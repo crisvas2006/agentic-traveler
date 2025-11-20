@@ -1,5 +1,7 @@
 from typing import List, Optional
+
 from .models import Task
+
 
 class TaskRepository:
     def __init__(self):
@@ -27,5 +29,6 @@ class TaskRepository:
             if task.id == task_id:
                 return task
         return None
+
 
 REPO = TaskRepository()

@@ -1,5 +1,6 @@
 from agentic_traveler.task_manager_demo.repository import REPO
 
+
 def print_tasks():
     tasks = REPO.list_tasks()
     if not tasks:
@@ -7,6 +8,7 @@ def print_tasks():
     for task in tasks:
         status = "Done" if task.done else "Not Done"
         print(f"[{task.id}] {task.title} - {status}")
+
 
 def main():
     print("Welcome to the interactive task manager!")
@@ -42,7 +44,10 @@ def main():
             print("Goodbye!")
             break
         else:
-            print("Unknown command. Available commands: list, add <title>, complete <id>, quit")
+            print(
+                "Unknown command. Available commands: list, add <title>, complete <id>, quit"
+            )
+
 
 if __name__ == "__main__":
     main()
