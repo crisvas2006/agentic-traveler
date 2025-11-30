@@ -9,83 +9,82 @@ This guide explains how to deploy the Agentic Traveler to Google Cloud.
 3.  **Google Cloud SDK**: Install and initialize the [gcloud CLI](https://cloud.google.com/sdk/docs/install).
 4.  **API Key**: Obtain a Google Gen AI API key from [Google AI Studio](https://aistudio.google.com/).
 
-## Option 1: Deploy as a Cloud Function (Serverless)
+## Deploy as a Cloud Run Function
 
-Since this is a simple agent, a Cloud Function is a good fit if you want to expose it via HTTP. *Note: The current code is a CLI, so you would need to adapt `main.py` to be a Flask/Functions Framework entry point for HTTP deployment.*
+Cloud Run Functions (formerly Cloud Functions) is a serverless execution environment for building and connecting cloud services. It is ideal for stateless, event-driven, or HTTP-triggered applications.
 
-## Option 2: Run on a VM (Compute Engine)
+### Prerequisites
 
-1.  **Create a VM instance**:
+1.  **Google Cloud Project**: Create a project in the [Google Cloud Console](https://console.cloud.google.com/).
+2.  **Billing**: Enable billing for your project.
+3.  **Google Cloud SDK**: Install and initialize the [gcloud CLI](https://cloud.google.com/sdk/docs/install).
+4.  **API Key**: Obtain a Google Gen AI API key from [Google AI Studio](https://aistudio.google.com/).
+
+### Deployment Steps
+
+1.  **Prepare the Environment**:
+    Ensure your `requirements.txt` includes `functions-framework` if you want to test locally, though it's not strictly required for deployment if you specify the entry point correctly.
+    
     ```bash
-    gcloud compute instances create travel-agent-vm --zone=us-central1-a --machine-type=e2-micro
+    pip install functions-framework
     ```
 
-2.  **SSH into the VM**:
+2.  **Create an HTTP Entry Point**:
+    Cloud Functions require an HTTP-triggerable function. You can create a file named `main_http.py` (or add to `main.py`) with a function that accepts a request object.
+
+    ```python
+    import functions_framework
+    from agentic_traveler.travel_agent import TravelAgent
+
+    @functions_framework.http
+    def travel_agent_http(request):
+        request_json = request.get_json(silent=True)
+        request_args = request.args
+
+        # Extract parameters from JSON body or Query parameters
+        def get_param(name):
+            if request_json and name in request_json:
+                return request_json[name]
+            elif request_args and name in request_args:
+                return request_args[name]
+            return None
+
+        budget = get_param('budget') or 'medium'
+        climate = get_param('climate') or 'any'
+        activity = get_param('activity') or 'any'
+        duration = get_param('duration') or '1 week'
+
+        agent = TravelAgent()
+        idea = agent.generate_travel_idea({
+            "budget": budget,
+            "climate": climate,
+            "activity": activity,
+            "duration": duration
+        })
+        
+        return idea
+    ```
+
+3.  **Deploy**:
+    Run the following command to deploy the function:
+
     ```bash
-    gcloud compute ssh travel-agent-vm --zone=us-central1-a
+    gcloud functions deploy agentic-traveler-func \
+        --gen2 \
+        --runtime=python311 \
+        --region=us-central1 \
+        --source=. \
+        --entry-point=travel_agent_http \
+        --trigger-http \
+        --allow-unauthenticated \
+        --set-env-vars GOOGLE_API_KEY=YOUR_API_KEY
     ```
 
-3.  **Install Python and Git**:
+    *Replace `YOUR_API_KEY` with your actual API key.*
+
+4.  **Test**:
+    After deployment, you will get a URL. You can test it with `curl`:
+
     ```bash
-    sudo apt-get update
-    sudo apt-get install python3-pip git
+    curl "https://YOUR_FUNCTION_URL?budget=low&climate=tropical"
     ```
-
-4.  **Clone the repository**:
-    ```bash
-    git clone <your-repo-url>
-    cd agentic-traveler
-    ```
-
-5.  **Install dependencies**:
-    ```bash
-    pip3 install -r requirements.txt
-    ```
-
-6.  **Set Environment Variable**:
-    ```bash
-    export GOOGLE_API_KEY="your_api_key_here"
-    ```
-
-7.  **Run the Agent**:
-    ```bash
-    python3 src/agentic_traveler/main.py
-    ```
-
-## Option 3: Deploy to Cloud Run (Containerized)
-
-To deploy to Cloud Run, you need to containerize the application.
-
-1.  **Create a `Dockerfile`** in the root directory:
-
-    ```dockerfile
-    FROM python:3.9-slim
-
-    WORKDIR /app
-
-    COPY requirements.txt .
-    RUN pip install --no-cache-dir -r requirements.txt
-
-    COPY src/ .
-
-    # For a CLI, Cloud Run isn't the typical target unless you run it as a job or a web service.
-    # If deploying as a web service, you need a web framework (like Flask/FastAPI).
-    # For this CLI example, we'll just set the entrypoint.
-    CMD ["python", "agentic_traveler/main.py"]
-    ```
-
-2.  **Build and Push the image**:
-    ```bash
-    gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/travel-agent
-    ```
-
-3.  **Deploy (as a Job)**:
-    ```bash
-    gcloud run jobs create travel-agent-job --image gcr.io/YOUR_PROJECT_ID/travel-agent
-    ```
-
-    *Note: You'll need to pass arguments or set env vars for the job execution.*
-
-## Recommended: Cloud Run Job (for batch/scheduled) or Cloud Functions (for API)
-
-For this specific CLI implementation, running it locally or on a VM is easiest. If you want to make it a web service, wrap `TravelAgent` in a Flask/FastAPI app and deploy to Cloud Run.
