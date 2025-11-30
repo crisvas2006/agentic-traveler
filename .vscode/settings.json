@@ -8,5 +8,9 @@
     "python.envFile": "${workspaceFolder}/.env",
     "python.analysis.extraPaths": [
         "./src"
-    ]
+    ],
+    "python.linting.mypyEnabled": true,
+    "python.linting.enabled": true,
+    "mypy.runUsingActiveInterpreter": true,
+    "ruff.lint.enabled": true
 }
