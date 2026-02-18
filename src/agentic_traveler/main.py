@@ -1,33 +1,44 @@
-import click
-from agentic_traveler.travel_agent import TravelAgent
+import functions_framework
+from flask import Request, jsonify
+import os
+from agentic_traveler.orchestrator.agent import OrchestratorAgent
 
-@click.command()
-@click.option('--budget', prompt='What is your budget?', help='Your budget (e.g., low, medium, high)')
-@click.option('--climate', prompt='Preferred climate?', help='Preferred climate (e.g., warm, cold, tropical)')
-@click.option('--activity', prompt='Preferred activity?', help='Preferred activity (e.g., hiking, beach, city)')
-@click.option('--duration', prompt='Duration of trip?', help='Duration (e.g., 1 week, weekend)')
-def main(budget, climate, activity, duration):
+# Initialize the agent globally to reuse connections (like Firestore client)
+orchestrator_agent = OrchestratorAgent()
+
+@functions_framework.http
+def telegram_webhook(request: Request):
     """
-    Simple CLI for the Agentic Traveler.
+    HTTP Cloud Function that receives Telegram updates via Make.
     """
-    click.echo(f"Generating travel idea for: Budget={budget}, Climate={climate}, Activity={activity}, Duration={duration}...")
     
-    try:
-        agent = TravelAgent()
-        idea = agent.generate_travel_idea({
-            "budget": budget,
-            "climate": climate,
-            "activity": activity,
-            "duration": duration
-        })
-        click.echo("\n--- Travel Idea ---\n")
-        click.echo(idea)
-        click.echo("\n-------------------\n")
-    except ValueError as e:
-        click.echo(f"Error: {e}")
-        click.echo("Please ensure GOOGLE_API_KEY is set in your environment or .env file.")
-    except Exception as e:
-        click.echo(f"An unexpected error occurred: {e}")
+    # 1. Security Check
+    secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    expected_token = os.environ.get("TELEGRAM_SECRET_TOKEN")
+    
+    if expected_token and secret_token != expected_token:
+        return jsonify({"error": "Unauthorized"}), 403
 
-if __name__ == '__main__':
-    main()
+    # 2. Parse Payload
+    request_json = request.get_json(silent=True)
+    if not request_json:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    # Expected payload structure from Make:
+    # {
+    #   "telegramUserId": "123456",
+    #   "messageText": "Hello",
+    #   ...
+    # }
+    
+    telegram_user_id = str(request_json.get("telegramUserId", ""))
+    message_text = request_json.get("messageText", "")
+
+    if not telegram_user_id:
+        return jsonify({"error": "Missing telegramUserId"}), 400
+
+    # 3. Process with Agent
+    response = orchestrator_agent.process_request(telegram_user_id, message_text)
+
+    # 4. Return Response
+    return jsonify(response), 200

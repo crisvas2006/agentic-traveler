@@ -9,7 +9,7 @@ This roadmap outlines the high-level phases for building the Agentic Traveler MV
 
 ## Phase 2: Core Agent System
 **Goal**: Implement the multi-agent orchestration and the primary agents for discovery and planning.
-- **Task 03**: Orchestrator Agent & Telegram Integration (Entry point, routing).
+- **Task 03**: Orchestrator Agent & Telegram Integration (Entry point, routing). [DONE]
 - **Task 04**: Profile & Memory Agent (Profile enrichment, preference learning).
 - **Task 05**: Discovery Agent (Destination search, weather integration).
 - **Task 06**: Planner & Companion Agent (Itinerary generation, in-trip assistance).

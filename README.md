@@ -1,6 +1,324 @@
 # Agentic Traveler
 
-An agentic travel planner powered by Google Gen AI.
+An agentic travel planner and companion powered by Google Gen AI.
+
+## High level description
+
+### Problem Statement
+
+When I want to travel, I usually have fuzzy desires and constraints but no clear destination. I bounce between flight sites, booking platforms, blogs, and maps, trying to answer three questions at once:
+
+*   Where should I go that genuinely fits my budget, personality, energy, and constraints
+    
+*   What concrete itinerary and activities would make this trip feel meaningful, not generic
+    
+*   How do I adapt plans when reality changes, for example bad weather, low energy, or a different mood than expected
+    
+
+Even after hours of research, I can still end up with:
+
+*   Destinations chosen for price or hype, not personal fit
+    
+*   Overcrowded or under planned itineraries
+    
+*   Frustration during the trip when plans do not match energy, weather, or local reality
+    
+
+Existing tools are either deal engines or rigid planners. They barely model who you are as a traveler: lifestyle, energy, risk tolerance, deeper motivations like self discovery or connection. They also do not behave like a companion that adapts day by day.
+
+I focus the MVP on the solo traveler (who may sometimes bring a partner or friend) who wants trips that align with their personality and current life phase, not just “cheap and popular”.
+
+### Why agents?
+
+The problem is not a single query but an ongoing process:
+
+*   Build a rich, structured profile of the traveler
+    
+*   Interpret vague requests like “5–7 days in late spring, I’m tired, want nature and some culture, from Bucharest”
+    
+*   Discover plausible destinations, filter by constraints, and justify why they fit
+    
+*   Turn a chosen destination into a flexible itinerary
+    
+*   During the trip, adapt suggestions to mood, weather, and what actually happened
+    
+
+This requires:
+
+*   Long term memory (profile and learned preferences)
+    
+*   Session state per interaction
+    
+*   Tool use (datastore, search, weather, maps)
+    
+*   Safety and uncertainty handling
+    
+
+Agents fit well because they allow:
+
+*   Small, specialized components (discovery, planning, memory, safety) instead of one giant prompt
+    
+*   Tight control over what context each agent sees, which improves cost and reduces hallucinations
+    
+*   A planning-before-acting pattern with explicit tool calls and checks
+    
+*   Clear separation between runtime (stateless Cloud Run) and state (Firestore + logs)
+    
+
+The user does not need “one big model answer” but a persistent, evolving travel companion. Agentic design matches that need.
+
+### What I created
+
+High level, the system has three layers.
+
+#### 1\. Personalization intake
+
+A Tally form, “Know Thy Damn Self (for Travel),” collects a deep but structured profile:
+
+*   Context: age band, home base, budget style
+    
+*   Lifestyle & energy: daily rhythm, physical activity, typical tempo
+    
+*   Travel style: preferred trip vibes (nature, culture, spiritual, party, etc), structure preference, solo comfort
+    
+*   Personality & values: spontaneous vs reflective, social vs independent, motivations to travel, risk tolerance, spiritual interest
+    
+*   Past travel: what worked, what did not, solo challenges
+    
+*   Practical constraints: vacation days, diet/lifestyle, climate/logistics avoidances
+    
+*   Goals & dreams: what they want from their next trip, dream trip style, open notes
+    
+
+This form sends data to a GCP HTTP Cloud Function, which writes into Firestore:
+
+*   Project: agentic-traveler-db
+    
+*   Collection: users
+    
+*   Each document includes:
+    
+    *   user\_profile with nested sections reflecting the questionnaire
+        
+    *   Identification fields: name, email, createdDate
+        
+    *   Later fields: telegramUserId, preferenceSignals, links to trips
+        
+
+The user\_profile field is the main personalization source for the agents.
+
+#### 2\. Automation and messaging
+
+*   Telegram is the main interface.
+    
+*   A Make scenario connects Telegram to the backend:
+    
+    *   Receives Telegram webhook updates
+        
+    *   Extracts telegramUserId, chatId, messageText, timestamp
+        
+    *   Sends this payload via HTTP POST to Cloud Run (/telegram-webhook)
+        
+    *   Receives replyText and sends it back to the user
+        
+
+This keeps the backend focused on agent logic and state, while Make handles channel plumbing and basic logging.
+
+#### 3\. Agentic backend on Cloud Run
+
+*   Service: agentic-traveler-orchestrator (Python + Google ADK)
+    
+*   Data: Firestore as source of truth
+    
+    *   users: long term profile and preferenceSignals
+        
+    *   trips: constraints, candidates, chosen destination, itinerary summary, status
+        
+    *   events: suggestion and feedback logs for lightweight learning
+        
+
+Core agents:
+
+1.  **Conversation Orchestrator Agent**
+    
+    *   Entry point for every Telegram request
+        
+    *   Loads user from Firestore (by telegramUserId)
+        
+    *   If no user\_profile, asks user to complete the Tally form
+        
+    *   Classifies message: new trip, planning refinement, in-trip adjustment, or help
+        
+    *   Routes to Discovery or Planner/Companion as needed
+        
+    *   Assembles the final answer and calls the Safety Filter
+        
+2.  **Profile & Memory Agent**
+    
+    *   Translates user\_profile into an enriched profile object:
+        
+        *   Budget band, key vibes, structure preference, solo comfort, risk tolerance, hard avoidances, current trip goals
+            
+    *   Manages preferenceSignals:
+        
+        *   Simple counters of liked/disliked categories (for example hikes, nightlife, long tours, spiritual events)
+            
+    *   Exposes get\_enriched\_profile(userId) to other agents
+        
+3.  **Discovery Agent**
+    
+    *   Input: enriched profile + trip constraints from chat
+        
+    *   Uses web search and weather tools to:
+        
+        *   Identify candidate destinations that match vibes and constraints
+            
+        *   Check rough seasonality and cost bands in the requested period
+            
+    *   Produces 3–5 destinations with:
+        
+        *   Why they fit the person (explicitly tying to profile answers)
+            
+        *   Estimated budget band and travel effort
+            
+        *   Recommended windows within the chosen dates
+            
+4.  **Planner & Companion Agent**
+    
+    *   Before trip:
+        
+        *   Uses structure preference to decide how detailed the plan should be
+            
+        *   Uses search/maps to propose day level activity sets, with options for different energy levels
+            
+        *   Stores itinerary summary in trips
+            
+    *   During trip:
+        
+        *   Uses current mood, energy, time, weather, and destination to suggest 2–3 options
+            
+        *   Logs suggestion events and, when the user reacts, accepted/rejected categories
+            
+        *   Passes preference updates to Profile & Memory Agent
+            
+5.  **Safety Filter**
+    
+    *   Runs on all responses before sending to user
+        
+    *   Uses a safety tool / rules to:
+        
+        *   Remove or rewrite clearly illegal or obviously unsafe suggestions
+            
+        *   Add “Please verify details and safety before booking or acting on this suggestion” for safety sensitive or uncertain cases
+            
+
+The backend is stateless: each request reconstructs context from Firestore and tools, then responds via Make to Telegram.
+
+### The Build
+
+Tools and technologies:
+
+*   **GCP**
+    
+    *   Firestore for long term state (users, trips, events)
+        
+    *   Cloud Functions for Tally profile ingestion
+        
+    *   Cloud Run for the stateless agent service
+        
+*   **Backend & agents**
+    
+    *   Python with Google ADK to define the agent graph
+        
+    *   Small, specialized agents:
+        
+        *   Orchestrator, Profile & Memory, Discovery, Planner/Companion, Safety Filter
+            
+    *   Planning before acting:
+        
+        *   For complex tasks (discovery, itinerary), agents first sketch a plan (steps + tools) then execute tool calls
+            
+    *   Lightweight learning:
+        
+        *   Events are aggregated into preferenceSignals instead of loading full histories into the LLM
+            
+*   **Automation and chat**
+    
+    *   Tally form for user personalization
+        
+    *   Cloud Function mapping Tally data into user\_profile in Firestore
+        
+    *   Telegram bot as interface
+        
+    *   Make as integration layer between Telegram and Cloud Run
+        
+*   **Safety and monitoring**
+    
+    *   Safety Filter for output sanitization and risk wording
+        
+    *   Logging of:
+        
+        *   Incoming message metadata
+            
+        *   Tool calls and outcomes
+            
+        *   Errors and basic latencies
+            
+    *   Versioned prompts and tools, so changes can be tracked and rolled back
+        
+
+The build emphasizes clear responsibilities per agent, stateless runtime with externalized state, and a realistic but contained scope that still demonstrates agentic behavior, memory, and robustness.
+
+### If I had more time, this is what I’d do
+
+If I had more time, I would extend in these directions:
+
+1.  **Richer behavior modeling**
+    
+    *   Add a vector store for user embeddings and trip summaries
+        
+    *   Use similarity search to adapt plans based on past successful trips
+        
+    *   Move beyond simple counters toward richer “travel archetypes” for each user
+        
+2.  **Group and relationship aware travel**
+    
+    *   Support multiple traveler profiles and a group plan
+        
+    *   Add an agent that mediates between different budgets, vibes, and avoidances
+        
+    *   Support group chats where the agent helps converge on “good enough for everyone” plans
+        
+3.  **Deeper travel integrations**
+    
+    *   Integrate a real flight or accommodation API for realistic price ranges and routes
+        
+    *   Generate prefilled links or filters for popular booking sites
+        
+4.  **Proactive companion mode**
+    
+    *   Optional daily check ins during trips, based on weather and preferences
+        
+    *   Simple triggers to propose alternatives when key activities fall through
+        
+5.  **Evaluation and observability**
+    
+    *   Build a small eval set of scenarios and expected behaviors
+        
+    *   Use it to test changes in prompts, tools, and logic before deployment
+        
+    *   Improve tracing to quickly understand “bad” suggestions and fix root causes
+        
+6.  **User experience surfaces**
+    
+    *   Add a minimal web UI for visualizing trips and editing profiles
+        
+    *   Expose the system as an API that other products or agencies could integrate
+        
+
+These steps would deepen the technical sophistication and make the project an even stronger showcase of agentic AI, architecture, and product thinking.
+
+## Technical Design Documentation
 
 ### 1.1 Problem and product description
 

@@ -4,7 +4,7 @@
 
 ## 1. Task Overview
 - **Summary:** Initialize the git repository, set up the Python environment, install ADK and other dependencies, and create the basic directory structure.
-- **Background:** This is a greenfield project but some of the steps were already done, like initializing the git repository and setting up the Python environment with venv. We need a solid foundation before building agents.
+- **Background:** This is a greenfield project. We need a solid foundation before building agents.
 - **Primary Owner:** User
 
 ## 2. Objectives & Success Criteria

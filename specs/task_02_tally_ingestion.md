@@ -28,7 +28,98 @@
 
 ## 5. Inputs & Resources
 - **Artifacts:** Sample Tally JSON payload (need to create/mock this).
-- **Assumptions:** Firestore project `agentic-traveler-db` exists (or we mock it for now).
+- **Assumptions:** 
+    - Firestore project `agentic-traveler-db` exists (or we mock it for now).
+    - users collection exists.
+    - user item has the following fields (with example):
+event_id: "d4124d56-d88a-4b1d-8db4-46ca9d277b11"
+(string) 
+event_type: "FORM_RESPONSE"
+(string) 
+phone_number: "+40745022676"
+(string) 
+source: "tally"
+(string) 
+user_name: "Cristian"
+(string) 
+user_profile
+(map) 
+absolute_avoidances
+(array) 
+0: "High‑crime / dangerous areas"
+(string) 
+1: "Heavy partying, loud hostels"
+(string) 
+2: "Other: "
+(string) 
+absolute_avoidances_other: "Garden gnomes"
+(string) 
+activity_level: "Moderate (sports or exercise 2–4×/week)"
+(string) 
+age_group: "25-34"
+(string) 
+budget_priority: "Balance — some comfort, but willing to spend a bit if experience demands it"
+(string) 
+cultural_spiritual_importance: "Rarely — I care more about fun, comfort or convenience"
+(string) 
+daily_rhythm: "Mid‑morning riser (9–11 AM)"
+(string) 
+diet_lifestyle_constraints: "I never eat breakfast"
+(string) 
+discomfort_tolerance_score: 2
+(number) 
+disliked_trip_patterns: "Waiting in line 18 days at a festival"
+(string) 
+dream_trip_style: "Go all in on whale hunting in Norway"
+(string) 
+extra_notes: "I like pina coladas"
+(string) 
+favorite_past_trip: "Swimming with the dolphins in Spain"
+(string) 
+hardest_part_solo_travel: "Too much unstructured time — felt directionless"
+(string) 
+location: "Romania, Bucharest"
+next_trip_outcome_goals
+(array) 
+0: "Adventure / challenge / adrenaline"
+(string) 
+1: "Rest & recharge"
+(string) 
+personality_baseline: "Social — love meeting people, connecting, sharing"
+(string) 
+solo_travel_comfort: "Not ideal — I like some leads or meetups to avoid being totally alone"
+(string) 
+solo_travel_experience: "Once or twice"
+(string) 
+structure_preference: "Loose skeleton: key things planned, rest is freestyle"
+(string) 
+travel_budget_style: "Flexible spender — I balance cost and comfort, will splurge if it makes the trip"
+(string) 
+travel_deal_breakers
+(array) 
+0: "Dirty / unsafe accommodations"
+(string) 
+1: "Places with no cultural or natural beauty"
+(string) 
+travel_motivations
+(array) 
+0: "Chill and relax away from routine"
+(string) 
+trip_vibe
+(array) 
+0: "Chill / Relaxation"
+(string) 
+1: "Spiritual / Inner‑journey "
+(string) 
+typical_trip_lengths
+(array) 
+0: "4–7 days (short break)"
+(string) 
+weekday_energy: "Moderate – a mix of chill and hustle"
+(string) 
+webhook_created_at: "2025-11-30T16:02:24.263Z"
+(string) 
+webhook_received_at: November 30, 2025 at 6:02:24.562 PM UTC+2
 
 ## 6. Implementation Plan
 - **High-Level Steps:**
