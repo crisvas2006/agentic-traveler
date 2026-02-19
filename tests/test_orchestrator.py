@@ -41,6 +41,20 @@ def test_new_trip_intent(mock_user_tool):
         assert response["action"] == "DISCOVERY_RESULTS"
         mock_discovery_instance.process_request.assert_called_once()
 
+def test_planning_intent(mock_user_tool):
+    mock_user_tool.get_user_by_telegram_id.return_value = {"user_name": "Bob"}
+    
+    with patch("agentic_traveler.orchestrator.agent.PlannerAgent") as MockPlanner:
+        mock_planner_instance = MockPlanner.return_value
+        mock_planner_instance.process_request.return_value = {"action": "PLANNER_RESULTS", "text": "Itinerary"}
+        
+        agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
+        # Using keywords like "itinerary" to trigger planning
+        response = agent.process_request("123", "Create an itinerary for my trip")
+        
+        assert response["action"] == "PLANNER_RESULTS"
+        mock_planner_instance.process_request.assert_called_once()
+
 def test_in_trip_intent(mock_user_tool):
     mock_user_tool.get_user_by_telegram_id.return_value = {"user_name": "Bob"}
     

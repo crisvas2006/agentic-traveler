@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
 from agentic_traveler.orchestrator.discovery_agent import DiscoveryAgent
+from agentic_traveler.orchestrator.planner_agent import PlannerAgent
 
 class OrchestratorAgent:
     """
@@ -10,6 +11,7 @@ class OrchestratorAgent:
     def __init__(self, firestore_user_tool: Optional[FirestoreUserTool] = None):
         self.user_tool = firestore_user_tool or FirestoreUserTool()
         self.discovery_agent = DiscoveryAgent()
+        self.planner_agent = PlannerAgent()
 
     def process_request(self, telegram_user_id: str, message_text: str) -> Dict[str, Any]:
         """
@@ -42,6 +44,8 @@ class OrchestratorAgent:
         # 3. Route based on intent
         if intent == "NEW_TRIP":
             return self._handle_new_trip(user_profile, message_text)
+        elif intent == "PLANNING":
+            return self._handle_planning(user_profile, message_text)
         elif intent == "IN_TRIP":
             return self._handle_in_trip(user_profile, message_text)
         else:
@@ -52,6 +56,8 @@ class OrchestratorAgent:
         Simple heuristic intent classification.
         """
         text_lower = text.lower()
+        if any(word in text_lower for word in ["itinerary", "schedule", "detailed plan"]):
+             return "PLANNING"
         if any(word in text_lower for word in ["plan", "trip", "go to", "visit", "vacation"]):
             return "NEW_TRIP"
         if any(word in text_lower for word in ["here", "now", "tired", "hungry", "bored"]):
@@ -61,6 +67,10 @@ class OrchestratorAgent:
     def _handle_new_trip(self, user_profile: Dict[str, Any], text: str) -> Dict[str, Any]:
         # Delegate to Discovery Agent
         return self.discovery_agent.process_request(user_profile, text)
+
+    def _handle_planning(self, user_profile: Dict[str, Any], text: str) -> Dict[str, Any]:
+        # Delegate to Planner Agent
+        return self.planner_agent.process_request(user_profile, text)
 
     def _handle_in_trip(self, user_profile: Dict[str, Any], text: str) -> Dict[str, Any]:
         # Mock Planner/Companion Agent call
