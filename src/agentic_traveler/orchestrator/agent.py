@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
+from agentic_traveler.orchestrator.discovery_agent import DiscoveryAgent
 
 class OrchestratorAgent:
     """
@@ -8,6 +9,7 @@ class OrchestratorAgent:
 
     def __init__(self, firestore_user_tool: Optional[FirestoreUserTool] = None):
         self.user_tool = firestore_user_tool or FirestoreUserTool()
+        self.discovery_agent = DiscoveryAgent()
 
     def process_request(self, telegram_user_id: str, message_text: str) -> Dict[str, Any]:
         """
@@ -57,11 +59,8 @@ class OrchestratorAgent:
         return "CHAT"
 
     def _handle_new_trip(self, user_profile: Dict[str, Any], text: str) -> Dict[str, Any]:
-        # Mock Discovery Agent call
-        return {
-            "text": f"I see you want to plan a trip! (Mock: Discovery Agent triggered for '{text}')",
-            "action": "DISCOVERY_TRIGGERED"
-        }
+        # Delegate to Discovery Agent
+        return self.discovery_agent.process_request(user_profile, text)
 
     def _handle_in_trip(self, user_profile: Dict[str, Any], text: str) -> Dict[str, Any]:
         # Mock Planner/Companion Agent call

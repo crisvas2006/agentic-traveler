@@ -13,7 +13,7 @@ class TravelAgent:
     using the Google Gen AI SDK.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-3.1-pro"):
         """
         Initialize the TravelAgent.
 
