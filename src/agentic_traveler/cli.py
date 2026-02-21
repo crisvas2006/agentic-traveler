@@ -54,9 +54,12 @@ def main():
     profile = tool.get_user_by_telegram_id(telegram_id)
     if profile:
         print(f"\n✅  Logged in as: {profile.get('user_name', 'Unknown')}")
-        prefs = profile.get("preferences", {})
+        prefs = profile.get("user_profile", {})
         if prefs:
-            print(f"   Preferences: {prefs}")
+            vibes = prefs.get("trip_vibe", [])
+            location = prefs.get("location", "")
+            print(f"   Location: {location}")
+            print(f"   Vibes: {', '.join(vibes) if isinstance(vibes, list) else vibes}")
     else:
         print(f"\n⚠️  No profile found for telegramUserId={telegram_id}")
         print("   You'll get the onboarding flow.\n")

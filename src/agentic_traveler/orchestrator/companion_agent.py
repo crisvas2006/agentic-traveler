@@ -3,6 +3,7 @@ import os
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+from agentic_traveler.orchestrator.profile_utils import build_profile_summary
 
 load_dotenv()
 
@@ -68,21 +69,16 @@ class CompanionAgent:
         self, user_profile: Dict[str, Any], message_text: str
     ) -> str:
         """Build the LLM prompt from user context and current message."""
-        user_name = user_profile.get("user_name", "Traveler")
-        preferences = user_profile.get("preferences", {})
-        avoidances = preferences.get("avoidances", "none specified")
-        vibes = preferences.get("vibes", "any")
+        profile_summary = build_profile_summary(user_profile)
 
-        return f"""
-You are a friendly, adaptive travel companion for '{user_name}'.
+        return f"""\
+You are a friendly, adaptive travel companion chatting with a traveler
+who is currently on a trip.
 
-The traveler is currently on a trip and says:
-"{message_text}"
+The traveler says: "{message_text}"
 
-Their profile highlights:
-- Preferred vibes: {vibes}
-- Hard avoidances: {avoidances}
-- General preferences: {preferences}
+Their profile:
+{profile_summary}
 
 Based on the message above, suggest 2-3 concrete, actionable options
 the traveler can do right now.  For each option include:
@@ -90,6 +86,7 @@ the traveler can do right now.  For each option include:
 2. Why it fits the traveler's current mood / energy
 3. Practical details (rough cost, distance, time needed)
 
-Keep the tone warm and supportive.  If the message mentions tiredness
-or low energy, prioritise low-effort options.
+Keep the total response under 200 words.
+If the message mentions tiredness or low energy, prioritise low-effort options.
+Tone: warm and supportive, like a friend who's been to the place.
 """

@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, Any, Optional
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
 from agentic_traveler.orchestrator.discovery_agent import DiscoveryAgent
@@ -5,6 +6,9 @@ from agentic_traveler.orchestrator.planner_agent import PlannerAgent
 from agentic_traveler.orchestrator.companion_agent import CompanionAgent
 from agentic_traveler.orchestrator.intent_classifier import IntentClassifier
 from agentic_traveler.orchestrator.safety_filter import SafetyFilter
+from agentic_traveler.orchestrator.chat_agent import ChatAgent
+
+logger = logging.getLogger(__name__)
 
 
 class OrchestratorAgent:
@@ -18,6 +22,7 @@ class OrchestratorAgent:
         self.discovery_agent = DiscoveryAgent()
         self.planner_agent = PlannerAgent()
         self.companion_agent = CompanionAgent()
+        self.chat_agent = ChatAgent()
         self.intent_classifier = IntentClassifier()
         self.safety_filter = SafetyFilter()
 
@@ -47,6 +52,7 @@ class OrchestratorAgent:
 
         # 2. Classify intent via LLM (with keyword fallback)
         intent = self.intent_classifier.classify(message_text)
+        logger.info("Intent classified as: %s for message: %.50s…", intent, message_text)
         
         # 3. Route based on intent
         if intent == "NEW_TRIP":
@@ -72,9 +78,4 @@ class OrchestratorAgent:
         return self.companion_agent.process_request(user_profile, text)
 
     def _handle_chat(self, user_profile: Dict[str, Any], text: str) -> Dict[str, Any]:
-        name = user_profile.get("user_name", "Traveler")
-        return {
-            "text": f"Hello {name}! How can I help you with your travels today?",
-            "action": "CHAT_REPLY"
-        }
-
+        return self.chat_agent.process_request(user_profile, text)

@@ -3,6 +3,7 @@ import os
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+from agentic_traveler.orchestrator.profile_utils import build_profile_summary
 
 load_dotenv()
 
@@ -14,7 +15,6 @@ class DiscoveryAgent:
     def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-3-flash-preview"):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
-             # For now, we'll warn but allow initialization for testing purposes if env wrapper handles it
              pass 
         
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
@@ -24,10 +24,6 @@ class DiscoveryAgent:
         """
         Generates destination proposals.
         """
-        # 1. Extract constraints from message (simplified for now, full extraction later)
-        # 2. Combine with user_profile
-        # 3. Call LLM to generate options
-        
         if not self.client:
             return {
                 "text": "I'm sorry, I can't generate travel ideas right now (Missing API Key).",
@@ -55,19 +51,25 @@ class DiscoveryAgent:
             }
 
     def _construct_prompt(self, user_profile: Dict[str, Any], message_text: str) -> str:
-        # Construct a rich prompt using the user profile
-        user_name = user_profile.get("user_name", "Traveler")
-        
-        # Flatten profile for the prompt (simplified)
-        # In a real scenario, we'd carefully select fields
-        profile_summary = f"User Name: {user_name}\n"
-        profile_summary += f"Preferences: {user_profile.get('preferences', {})}\n"
-        
-        return f"""
-        Act as an expert travel agent. The user '{user_name}' is asking: "{message_text}"
-        
-        Based on their profile:
-        {profile_summary}
-        
-        Suggest 3 destination candidates formatted as a list. For each, explain why it fits their profile and the current request.
-        """
+        profile_summary = build_profile_summary(user_profile)
+
+        return f"""\
+You are a friendly, knowledgeable travel advisor chatting with a traveler.
+
+The traveler says: "{message_text}"
+
+Their profile:
+{profile_summary}
+
+IMPORTANT response guidelines:
+- Match the depth of your answer to the user's message.
+  If they are just pondering or casually mentioning a place, give a SHORT
+  conversational reply (2-4 sentences) with a light suggestion and ask a
+  follow-up question to understand their needs better.
+- Only produce a full destination list (up to 3 options) when the user
+  clearly asks for destination recommendations or gives concrete constraints
+  (dates, budget, duration).
+- When giving full recommendations, keep each option to 3-4 lines max.
+- Always tie suggestions back to the traveler's profile.
+- Tone: warm, personal, like a well-traveled friend — not a brochure.
+"""

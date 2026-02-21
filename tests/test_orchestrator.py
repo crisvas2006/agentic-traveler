@@ -17,7 +17,8 @@ def patched_deps():
          patch("agentic_traveler.orchestrator.agent.SafetyFilter") as sf, \
          patch("agentic_traveler.orchestrator.agent.DiscoveryAgent") as disc, \
          patch("agentic_traveler.orchestrator.agent.PlannerAgent") as plan, \
-         patch("agentic_traveler.orchestrator.agent.CompanionAgent") as comp:
+         patch("agentic_traveler.orchestrator.agent.CompanionAgent") as comp, \
+         patch("agentic_traveler.orchestrator.agent.ChatAgent") as chat:
         # Default: safety filter passes text through unchanged
         sf.return_value.filter.side_effect = lambda t: t
         yield {
@@ -26,6 +27,7 @@ def patched_deps():
             "discovery": disc,
             "planner": plan,
             "companion": comp,
+            "chat": chat,
         }
 
 
@@ -40,10 +42,13 @@ def test_new_user_flow(mock_user_tool, patched_deps):
 def test_existing_user_chat(mock_user_tool, patched_deps):
     mock_user_tool.get_user_by_telegram_id.return_value = {"user_name": "Alice"}
     patched_deps["classifier"].return_value.classify.return_value = "CHAT"
+    patched_deps["chat"].return_value.process_request.return_value = {
+        "action": "CHAT_REPLY", "text": "Hello Alice!"
+    }
     agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
     response = agent.process_request("123", "Hello")
     assert response["action"] == "CHAT_REPLY"
-    assert "Hello Alice" in response["text"]
+    patched_deps["chat"].return_value.process_request.assert_called_once()
 
 
 def test_new_trip_intent(mock_user_tool, patched_deps):
@@ -86,6 +91,9 @@ def test_safety_filter_is_applied(mock_user_tool, patched_deps):
     """Verifies the safety filter runs on every response."""
     mock_user_tool.get_user_by_telegram_id.return_value = {"user_name": "Eve"}
     patched_deps["classifier"].return_value.classify.return_value = "CHAT"
+    patched_deps["chat"].return_value.process_request.return_value = {
+        "action": "CHAT_REPLY", "text": "Hi Eve!"
+    }
     patched_deps["safety"].return_value.filter.side_effect = None
     patched_deps["safety"].return_value.filter.return_value = "FILTERED"
     agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)

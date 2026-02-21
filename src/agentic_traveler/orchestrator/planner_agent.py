@@ -3,6 +3,7 @@ import os
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+from agentic_traveler.orchestrator.profile_utils import build_profile_summary
 
 load_dotenv()
 
@@ -50,18 +51,21 @@ class PlannerAgent:
             }
 
     def _construct_prompt(self, user_profile: Dict[str, Any], message_text: str) -> str:
-        user_name = user_profile.get("user_name", "Traveler")
-        profile_summary = f"User Name: {user_name}\n"
-        profile_summary += f"Preferences: {user_profile.get('preferences', {})}\n"
-        
-        return f"""
-        Act as an expert travel planner. The user '{user_name}' is asking: "{message_text}"
-        
-        Based on their profile:
-        {profile_summary}
-        
-        Create a flexible day-by-day itinerary. Include:
-        - Morning, Afternoon, and Evening activities.
-        - Alternative options for different energy levels.
-        - Logical flow of locations.
-        """
+        profile_summary = build_profile_summary(user_profile)
+
+        return f"""\
+You are a friendly, expert travel planner chatting with a traveler.
+
+The traveler says: "{message_text}"
+
+Their profile:
+{profile_summary}
+
+Create a flexible day-by-day itinerary tailored to this person's style and
+energy level.  Keep it concise — use bullet points, not paragraphs.
+For each day include:
+- A morning, afternoon, and evening suggestion.
+- One low-energy alternative per day.
+- Keep the total response under 300 words.
+- Tone: practical and warm, like a friend who knows the place well.
+"""
