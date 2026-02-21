@@ -1,11 +1,20 @@
 from typing import Optional, Dict, Any
-from google.cloud import firestore # type: ignore
+import os
+from google.cloud import firestore  # type: ignore
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class FirestoreUserTool:
     """Tool for interacting with the Firestore 'users' collection."""
 
-    def __init__(self, project_id: str = "agentic-traveler-db"):
-        self.db = firestore.Client(project=project_id)
+    def __init__(
+        self,
+        project_id: Optional[str] = None,
+        database_id: str = "agentic-traveler-db",
+    ):
+        project = project_id or os.getenv("GOOGLE_PROJECT_ID")
+        self.db = firestore.Client(project=project, database=database_id)
         self.users_collection = self.db.collection("users")
 
     def get_user_by_telegram_id(self, telegram_id: str) -> Optional[Dict[str, Any]]:

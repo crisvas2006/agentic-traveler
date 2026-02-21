@@ -12,3 +12,7 @@ where = ["src"]
 pythonpath = [
   "src"
 ]
+markers = [
+  "integration: tests that hit real Firestore and Gemini APIs (deselected by default)",
+]
+addopts = "-m 'not integration'"
