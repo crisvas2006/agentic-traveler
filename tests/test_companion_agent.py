@@ -12,7 +12,7 @@ def mock_genai_client():
 def test_companion_agent_init(mock_genai_client):
     agent = CompanionAgent(api_key="test_key")
     assert agent.client is not None
-    assert agent.model_name == "gemini-3.1-pro"
+    assert agent.model_name == "gemini-3-flash-preview"
 
 
 def test_companion_agent_process_request(mock_genai_client):
@@ -40,7 +40,7 @@ def test_companion_agent_process_request(mock_genai_client):
 
     # Verify call arguments
     args, kwargs = mock_model.generate_content.call_args
-    assert kwargs["model"] == "gemini-3.1-pro"
+    assert kwargs["model"] == "gemini-3-flash-preview"
     assert "Alice" in kwargs["contents"]
     assert "tired" in kwargs["contents"]
 

@@ -576,35 +576,91 @@ isort .
 ## Features
 
 - **AI Travel Agent**: Generates unique travel ideas based on your budget, climate, activity preferences, and duration.
+- **Interactive CLI**: Chat with the agent locally, impersonating an existing Firestore user.
 
 ## Setup
 
-1.  **Install Dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
+### 1. Create and activate the virtual environment
 
-2.  **Environment Setup**:
-    - Create a `.env` file in the root directory.
-    - Add your Google API key:
-      ```
-      GOOGLE_API_KEY=your_api_key_here
-      ```
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate
+```
+
+### 2. Install dependencies
+
+```powershell
+pip install -e ".[dev]"
+```
+
+### 3. Environment variables
+
+Create a `.env` file in the project root:
+
+```env
+GOOGLE_API_KEY=your-gemini-api-key
+GOOGLE_PROJECT_ID=your-gcp-project-id
+GOOGLE_APPLICATION_CREDENTIALS=path/to/application_default_credentials.json
+```
+
+- **`GOOGLE_API_KEY`** — required for all Gemini LLM calls (agents, classifier, safety filter).
+- **`GOOGLE_PROJECT_ID`** — your GCP project ID (used by the Firestore client).
+- **`GOOGLE_APPLICATION_CREDENTIALS`** — path to the Application Default Credentials JSON file.
+  To generate it, run `gcloud auth application-default login` and copy the path it prints.
+
+> **Note (Microsoft Store Python):** If you use the Microsoft Store version of Python,
+> `gcloud` saves credentials under a sandboxed `AppData` path. You **must** set
+> `GOOGLE_APPLICATION_CREDENTIALS` explicitly — see the path printed by the gcloud command.
 
 ## Usage
 
-Run the agent via the CLI:
+### Interactive CLI
 
-```bash
-python src/agentic_traveler/main.py --budget "Medium" --climate "Tropical" --activity "Relaxation" --duration "1 week"
+Chat with the orchestrator locally by impersonating an existing Firestore user:
+
+```powershell
+.\.venv\Scripts\python -m agentic_traveler.cli
 ```
 
-Or simply run it interactively:
+This lists all users in Firestore, lets you pick one, then opens an interactive chat loop. You can also pass a Telegram ID directly:
 
-```bash
-python src/agentic_traveler/main.py
+```powershell
+.\.venv\Scripts\python -m agentic_traveler.cli --telegram-id 12345
+```
+
+## Testing
+
+### Unit tests
+
+Unit tests use mocked Firestore and LLM — no credentials needed:
+
+```powershell
+.\.venv\Scripts\python -m pytest tests/ --ignore=tests/integration -v
+```
+
+### Integration tests
+
+Integration tests use the **real Gemini API** and **real Firestore** database. They require:
+- `GOOGLE_API_KEY` set in `.env`
+- `GOOGLE_APPLICATION_CREDENTIALS` set in `.env`
+- A working GCP project with Firestore enabled
+
+Test data is created with a `_test: True` marker and automatically cleaned up after each test.
+
+```powershell
+$env:_INTEGRATION_TESTS="1"; .\.venv\Scripts\python -m pytest -m integration -v
+```
+
+> The `_INTEGRATION_TESTS=1` env var tells the test framework to use the real
+> Firestore library instead of the mock used by unit tests.
+
+### Run all tests together
+
+```powershell
+$env:_INTEGRATION_TESTS="1"; .\.venv\Scripts\python -m pytest -v
 ```
 
 ## Deployment
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for instructions on deploying to Google Cloud.
+

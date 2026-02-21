@@ -31,6 +31,6 @@ def test_discovery_agent_process_request(mock_genai_client):
     
     # Verify call arguments
     args, kwargs = mock_model.generate_content.call_args
-    assert kwargs['model'] == "gemini-3.1-pro"
+    assert kwargs['model'] == "gemini-3-flash-preview"
     assert "Test User" in kwargs['contents']
     assert "expensive" in kwargs['contents']

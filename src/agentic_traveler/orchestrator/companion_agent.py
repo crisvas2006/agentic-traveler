@@ -19,7 +19,7 @@ class CompanionAgent:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model_name: str = "gemini-3.1-pro",
+        model_name: str = "gemini-3-flash-preview",
     ):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None

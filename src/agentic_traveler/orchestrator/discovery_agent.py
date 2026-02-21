@@ -11,7 +11,7 @@ class DiscoveryAgent:
     Agent responsible for discovering potential destinations based on user profile and constraints.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-3.1-pro"):
+    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-3-flash-preview"):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
              # For now, we'll warn but allow initialization for testing purposes if env wrapper handles it
