@@ -1,4 +1,5 @@
 from typing import Dict, Any, Optional
+import logging
 import os
 from google import genai
 from google.genai import types
@@ -6,6 +7,8 @@ from dotenv import load_dotenv
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class CompanionAgent:
@@ -19,25 +22,20 @@ class CompanionAgent:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        client: Optional[genai.Client] = None,
         model_name: str = "gemini-3-flash-preview",
     ):
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
-        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+        self.client = client
         self.model_name = model_name
 
     def process_request(
-        self, user_profile: Dict[str, Any], message_text: str
+        self,
+        user_profile: Dict[str, Any],
+        message_text: str,
+        conversation_context: str = "",
     ) -> Dict[str, Any]:
         """
         Generates contextual in-trip suggestions.
-
-        Args:
-            user_profile: The user's profile from Firestore.
-            message_text: The message describing current mood / situation.
-
-        Returns:
-            A dict with ``text`` (the suggestions) and ``action``.
         """
         if not self.client:
             return {
@@ -45,7 +43,8 @@ class CompanionAgent:
                 "action": "ERROR",
             }
 
-        prompt = self._construct_prompt(user_profile, message_text)
+        prompt = self._construct_prompt(user_profile, message_text, conversation_context)
+        logger.debug("Companion prompt length: %d chars", len(prompt))
 
         try:
             response = self.client.models.generate_content(
@@ -60,23 +59,31 @@ class CompanionAgent:
                 "action": "COMPANION_RESULTS",
             }
         except Exception as e:
+            logger.exception("Companion agent LLM call failed.")
             return {
                 "text": f"I encountered an error: {str(e)}",
                 "action": "ERROR",
             }
 
     def _construct_prompt(
-        self, user_profile: Dict[str, Any], message_text: str
+        self,
+        user_profile: Dict[str, Any],
+        message_text: str,
+        conversation_context: str,
     ) -> str:
         """Build the LLM prompt from user context and current message."""
         profile_summary = build_profile_summary(user_profile)
+
+        context_block = ""
+        if conversation_context:
+            context_block = f"\nConversation so far:\n{conversation_context}\n"
 
         return f"""\
 You are a friendly, adaptive travel companion chatting with a traveler
 who is currently on a trip.
 
 The traveler says: "{message_text}"
-
+{context_block}
 Their profile:
 {profile_summary}
 

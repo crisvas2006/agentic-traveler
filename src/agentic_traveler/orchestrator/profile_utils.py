@@ -14,19 +14,19 @@ def build_profile_summary(user_doc: Dict[str, Any]) -> str:
     Convert a raw Firestore user document into a concise text block
     suitable for LLM prompts.
 
-    Args:
-        user_doc: The full document dict returned by
-                  ``FirestoreUserTool.get_user_by_telegram_id()``.
-
-    Returns:
-        A multi-line string summarising the traveler's identity,
-        preferences, constraints, and goals.
+    Includes Tally form data (``user_profile``), agent-learned extras
+    (``learned_extras``), and the conversation history summary.
     """
     name = user_doc.get("user_name", "Traveler")
     profile = user_doc.get("user_profile", {})
+    extras = user_doc.get("learned_extras", {})
+    conv_summary = (
+        user_doc.get("conversation_history", {}).get("summary", "")
+    )
+
+    parts = [f"Name: {name}"]
 
     # --- identity ---
-    parts = [f"Name: {name}"]
     if profile.get("age_group"):
         parts.append(f"Age group: {profile['age_group']}")
     if profile.get("location"):
@@ -102,5 +102,15 @@ def build_profile_summary(user_doc: Dict[str, Any]) -> str:
     # --- free-text extras ---
     if profile.get("extra_notes"):
         parts.append(f"Extra notes: {profile['extra_notes']}")
+
+    # --- agent-learned preferences ---
+    if extras:
+        parts.append("\nAgent-learned preferences:")
+        for k, v in extras.items():
+            parts.append(f"  {k}: {v}")
+
+    # --- conversation history summary ---
+    if conv_summary:
+        parts.append(f"\nConversation history summary:\n{conv_summary}")
 
     return "\n".join(parts)

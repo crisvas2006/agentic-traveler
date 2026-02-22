@@ -4,6 +4,7 @@ Interactive CLI for chatting with the Agentic Traveler orchestrator.
 Usage:
     python -m agentic_traveler.cli                  # lists users, lets you pick
     python -m agentic_traveler.cli --telegram-id 12345  # use a specific user
+    python -m agentic_traveler.cli -v               # verbose logging
 """
 
 import argparse
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from agentic_traveler.logging_config import setup_logging
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
 
@@ -33,7 +35,13 @@ def list_users(tool: FirestoreUserTool, limit: int = 10):
 def main():
     parser = argparse.ArgumentParser(description="Chat with Agentic Traveler")
     parser.add_argument("--telegram-id", help="Telegram user ID to impersonate")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Enable verbose (DEBUG) logging to see agent routing & timing",
+    )
     args = parser.parse_args()
+
+    setup_logging(verbose=args.verbose)
 
     tool = FirestoreUserTool()
     telegram_id = args.telegram_id
@@ -66,7 +74,8 @@ def main():
 
     agent = OrchestratorAgent(firestore_user_tool=tool)
 
-    print("\n💬  Type your messages below (Ctrl+C or 'quit' to exit)\n")
+    print("\n💬  Type your messages below (Ctrl+C or 'quit' to exit)")
+    print(f"   {'Verbose logging ON — check stderr for agent details' if args.verbose else 'Tip: use -v for verbose logging'}")
     print("-" * 60)
 
     while True:

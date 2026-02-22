@@ -57,13 +57,10 @@ class SafetyFilter:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        client: Optional[genai.Client] = None,
         model_name: str = "gemini-2.5-flash-lite",
     ):
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
-        self.client = (
-            genai.Client(api_key=self.api_key) if self.api_key else None
-        )
+        self.client = client
         self.model_name = model_name
 
     # ------------------------------------------------------------------
