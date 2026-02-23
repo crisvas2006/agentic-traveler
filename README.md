@@ -137,80 +137,51 @@ This keeps the backend focused on agent logic and state, while Make handles chan
     *   events: suggestion and feedback logs for lightweight learning
         
 
-Core agents:
+Core agents (tool-calling architecture):
 
-1.  **Conversation Orchestrator Agent**
-    
-    *   Entry point for every Telegram request
-        
-    *   Loads user from Firestore (by telegramUserId)
-        
-    *   If no user\_profile, asks user to complete the Tally form
-        
-    *   Classifies message: new trip, planning refinement, in-trip adjustment, or help
-        
-    *   Routes to Discovery or Planner/Companion as needed
-        
-    *   Assembles the final answer and calls the Safety Filter
-        
-2.  **Profile & Memory Agent**
-    
-    *   Translates user\_profile into an enriched profile object:
-        
-        *   Budget band, key vibes, structure preference, solo comfort, risk tolerance, hard avoidances, current trip goals
-            
-    *   Manages preferenceSignals:
-        
-        *   Simple counters of liked/disliked categories (for example hikes, nightlife, long tours, spiritual events)
-            
-    *   Exposes get\_enriched\_profile(userId) to other agents
-        
-3.  **Discovery Agent**
-    
+1.  **Orchestrator Agent** (single entry point)
+
+    *   Receives every Telegram message
+    *   Loads user from Firestore (single query for doc + ref)
+    *   If no profile, directs user to complete the Tally form
+    *   **Decides intent itself** — no separate classifier
+    *   Routes to specialized agents via **GenAI automatic function calling**:
+        *   `discover_destinations()` — calls the Discovery Agent
+        *   `plan_itinerary()` — calls the Planner Agent
+        *   `get_companion_help()` — calls the Companion Agent
+        *   `update_preferences()` — persists learned preferences to Firestore
+    *   For simple chat — responds directly (no tool call, fastest path)
+    *   **Safety approach**: warns about risks with ⚠️ but never blocks — respects user autonomy
+
+2.  **Discovery Agent** (tool function)
+
     *   Input: enriched profile + trip constraints from chat
-        
-    *   Uses web search and weather tools to:
-        
-        *   Identify candidate destinations that match vibes and constraints
-            
-        *   Check rough seasonality and cost bands in the requested period
-            
-    *   Produces 3–5 destinations with:
-        
-        *   Why they fit the person (explicitly tying to profile answers)
-            
-        *   Estimated budget band and travel effort
-            
-        *   Recommended windows within the chosen dates
-            
-4.  **Planner & Companion Agent**
-    
-    *   Before trip:
-        
-        *   Uses structure preference to decide how detailed the plan should be
-            
-        *   Uses search/maps to propose day level activity sets, with options for different energy levels
-            
-        *   Stores itinerary summary in trips
-            
-    *   During trip:
-        
-        *   Uses current mood, energy, time, weather, and destination to suggest 2–3 options
-            
-        *   Logs suggestion events and, when the user reacts, accepted/rejected categories
-            
-        *   Passes preference updates to Profile & Memory Agent
-            
-5.  **Safety Filter**
-    
-    *   Runs on all responses before sending to user
-        
-    *   Uses a safety tool / rules to:
-        
-        *   Remove or rewrite clearly illegal or obviously unsafe suggestions
-            
-        *   Add “Please verify details and safety before booking or acting on this suggestion” for safety sensitive or uncertain cases
-            
+    *   Produces 3–5 destination candidates with fit explanation, budget band, and travel effort
+    *   Temperature: 0.7 (creative)
+
+3.  **Planner Agent** (tool function)
+
+    *   Creates flexible day-by-day itineraries tailored to the user's style
+    *   Includes morning/afternoon/evening suggestions with low-energy alternatives
+    *   Temperature: 0.7 (creative)
+
+4.  **Companion Agent** (tool function)
+
+    *   In-trip assistance — adapts suggestions to mood, energy, weather, time of day
+    *   Returns 2–3 actionable options with practical details
+    *   Temperature: 0.8 (conversational)
+
+5.  **Conversation Manager**
+
+    *   Stores recent messages + compacted summary in Firestore
+    *   Compacts via LLM when buffer exceeds 10 entries
+    *   Provides conversation context to all agent prompts
+
+6.  **Preference Learner** (tool function)
+
+    *   Persists preferences extracted by the orchestrator
+    *   Maps known fields into `user_profile`, unknown fields into `learned_extras`
+    *   List fields (avoidances, vibes) are merged, not overwritten
 
 The backend is stateless: each request reconstructs context from Firestore and tools, then responds via Make to Telegram.
 
@@ -603,7 +574,7 @@ GOOGLE_PROJECT_ID=your-gcp-project-id
 GOOGLE_APPLICATION_CREDENTIALS=path/to/application_default_credentials.json
 ```
 
-- **`GOOGLE_API_KEY`** — required for all Gemini LLM calls (agents, classifier, safety filter).
+- **`GOOGLE_API_KEY`** — required for all Gemini LLM calls (orchestrator + sub-agents).
 - **`GOOGLE_PROJECT_ID`** — your GCP project ID (used by the Firestore client).
 - **`GOOGLE_APPLICATION_CREDENTIALS`** — path to the Application Default Credentials JSON file.
   To generate it, run `gcloud auth application-default login` and copy the path it prints.
