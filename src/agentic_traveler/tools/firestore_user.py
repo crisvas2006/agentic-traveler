@@ -87,3 +87,34 @@ class FirestoreUserTool:
         if doc.exists:
             return doc.to_dict()
         return None
+
+    def link_telegram_user(
+        self, submission_id: str, telegram_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find a user by their Tally submissionId and set their telegramUserId.
+
+        Called when a user opens the bot via the /start deep link after
+        completing the Tally form.
+
+        Returns:
+            The user document dict if found and linked, or None.
+        """
+        query = self.users_collection.where(
+            filter=FieldFilter("submissionId", "==", submission_id)
+        ).limit(1)
+        results = list(query.stream())
+
+        if not results:
+            logger.warning(
+                "No user found with submissionId=%s", submission_id
+            )
+            return None
+
+        doc_ref = results[0].reference
+        doc_ref.set({"telegramUserId": telegram_id}, merge=True)
+        logger.info(
+            "Linked telegramUserId=%s to submissionId=%s",
+            telegram_id, submission_id,
+        )
+        return results[0].to_dict()
