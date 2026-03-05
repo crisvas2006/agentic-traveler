@@ -21,6 +21,7 @@ import requests as http_requests
 from dotenv import load_dotenv
 from flask import Flask, Request, jsonify, request
 
+from agentic_traveler import off_topic_guard
 from agentic_traveler.logging_config import setup_logging
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
 from agentic_traveler.sanitize import sanitize_user_input
@@ -182,6 +183,15 @@ def telegram_webhook(secret: str):
 
     # ── Regular message → orchestrator ──
     logger.info("Message from user %s: %s", user_id, text[:80])
+
+    # Off-topic restriction check (blocks before LLM call to save costs)
+    user_doc = _user_tool.get_user_by_telegram_id(user_id)
+    if user_doc:
+        restriction_msg = off_topic_guard.is_restricted(user_doc)
+        if restriction_msg:
+            send_telegram_message(chat_id, restriction_msg)
+            return jsonify({"ok": True}), 200
+
     try:
         response = _orchestrator.process_request(user_id, text)
         reply = response.get("text", "Something went wrong.")

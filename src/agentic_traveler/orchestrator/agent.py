@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from agentic_traveler import off_topic_guard
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
 from agentic_traveler.orchestrator.discovery_agent import DiscoveryAgent
 from agentic_traveler.orchestrator.planner_agent import PlannerAgent
@@ -59,6 +60,13 @@ ROUTING RULES:
    travel style, etc.) — call update_preferences() AND incorporate
    acknowledgement into your response (e.g. "Got it, I've noted that you
    prefer mountains over beaches!").
+6. When the message is clearly NOT about travel and NOT casual/fun (e.g.
+   coding help, math homework, political debate, business advice) — call
+   flag_off_topic() to record it, and gently redirect the user toward a
+   travel conversation.  Ask if maybe their question is travel-related.
+   BE LENIENT: jokes, banter, personal stories, "tell me something fun",
+   and anything that could plausibly relate to travel are all FINE — do NOT
+   flag those.  Only flag messages that are clearly about a different domain.
 
 SAFETY APPROACH:
 - NEVER refuse an activity the user wants to do.
@@ -106,6 +114,7 @@ class OrchestratorAgent:
         self._current_user_doc: Dict[str, Any] = {}
         self._current_user_ref = None
         self._current_conv_context: str = ""
+        self._off_topic_flagged: bool = False
         self._model_name = "gemini-3-flash-preview"
 
     # ── tool functions (called by the LLM via automatic function calling) ──
@@ -196,6 +205,39 @@ class OrchestratorAgent:
             )
         return f"Noted: {preference_key} = {preference_value}"
 
+    def flag_off_topic(self, reason: str) -> str:
+        """
+        Flag a message as off-topic (not related to travel).
+
+        Call this when the user's message is clearly about a non-travel
+        domain (e.g. coding, math, politics).  Do NOT call for jokes,
+        banter, or anything that could plausibly relate to travel.
+
+        Args:
+            reason: Brief description of why the message is off-topic
+                (e.g. "user asked for coding help").
+
+        Returns:
+            A warning string to incorporate into your response.
+        """
+        self._off_topic_flagged = True
+        logger.info("🚩 Off-topic flagged: %s", reason)
+
+        result = off_topic_guard.record_off_topic(
+            self._current_user_doc, self._current_user_ref,
+        )
+
+        if result["restricted"]:
+            return (
+                "The user has been restricted due to repeated off-topic "
+                "messages. Let them know their access is temporarily limited."
+            )
+
+        return (
+            f"This is a travel assistant. Gently redirect the user. "
+            f"(off-topic count: {result['count']}/{off_topic_guard.THRESHOLD})"
+        )
+
     # ── main entry point ──
 
     def process_request(
@@ -232,6 +274,7 @@ class OrchestratorAgent:
         # Store request-scoped state for tool functions
         self._current_user_doc = user_doc
         self._current_user_ref = user_doc_ref
+        self._off_topic_flagged = False
         self._current_conv_context = (
             self.conversation_manager.build_context_block(user_doc)
         )
@@ -255,7 +298,11 @@ class OrchestratorAgent:
             )
         logger.info("⏱ LLM call (total incl. tools): %s", _elapsed(t))
 
-        # 4. Save conversation history
+        # 4. Reset off-topic counter if this was a travel message
+        if not self._off_topic_flagged and user_doc_ref:
+            off_topic_guard.reset(user_doc_ref)
+
+        # 5. Save conversation history
         if user_doc_ref:
             t = time.time()
             self.conversation_manager.append_and_save(
@@ -306,6 +353,7 @@ class OrchestratorAgent:
                 tools=[
                     self.discover_destinations,
                     self.plan_itinerary,
+                    self.flag_off_topic,
                     self.get_companion_help,
                     self.update_preferences,
                 ],
