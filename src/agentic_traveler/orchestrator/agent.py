@@ -281,7 +281,7 @@ class OrchestratorAgent:
         parts = [f"Traveler profile:\n{profile}"]
         if conversation:
             parts.append(f"\nConversation so far:\n{conversation}")
-        parts.append(f"\nTraveler says: \"{message}\"")
+        parts.append(f"\n<user_message>\n{message}\n</user_message>")
         return "\n".join(parts)
 
     def _call_llm(self, user_content: str) -> str:

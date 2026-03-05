@@ -17,7 +17,9 @@ import pytest
 # Patch heavy dependencies before importing the webhook module
 with patch("agentic_traveler.webhook.FirestoreUserTool"), \
      patch("agentic_traveler.webhook.OrchestratorAgent"):
-    from agentic_traveler.webhook import app, _is_rate_limited, _user_timestamps, _rate_lock
+    from agentic_traveler.webhook import (
+        app, _is_rate_limited, _user_timestamps, _rate_lock,
+    )
 
 
 @pytest.fixture

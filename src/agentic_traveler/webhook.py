@@ -23,6 +23,7 @@ from flask import Flask, Request, jsonify, request
 
 from agentic_traveler.logging_config import setup_logging
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
+from agentic_traveler.sanitize import sanitize_user_input
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
 
 load_dotenv()
@@ -161,7 +162,7 @@ def telegram_webhook(secret: str):
     chat_id = message.get("chat", {}).get("id")
     from_user = message.get("from", {})
     user_id = str(from_user.get("id", ""))
-    text = (message.get("text") or "").strip()
+    text = sanitize_user_input(message.get("text") or "")
 
     if not chat_id or not user_id or not text:
         return jsonify({"ok": True}), 200

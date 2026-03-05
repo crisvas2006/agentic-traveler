@@ -1,6 +1,5 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 import logging
-import os
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -76,7 +75,9 @@ class DiscoveryAgent:
         return f"""\
 You are a friendly, knowledgeable travel advisor chatting with a traveler.
 
-The traveler says: "{message_text}"
+<user_message>
+{message_text}
+</user_message>
 {context_block}
 Their profile:
 {profile_summary}
