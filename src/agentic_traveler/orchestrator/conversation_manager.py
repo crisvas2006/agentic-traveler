@@ -157,12 +157,18 @@ class ConversationManager:
             f"{m.get('role','').title()}: {m.get('text','')}" for m in messages
         )
 
+        existing_block = (
+            f"Existing summary of earlier conversation:\n{existing_summary}"
+            if existing_summary
+            else ""
+        )
+
         prompt = f"""\
 Summarise the following conversation fragment into a concise paragraph.
 Preserve any concrete facts — destination names, dates, budgets, preferences,
 decisions made, and questions still open.
 
-{"Existing summary of earlier conversation:\n" + existing_summary if existing_summary else ""}
+{existing_block}
 
 New messages to incorporate:
 {conversation_text}
