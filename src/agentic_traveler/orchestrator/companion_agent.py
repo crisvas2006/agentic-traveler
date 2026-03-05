@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional
 import logging
+import time
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -46,6 +47,7 @@ class CompanionAgent:
         logger.debug("Companion prompt length: %d chars", len(prompt))
 
         try:
+            t = time.time()
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
@@ -56,6 +58,8 @@ class CompanionAgent:
             return {
                 "text": response.text,
                 "action": "COMPANION_RESULTS",
+                "_raw_response": response,
+                "_latency_ms": (time.time() - t) * 1000,
             }
         except Exception as e:
             logger.exception("Companion agent LLM call failed.")

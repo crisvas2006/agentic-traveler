@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional
 import logging
+import time
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -40,8 +41,9 @@ class PlannerAgent:
 
         prompt = self._construct_prompt(user_profile, message_text, conversation_context)
         logger.debug("Planner prompt length: %d chars", len(prompt))
-        
+
         try:
+            t = time.time()
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
@@ -51,7 +53,9 @@ class PlannerAgent:
             )
             return {
                 "text": response.text,
-                "action": "PLANNER_RESULTS"
+                "action": "PLANNER_RESULTS",
+                "_raw_response": response,
+                "_latency_ms": (time.time() - t) * 1000,
             }
         except Exception as e:
             logger.exception("Planner agent LLM call failed.")

@@ -24,6 +24,7 @@ from google import genai
 from google.genai import types
 
 from agentic_traveler import off_topic_guard
+from agentic_traveler import usage_tracker
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
 from agentic_traveler.orchestrator.discovery_agent import DiscoveryAgent
 from agentic_traveler.orchestrator.planner_agent import PlannerAgent
@@ -113,11 +114,29 @@ class OrchestratorAgent:
         # State used during a single request (set in process_request)
         self._current_user_doc: Dict[str, Any] = {}
         self._current_user_ref = None
+        self._current_user_id: str = ""
         self._current_conv_context: str = ""
         self._off_topic_flagged: bool = False
         self._model_name = "gemini-3-flash-preview"
 
     # ── tool functions (called by the LLM via automatic function calling) ──
+
+    def _log_sub_agent_usage(self, agent_name: str, result: Dict[str, Any]) -> None:
+        """Log token usage from a sub-agent result if available."""
+        raw = result.get("_raw_response")
+        latency = result.get("_latency_ms", 0)
+        if raw:
+            sub_model = getattr(raw, "_model_name", None)
+            # Sub-agents use their own model_name; fall back to "unknown"
+            model = sub_model or self._model_name
+            usage_tracker.log_and_accumulate(
+                agent_name=agent_name,
+                model_name=model,
+                user_id=self._current_user_id,
+                response=raw,
+                latency_ms=latency,
+                user_doc_ref=self._current_user_ref,
+            )
 
     def discover_destinations(self, request: str) -> str:
         """
@@ -136,6 +155,7 @@ class OrchestratorAgent:
             self._current_user_doc, request, self._current_conv_context
         )
         logger.info("⏱ discover_destinations: %s", _elapsed(t))
+        self._log_sub_agent_usage("discovery", result)
         return result.get("text", "")
 
     def plan_itinerary(self, request: str) -> str:
@@ -155,6 +175,7 @@ class OrchestratorAgent:
             self._current_user_doc, request, self._current_conv_context
         )
         logger.info("⏱ plan_itinerary: %s", _elapsed(t))
+        self._log_sub_agent_usage("planner", result)
         return result.get("text", "")
 
     def get_companion_help(self, request: str) -> str:
@@ -175,6 +196,7 @@ class OrchestratorAgent:
             self._current_user_doc, request, self._current_conv_context
         )
         logger.info("⏱ get_companion_help: %s", _elapsed(t))
+        self._log_sub_agent_usage("companion", result)
         return result.get("text", "")
 
     def update_preferences(self, preference_key: str, preference_value: str) -> str:
@@ -284,6 +306,7 @@ class OrchestratorAgent:
         # Store request-scoped state for tool functions
         self._current_user_doc = user_doc
         self._current_user_ref = user_doc_ref
+        self._current_user_id = user_doc_ref.id if user_doc_ref else telegram_user_id
         self._off_topic_flagged = False
         self._current_conv_context = (
             self.conversation_manager.build_context_block(user_doc)
@@ -298,7 +321,18 @@ class OrchestratorAgent:
         # 3. Single LLM call with automatic function calling
         t = time.time()
         try:
-            response = self._call_llm(user_content)
+            raw_response = self._call_llm(user_content)
+            response = raw_response.text if hasattr(raw_response, 'text') else raw_response
+            # Log token usage
+            if hasattr(raw_response, 'usage_metadata'):
+                usage_tracker.log_and_accumulate(
+                    agent_name="orchestrator",
+                    model_name=self._model_name,
+                    user_id=telegram_user_id,
+                    response=raw_response,
+                    latency_ms=(time.time() - t) * 1000,
+                    user_doc_ref=user_doc_ref,
+                )
         except Exception:
             logger.exception("Orchestrator LLM call failed.")
             name = user_doc.get("user_name", "Traveler")
@@ -369,4 +403,4 @@ class OrchestratorAgent:
                 ],
             ),
         )
-        return response.text
+        return response

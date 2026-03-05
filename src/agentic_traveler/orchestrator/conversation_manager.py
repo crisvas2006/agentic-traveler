@@ -12,13 +12,15 @@ Firestore layout (under each user doc):
 """
 
 import logging
-import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+from agentic_traveler import usage_tracker
 
 load_dotenv()
 
@@ -176,6 +178,7 @@ New messages to incorporate:
 Write ONLY the updated summary, nothing else.
 """
         try:
+            t = time.time()
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
@@ -183,6 +186,13 @@ Write ONLY the updated summary, nothing else.
                     temperature=0.2,
                     max_output_tokens=300,
                 ),
+            )
+            usage_tracker.log_and_accumulate(
+                agent_name="compaction",
+                model_name=self.model_name,
+                user_id="system",
+                response=response,
+                latency_ms=(time.time() - t) * 1000,
             )
             return response.text.strip()
         except Exception:

@@ -4,6 +4,9 @@ Integration tests for the full OrchestratorAgent pipeline.
 Uses real Firestore (test user created/deleted per test)
 and real Gemini API calls.  Asserts on response *structure*
 rather than exact content, since LLM output is non-deterministic.
+
+The orchestrator now uses a single LLM call with automatic function
+calling, so all responses come back with action="RESPONSE".
 """
 
 import pytest
@@ -27,7 +30,7 @@ def test_new_user_gets_onboarding(orchestrator):
 
 
 # ------------------------------------------------------------------
-# 2. Discovery flow (NEW_TRIP intent)
+# 2. Discovery flow
 # ------------------------------------------------------------------
 
 def test_discovery_flow(orchestrator, test_user):
@@ -36,13 +39,13 @@ def test_discovery_flow(orchestrator, test_user):
         test_user["_telegram_id"],
         "I want to travel somewhere warm and cheap in March",
     )
-    assert response["action"] in ("DISCOVERY_RESULTS", "ERROR")
+    assert response["action"] == "RESPONSE"
     assert isinstance(response["text"], str)
     assert len(response["text"]) > 20  # non-trivial response
 
 
 # ------------------------------------------------------------------
-# 3. Planner flow (PLANNING intent)
+# 3. Planner flow
 # ------------------------------------------------------------------
 
 def test_planner_flow(orchestrator, test_user):
@@ -51,13 +54,13 @@ def test_planner_flow(orchestrator, test_user):
         test_user["_telegram_id"],
         "Create a 3-day itinerary for my trip to Lisbon",
     )
-    assert response["action"] in ("PLANNER_RESULTS", "ERROR")
+    assert response["action"] == "RESPONSE"
     assert isinstance(response["text"], str)
     assert len(response["text"]) > 50  # should be a substantial plan
 
 
 # ------------------------------------------------------------------
-# 4. Companion flow (IN_TRIP intent)
+# 4. Companion flow
 # ------------------------------------------------------------------
 
 def test_companion_flow(orchestrator, test_user):
@@ -66,7 +69,7 @@ def test_companion_flow(orchestrator, test_user):
         test_user["_telegram_id"],
         "I'm tired and hungry here, what should I do right now?",
     )
-    assert response["action"] in ("COMPANION_RESULTS", "ERROR")
+    assert response["action"] == "RESPONSE"
     assert isinstance(response["text"], str)
     assert len(response["text"]) > 20
 
@@ -81,6 +84,6 @@ def test_chat_flow(orchestrator, test_user):
         test_user["_telegram_id"],
         "Hello, how are you?",
     )
-    assert response["action"] == "CHAT_REPLY"
-    assert "IntegrationBot" in response["text"]
-
+    assert response["action"] == "RESPONSE"
+    assert isinstance(response["text"], str)
+    assert len(response["text"]) > 5

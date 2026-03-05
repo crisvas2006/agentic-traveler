@@ -135,6 +135,35 @@ The endpoint is protected by multiple layers:
 | Payload validation | Rejects malformed or empty updates |
 | Cloud Run limits | 1 instance, 10 concurrent, 60s timeout |
 
+## Monitoring logs
+
+### Real-time log tailing
+
+```bash
+gcloud beta run services logs tail agentic-traveler --region europe-west1
+```
+
+### Errors/warnings only
+
+```bash
+gcloud beta run services logs tail agentic-traveler --region europe-west1 --log-filter="severity>=WARNING"
+```
+
+### Cloud Logging console
+
+Open in browser:
+
+```
+https://console.cloud.google.com/logs/query?project=YOUR_PROJECT_ID
+```
+
+Filter with:
+
+```
+resource.type="cloud_run_revision"
+resource.labels.service_name="agentic-traveler"
+```
+
 ## Deleting the webhook
 
 ```powershell
