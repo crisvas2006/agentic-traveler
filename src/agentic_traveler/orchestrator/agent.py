@@ -233,6 +233,16 @@ class OrchestratorAgent:
                 "messages. Let them know their access is temporarily limited."
             )
 
+        if result["count"] >= 3:
+            remaining = off_topic_guard.THRESHOLD - result["count"]
+            return (
+                f"This is a travel assistant. Gently redirect the user. "
+                f"IMPORTANT: Warn them that they will be temporarily "
+                f"restricted if they keep sending off-topic messages "
+                f"({remaining} more before restriction). "
+                f"(off-topic count: {result['count']}/{off_topic_guard.THRESHOLD})"
+            )
+
         return (
             f"This is a travel assistant. Gently redirect the user. "
             f"(off-topic count: {result['count']}/{off_topic_guard.THRESHOLD})"

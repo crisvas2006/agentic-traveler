@@ -126,7 +126,7 @@ def record_off_topic(
 
     # Persist to Firestore
     if user_doc_ref:
-        user_doc_ref.set(update, merge=True)
+        user_doc_ref.update(update)
 
     return result
 
@@ -142,10 +142,9 @@ def reset(user_doc_ref: Any) -> None:
         user_doc_ref: Firestore DocumentReference for the user.
     """
     if user_doc_ref:
-        user_doc_ref.set(
+        user_doc_ref.update(
             {
                 "off_topic.count": 0,
                 "off_topic.restricted_until": None,
-            },
-            merge=True,
+            }
         )

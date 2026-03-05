@@ -59,7 +59,7 @@ def test_counter_increments():
     result = record_off_topic(doc, ref)
     assert result["count"] == 3
     assert result["restricted"] is False
-    ref.set.assert_called_once()
+    ref.update.assert_called_once()
 
 
 def test_restriction_after_threshold():
@@ -74,7 +74,7 @@ def test_restriction_after_threshold():
     assert "restricted_until" in result
 
     # Verify Firestore was called with restriction
-    call_args = ref.set.call_args[0][0]
+    call_args = ref.update.call_args[0][0]
     assert "off_topic.restricted_until" in call_args
 
 
@@ -82,8 +82,8 @@ def test_reset_clears_counter():
     """reset() writes count=0 and restricted_until=None to Firestore."""
     ref = MagicMock()
     reset(ref)
-    ref.set.assert_called_once()
-    call_args = ref.set.call_args[0][0]
+    ref.update.assert_called_once()
+    call_args = ref.update.call_args[0][0]
     assert call_args["off_topic.count"] == 0
     assert call_args["off_topic.restricted_until"] is None
 
