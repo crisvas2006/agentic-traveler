@@ -53,6 +53,7 @@ class CompanionAgent:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.8,
+                    max_output_tokens=1000,
                 ),
             )
             return {
@@ -92,13 +93,18 @@ who is currently on a trip.
 Their profile:
 {profile_summary}
 
-Based on the message above, suggest 2-3 concrete, actionable options
-the traveler can do right now.  For each option include:
-1. A short title
-2. Why it fits the traveler's current mood / energy
-3. Practical details (rough cost, distance, time needed)
+Suggest 2-3 concrete, actionable options the traveler can do right now.
+For each option:
+• *Option name* — why it fits their mood/energy (1 line)
+• Practical details: rough cost, distance, time needed (1 line)
 
-Keep the total response under 200 words.
-If the message mentions tiredness or low energy, prioritise low-effort options.
-Tone: warm and supportive, like a friend who's been to the place.
+Keep the total response under 150 words — the user is on the go and
+needs quick, scannable answers.
+If they mention tiredness or low energy, prioritise low-effort options.
+
+Formatting (Telegram):
+- Use *bold* for option names.
+- Use bullet points (•) for structure.
+- Do NOT use headers (#), tables, or code blocks.
+- Tone: warm and supportive, like a friend who's been to the place.
 """

@@ -98,21 +98,37 @@ def _is_telegram_ip(req: Request) -> bool:
 # ── Telegram helpers ──
 
 def send_telegram_message(chat_id: int | str, text: str) -> None:
-    """Send a message via the Telegram Bot API."""
+    """Send a message via the Telegram Bot API with Markdown formatting."""
     # Telegram limit is 4096 chars per message
     for i in range(0, len(text), 4096):
         chunk = text[i : i + 4096]
         try:
             resp = http_requests.post(
                 f"{TELEGRAM_API}/sendMessage",
-                json={"chat_id": chat_id, "text": chunk},
+                json={
+                    "chat_id": chat_id,
+                    "text": chunk,
+                    "parse_mode": "Markdown",
+                },
                 timeout=10,
             )
             if not resp.ok:
-                logger.error(
-                    "Telegram sendMessage failed: %s %s",
-                    resp.status_code, resp.text,
+                # Markdown parsing can fail on unclosed tags — retry as
+                # plain text so the user always gets a response.
+                logger.warning(
+                    "Telegram Markdown send failed (%s), retrying plain text.",
+                    resp.status_code,
                 )
+                resp = http_requests.post(
+                    f"{TELEGRAM_API}/sendMessage",
+                    json={"chat_id": chat_id, "text": chunk},
+                    timeout=10,
+                )
+                if not resp.ok:
+                    logger.error(
+                        "Telegram sendMessage failed: %s %s",
+                        resp.status_code, resp.text,
+                    )
         except Exception:
             logger.exception("Failed to send Telegram message to %s", chat_id)
 

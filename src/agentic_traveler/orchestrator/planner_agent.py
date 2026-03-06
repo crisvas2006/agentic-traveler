@@ -49,6 +49,7 @@ class PlannerAgent:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.7,
+                    max_output_tokens=1500,
                 )
             )
             return {
@@ -87,12 +88,17 @@ Their profile:
 {profile_summary}
 
 Create a flexible day-by-day itinerary tailored to this person's style and
-energy level.  Keep it concise — use bullet points, not paragraphs.
-For each day include:
-- A morning, afternoon, and evening suggestion.
-- One low-energy alternative per day.
-- Use the conversation history for context (destination, dates, preferences
-  discussed earlier).
-- Keep the total response under 300 words.
+energy level.  For each day include:
+• Morning, afternoon, and evening — one line each
+• One low-energy alternative per day
+Use conversation history for context (destination, dates, preferences).
+
+Formatting (Telegram):
+- Use *bold* for day headings and place names.
+- Use numbered lists (1. 2. 3.) for days, bullet points (•) for activities.
+- Do NOT use headers (#), tables, or code blocks.
+- Keep each activity to one line — name + what makes it special.
+- Total response: aim for ~150-250 words. Concise beats comprehensive.
 - Tone: practical and warm, like a friend who knows the place well.
+- End with a brief "Want me to adjust anything?" to invite follow-up.
 """

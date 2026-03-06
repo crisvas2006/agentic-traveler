@@ -49,6 +49,7 @@ class DiscoveryAgent:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.7,
+                    max_output_tokens=1500,
                 )
             )
             return {
@@ -94,9 +95,17 @@ IMPORTANT response guidelines:
 - Only produce a full destination list (up to 3 options) when the user
   clearly asks for destination recommendations or gives concrete constraints
   (dates, budget, duration).
-- When giving full recommendations, keep each option to 3-4 lines max.
+- When giving full recommendations, use this format for each:
+  • *Destination Name* — one-line pitch
+  • Why it fits: 1-2 sentences tying to their profile
+  Keep each option to 3-4 lines max — this is a chat, not a brochure.
 - Always tie suggestions back to the traveler's profile.
-- Use the conversation history to maintain continuity — reference things
-  you've already discussed and don't repeat yourself.
-- Tone: warm, personal, like a well-traveled friend — not a brochure.
+- Use conversation history — reference things discussed, don't repeat yourself.
+
+Formatting (Telegram):
+- Use *bold* for place names and highlights.
+- Use bullet points (•) for lists.
+- Do NOT use headers (#), tables, or code blocks.
+- Keep paragraphs to 2-3 sentences max.
+- Tone: warm, personal, like a well-traveled friend.
 """
