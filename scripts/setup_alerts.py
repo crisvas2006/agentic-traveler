@@ -90,6 +90,34 @@ ALERT_POLICIES = [
     ("high_token_usage", "High token consumption", 50, 3600, 0),
 ]
 
+# ── Resource alert definitions ──
+# Built-in Cloud Run metrics (no log-based metrics needed)
+# Each tuple: (display_name, metric_type, threshold, aligner, reducer)
+
+RESOURCE_ALERTS = [
+    (
+        "High CPU utilization",
+        "run.googleapis.com/container/cpu/utilizations",
+        0.8,  # 80%
+        "ALIGN_PERCENTILE_95",
+        "REDUCE_NONE",
+    ),
+    (
+        "High memory utilization",
+        "run.googleapis.com/container/memory/utilizations",
+        0.8,  # 80%
+        "ALIGN_PERCENTILE_95",
+        "REDUCE_NONE",
+    ),
+    (
+        "High request latency",
+        "run.googleapis.com/request_latencies",
+        15000,  # 15 seconds in milliseconds
+        "ALIGN_PERCENTILE_95",
+        "REDUCE_NONE",
+    ),
+]
+
 
 def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
     """Run a gcloud command and return the result."""
@@ -230,6 +258,64 @@ def create_alert_policies(channel_id: str):
             print(f"❌ {e}")
 
 
+def create_resource_alerts(channel_id: str):
+    """Create resource-based alert policies for Cloud Run."""
+    print("\n📈 Creating resource alerts...")
+
+    token = _get_access_token()
+    api_url = (
+        f"https://monitoring.googleapis.com/v3"
+        f"/projects/{PROJECT_ID}/alertPolicies"
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    for display_name, metric_type, threshold, aligner, reducer in RESOURCE_ALERTS:
+        print(f"  • {display_name}: ", end="")
+
+        policy = {
+            "displayName": f"[Agentic Traveler] {display_name}",
+            "conditions": [
+                {
+                    "displayName": display_name,
+                    "conditionThreshold": {
+                        "filter": (
+                            f'metric.type="{metric_type}"'
+                            f' AND resource.type="cloud_run_revision"'
+                            f' AND resource.labels.service_name="agentic-traveler"'
+                        ),
+                        "comparison": "COMPARISON_GT",
+                        "thresholdValue": threshold,
+                        "duration": "300s",
+                        "aggregations": [
+                            {
+                                "alignmentPeriod": "300s",
+                                "perSeriesAligner": aligner,
+                                "crossSeriesReducer": reducer,
+                            }
+                        ],
+                    },
+                }
+            ],
+            "notificationChannels": [channel_id],
+            "combiner": "OR",
+            "enabled": True,
+        }
+
+        try:
+            resp = requests.post(api_url, headers=headers, json=policy, timeout=15)
+            if resp.status_code in (200, 201):
+                print("✅ created")
+            elif resp.status_code == 409:
+                print("✅ already exists")
+            else:
+                print(f"❌ {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"❌ {e}")
+
+
 def main():
     if not PROJECT_ID:
         print("ERROR: GOOGLE_PROJECT_ID not set in .env")
@@ -244,6 +330,7 @@ def main():
     channel_id = create_notification_channel()
     create_log_metrics()
     create_alert_policies(channel_id)
+    create_resource_alerts(channel_id)
 
     print("\n✅ All done! Check your alerts at:")
     print(

@@ -190,6 +190,15 @@ This creates 6 log-based metrics and alert policies in Cloud Monitoring:
 | High 5xx error rate | ≥ 5 in 5 min |
 | Users restricted (off-topic) | ≥ 5 in 1 hour |
 | High token consumption | ≥ 50 events in 1 hour |
+| High CPU utilization | > 80% (p95) for 5 min |
+| High memory utilization | > 80% (p95) for 5 min |
+| High request latency | > 15s (p95) for 5 min |
+
+### Live resource monitoring
+
+```
+https://console.cloud.google.com/run/detail/europe-west1/agentic-traveler/metrics?project=YOUR_PROJECT_ID
+```
 
 ### Test alerts
 
