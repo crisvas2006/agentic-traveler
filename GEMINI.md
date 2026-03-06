@@ -4,6 +4,7 @@
 - When creating or updating significant features, update `README.md` to reflect the changes.
 - Documentation should be concise and explain the relevant parts in the code.
 - When creating or updating code, add or update comments for methods and classes if the code is not self-explanatory or the cognitive load is high.
+- All software should be documented in a way that is easy to understand and deploy by following the instructions in the repository.
 
 ## Feature Planning
 - When implementing a new significant feature, start by creating a `task_template_<feature_name>.md` in a "feature plan" with the steps planned and the relevant info.

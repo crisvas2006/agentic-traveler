@@ -164,8 +164,71 @@ resource.type="cloud_run_revision"
 resource.labels.service_name="agentic-traveler"
 ```
 
+## Alerting (suspicious traffic)
+
+### Prerequisites
+
+Add `ALERTING_EMAIL` to your `.env`:
+
+```
+ALERTING_EMAIL=your-email@example.com
+```
+
+### Setup alerts
+
+```powershell
+.\.venv\Scripts\python scripts/setup_alerts.py
+```
+
+This creates 6 log-based metrics and alert policies in Cloud Monitoring:
+
+| Alert | Threshold |
+|-------|-----------|
+| Non-Telegram IP requests | ≥ 5 in 5 min |
+| Auth failures (invalid secret) | ≥ 3 in 5 min |
+| Rate limit abuse | ≥ 10 in 10 min |
+| High 5xx error rate | ≥ 5 in 5 min |
+| Users restricted (off-topic) | ≥ 5 in 1 hour |
+| High token consumption | ≥ 50 events in 1 hour |
+
+### Test alerts
+
+**Quick test (alerts 1-2, no setup needed):**
+
+```powershell
+.\.venv\Scripts\python scripts/test_alerts.py
+```
+
+**Full test (all 6 alerts):**
+
+```powershell
+# 1. Temporarily allow non-Telegram IPs
+gcloud run services update agentic-traveler `
+  --region europe-west1 `
+  --update-env-vars SKIP_IP_CHECK=true
+
+# 2. Run all tests
+.\.venv\Scripts\python scripts/test_alerts.py --all
+
+# 3. Wait 3-8 min, check email + GCP Console
+
+# 4. IMPORTANT: Remove SKIP_IP_CHECK
+gcloud run services update agentic-traveler `
+  --region europe-west1 `
+  --remove-env-vars SKIP_IP_CHECK
+```
+
+**Postman:** Import `tests/postman/alert_tests.postman_collection.json` and set the `secret_token` collection variable.
+
+### View alerts
+
+```
+https://console.cloud.google.com/monitoring/alerting?project=YOUR_PROJECT_ID
+```
+
 ## Deleting the webhook
 
 ```powershell
 .\.venv\Scripts\python scripts/register_webhook.py --url dummy --delete
 ```
+

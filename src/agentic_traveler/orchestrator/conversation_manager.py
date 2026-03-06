@@ -184,7 +184,7 @@ Write ONLY the updated summary, nothing else.
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=300,
+                    max_output_tokens=800,
                 ),
             )
             usage_tracker.log_and_accumulate(
