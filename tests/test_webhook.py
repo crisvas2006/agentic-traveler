@@ -200,10 +200,14 @@ def test_start_unknown_submission(mock_tool, mock_send, client):
 @patch("agentic_traveler.webhook.SECRET_TOKEN", "test-secret")
 @patch.dict("os.environ", {"SKIP_IP_CHECK": "1"})
 @patch("agentic_traveler.webhook.send_telegram_message")
+@patch("agentic_traveler.webhook.edit_telegram_message")
 @patch("agentic_traveler.webhook._orchestrator")
-def test_regular_message(mock_orch, mock_send, client, valid_update):
+def test_regular_message(mock_orch, mock_edit, mock_send, client, valid_update):
     """Regular message → orchestrator → reply."""
     mock_orch.process_request.return_value = {"text": "Hello Alice!"}
+
+    # mock_send returns a dummy message_id for the placeholder
+    mock_send.return_value = 42
 
     resp = client.post(
         "/webhook/test-secret",
@@ -212,7 +216,10 @@ def test_regular_message(mock_orch, mock_send, client, valid_update):
     )
     assert resp.status_code == 200
     mock_orch.process_request.assert_called_once_with("67890", "Hello bot!")
-    mock_send.assert_called_once_with(12345, "Hello Alice!")
+    
+    # Verify the two-step flow
+    mock_send.assert_called_once_with(12345, "⏳ Thinking...")
+    mock_edit.assert_called_once_with(12345, 42, "Hello Alice!")
 
 
 # ── Health Check ──

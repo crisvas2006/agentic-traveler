@@ -97,8 +97,13 @@ def _is_telegram_ip(req: Request) -> bool:
 
 # ── Telegram helpers ──
 
-def send_telegram_message(chat_id: int | str, text: str) -> None:
-    """Send a message via the Telegram Bot API with Markdown formatting."""
+def send_telegram_message(chat_id: int | str, text: str) -> int | None:
+    """Send a message via the Telegram API with Markdown formatting.
+    
+    Returns the message_id of the sent message (or the last message if
+    chunked), or None on failure.
+    """
+    last_message_id = None
     # Telegram limit is 4096 chars per message
     for i in range(0, len(text), 4096):
         chunk = text[i : i + 4096]
@@ -129,8 +134,49 @@ def send_telegram_message(chat_id: int | str, text: str) -> None:
                         "Telegram sendMessage failed: %s %s",
                         resp.status_code, resp.text,
                     )
+                    continue
+            
+            result = resp.json()
+            if result.get("ok"):
+                last_message_id = result["result"].get("message_id")
+                
         except Exception:
             logger.exception("Failed to send Telegram message to %s", chat_id)
+            
+    return last_message_id
+
+def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> None:
+    """Edit an existing Telegram message with new Markdown text."""
+    # Note: If text > 4096, editing won't work perfectly for chunking,
+    # but LLM responses are typically kept under the limit.
+    text = text[:4096]
+    try:
+        resp = http_requests.post(
+            f"{TELEGRAM_API}/editMessageText",
+            json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+                "parse_mode": "Markdown",
+            },
+            timeout=10,
+        )
+        if not resp.ok:
+            logger.warning("Telegram editMessageText failed (%s), retrying plain text.", resp.status_code)
+            http_requests.post(
+                f"{TELEGRAM_API}/editMessageText",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                },
+                timeout=10,
+            )
+    except Exception:
+        logger.exception("Failed to edit Telegram message %s", message_id)
+
+
+
 
 
 # ── globals (initialized once per container) ──
@@ -208,6 +254,9 @@ def telegram_webhook(secret: str):
             send_telegram_message(chat_id, restriction_msg)
             return jsonify({"ok": True}), 200
 
+    # Show inline placeholder while LLM processes
+    placeholder_msg_id = send_telegram_message(chat_id, "⏳ Thinking...")
+
     try:
         response = _orchestrator.process_request(user_id, text)
         reply = response.get("text", "Something went wrong.")
@@ -215,7 +264,12 @@ def telegram_webhook(secret: str):
         logger.exception("Orchestrator error for user %s", user_id)
         reply = "Sorry, I hit an error processing your message. Please try again."
 
-    send_telegram_message(chat_id, reply)
+    if placeholder_msg_id:
+        edit_telegram_message(chat_id, placeholder_msg_id, reply)
+    else:
+        # Fallback if placeholder failed to send
+        send_telegram_message(chat_id, reply)
+        
     return jsonify({"ok": True}), 200
 
 
