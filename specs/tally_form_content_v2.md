@@ -1,139 +1,135 @@
-Tally Onboarding Form — "The Odyssey Onboarding"
-Intro Text: "Welcome to the start of something transformative. This isn’t just a logistics form; it’s the DNA of your future adventures.
+# Tally Onboarding Form — "The Odyssey Onboarding"
 
-To help your AI companion plan trips that feel like they were made specifically for you, we’re going to map your travel personality. We’ll start with your favorite vibes and rhythms before diving into how you handle the world’s little surprises. Be honest, be bold—we’ll handle the rest."
+**URL:** https://tally.so/r/ODPGak
 
-Section I: The Vision (The Fun Stuff)
-Goal: Start with high-pleasure, aspirational questions to build engagement.
+**Purpose:** Collects traveler preferences, personality traits, and travel style to build a user profile for the Agentic Traveler companion bot.
 
-Q1. The "Everything" Question: What makes a trip feel successful to you?
-Type: Multi-select (Required)
+**Intro text:** "Welcome to the start of something transformative. This isn't just a logistics form - it's the DNA of your future adventures. To help your AI companion plan trips that feel like they were made specifically for you, we're going to map your travel personality. We'll start with your favorite vibes and rhythms before diving into how you handle the world's little surprises. Be honest, be bold - we'll handle the rest."
 
-Description: (We know you want it all! Check everything that resonates—your choices help me weight my top suggestions for you.)
+---
 
-Options:
+## Phase 1: Your Internal Travel Compass
 
-🌿 Nature: Breathtaking landscapes and fresh air.
+### Q1. What makes a trip feel successful to you?
+- **Type:** Checkboxes (optional)
+- **Options:**
+  - Nature: Breathtaking landscapes and fresh air.
+  - Culture & History: Deep history, museums, and architecture.
+  - Taste: Street food, fine dining, and local markets.
+  - Peace & Reset: Silence, spas, and mental decompression.
+  - Adventure: High-energy thrills and physical challenges.
+  - Aesthetics: Photography-worthy spots and beautiful design.
+  - Social Energy: Nightlife, festivals, and meeting new people.
+  - Growth: Learning a new skill, language, or inner-work.
 
-🏛️ Culture: Deep history, museums, and architecture.
+### Q2. Who is usually in your "Travel Bubble"?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - Solo: Just me and my thoughts.
+  - The Duo: My partner - we move as a unit.
+  - The Inner Circle: A small group of close, trusted friends or family.
+  - The Socialite: I love meeting new travelers and making friends in every city.
 
-🍱 Taste: Street food, fine dining, and local markets.
+### Q3. Meaning & Depth: How much do you value the spiritual or cultural dimensions of a place?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: The Seeker: I look for deep meaning, spiritual connection, or sacred history.
+  - B: The Explorer: I enjoy local traditions and history, but I’m mostly here for the experience.
+  - C: The Vacationer: I care more about the vibe, comfort, and fun than the "deeper" history.
 
-🧘 Peace: Silence, spa, and mental decompression.
+### Q4. When it comes to "Local Immersion", where is your sweet spot?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: The Deep End: I want to eat what the locals eat and stay where they stay.
+  - B: The Best of Both Worlds: I love authentic units but want a high-standard bed and hot shower.
+  - C: The Curated Lens: High-end galleries, fine dining, and secure tours.
 
-🧗 Thrill: Adventure, sports, and pushing limits.
+### Q5. The Solo Freedom: How comfortable are you wandering without a fixed plan?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: Total Freedom
+  - B: Flexible
+  - C: Social Safety
+  - D: The Pack
 
-🎨 Aesthetics: Photography-worthy spots and beautiful design.
+---
 
-🥂 Energy: Nightlife, festivals, and social crowds.
+## Phase II: The Pulse (Daily Rhythm)
 
-Q2. Social Architecture: Who is usually in your "Travel Bubble"?
-Type: Multi-select (Required)
+### Q6. What is your "Ideal Morning" vibe?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: Sunrise Seeker
+  - B: Civilized Start
+  - C: Night Owl
 
-Options:
+### Q7. Physical Intensity: How much "Sweat Equity" are you willing to put in?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: Leisurely
+  - B: Active
+  - C: Rugged
 
-Solo: Just me and my thoughts.
+### Q8. What is your "Energy Level" strategy?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: The Sprinter
+  - B: The Wanderer
+  - C: The Slow-Mo
 
-The Duo: My partner—we move as a unit.
+### Q9. The Uncertainty Scale: How much discomfort are you willing to embrace?
+- **Type:** Linear scale 1–5 (required)
+- **Scale:**
+  - 1 = Comfort is priority
+  - 5 = Discomfort is part of the story
 
-The Inner Circle: A small group of close, trusted friends or family.
+---
 
-The Socialite: I love meeting new travelers and making friends in every city.
+## Phase III: The Strategy
 
-Hint: This helps me suggest either private, intimate spots or social, lively hubs.
+### Q10. A local strike has canceled your transport. What’s your move?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: The Tactician
+  - B: The Alchemist
+  - C: The Delegate
 
-Q3. When it comes to "Local Immersion," where is your sweet spot?
-Type: Multiple choice (Required)
+### Q11. The Splurge Priority: Where does the "treat yourself" money go?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: The Stay
+  - B: The Plate
+  - C: The Experience
+  - D: The Piece (local craft/art)
 
-Options:
+### Q12. What is your current "Budget Personality"?
+- **Type:** Multiple choice (required)
+- **Options:**
+  - A: The Negotiator
+  - B: Balanced
+  - C: The High-End
 
-The Deep End: I want to eat what the locals eat and stay where they stay. I don't mind a lack of English or "tourist" comforts.
+### Q13. Any absolute "Deal-Breakers"?
+- **Type:** Multi-select Dropdown (required)
+- **Options:**
+  - Poor hygiene
+  - No Wi-Fi
+  - Overwhelming crowds
+  - Extreme Heat
+  - Extreme Cold
+  - Poor transport
 
-The Best of Both Worlds: I love the authentic "hidden gems," but I want a high-standard bed and a hot shower to return to.
+---
 
-The Curated Lens: I prefer exploring the culture through high-end galleries, fine dining, and secure, comfortable tours.
+## Section IV: The Identification
 
-Section II: The Pulse (Daily Rhythm)
-Goal: Understand the physical constraints and energy of the user.
+### Q14. Your name
+- **Type:** Short Text (required)
 
-Q4. What is your "Ideal Morning" vibe?
-Type: Multiple choice (Required)
+### Q15. Where are you currently based?
+- **Type:** Short Text (required)
 
-Options:
+#### Upon submission you will be redirected to your travel assistant on Telegram!
+---
 
-The Sunrise Seeker: I want to be out early, catch the soft light, and beat the crowds at the big sites.
-
-The Civilized Start: A slow breakfast and coffee, hitting the streets around 10:00 AM.
-
-The Night Owl: I prefer to sleep in; the city doesn't truly get interesting for me until the sun starts to set.
-
-Q5. Physical Intensity: How much "Sweat Equity" are you willing to put in?
-Type: Multiple choice (Required)
-
-Options:
-
-Leisurely: Taxis, elevators, and short strolls. I'm here to relax.
-
-Active: I enjoy a good walking tour and don't mind a few flights of stairs or a light hike.
-
-Rugged: Put me on a 20km trail, a bike, or a mountain. I want to feel the burn.
-
-Section III: The Architect (The Scenario)
-Goal: Now that they are comfortable, we test their behavioral traits.
-
-Q6. A local strike has canceled your transport for the day. You have 8 hours to kill. What’s your move?
-Type: Multiple choice (Required)
-
-Description: (This reveals how you handle the unexpected—crucial for how I give you advice during a trip!)
-
-Options:
-
-The Tactician: I’m at the counter or on my phone immediately, re-organizing the rest of the trip to ensure no time is lost.
-
-The Alchemist: I take it as a sign! I’ll walk into the nearest neighborhood and find the best coffee or local spot I would have missed.
-
-The Delegate: I find a comfortable place to wait and look for a professional (concierge or app) to tell me when the next best option is ready.
-
-Section IV: Priorities & Reality
-Goal: Practical logistics and final preferences.
-
-Q7. The Splurge Priority: If you decided to "treat yourself," where does the money go?
-Type: Multiple choice (Required)
-
-Options:
-
-The Stay: Upgrading to a 5-star hotel or a unique boutique villa.
-
-The Plate: A legendary multi-course meal or a private chef experience.
-
-The Experience: A private helicopter tour, a VIP pass, or a sold-out show.
-
-The Piece: A high-quality local craft, fashion, or art to take home.
-
-Q8. What is your current "Budget Personality"?
-Type: Multiple choice (Required)
-
-Options:
-
-Shoestring: I’m a pro at finding deals and keeping costs low.
-
-Mid-Range: I value comfort and will spend for quality, but I’m not throwing money away.
-
-High-End: I want the best available and am willing to pay for convenience and luxury.
-
-Q9. Any absolute "Deal-Breakers"? (Check all that apply)
-Type: Multi-select
-
-Options: Poor hygiene/Dirty bathrooms, No Wi-Fi/No Signal, Overwhelming crowds, Extreme Heat, Extreme Cold, Early morning wake-up calls, Lack of public transport.
-
-Section V: The Identification (Contact)
-Goal: Finalize the profile with essential identification.
-
-Q10. What is your full name?
-Type: Short text (Required)
-
-Q11. What is your phone number or Telegram handle?
-Type: Short text (Required)
-
-Q12. Where are you currently based (City / Country)?
-Type: Short text (Required)
+_The form ends with a **Submit** button._

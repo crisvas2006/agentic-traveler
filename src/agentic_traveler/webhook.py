@@ -289,17 +289,27 @@ def _handle_start(
         return
 
     # Try to link Telegram user to Firestore profile
-    user_doc = _user_tool.link_telegram_user(submission_id, user_id)
+    user_doc, is_update = _user_tool.link_telegram_user(submission_id, user_id)
     if user_doc:
-        name = user_doc.get("user_name", "Traveler")
-        send_telegram_message(
-            chat_id,
-            f"✅ Welcome, {name}! Your travel profile is linked.\n\n"
-            "You can now ask me anything — try:\n"
-            "• \"Suggest me a 5-day trip in May\"\n"
-            "• \"I want a nature getaway under 800 EUR\"\n"
-            "• \"What do you know about me?\"",
-        )
+        name = user_doc.get("name", user_doc.get("user_name", "Traveler"))
+        if is_update:
+            send_telegram_message(
+                chat_id,
+                f"✅ Welcome back, {name}! Your profile was updated with info from the completed form.\n\n"
+                "You can now ask me anything — try:\n"
+                "• \"Suggest me a 5-day trip in May\"\n"
+                "• \"I want a nature getaway under 800 EUR\"\n"
+                "• \"What do you know about me?\"",
+            )
+        else:
+            send_telegram_message(
+                chat_id,
+                f"✅ Welcome, {name}! Your travel profile is linked.\n\n"
+                "You can now ask me anything — try:\n"
+                "• \"Suggest me a 5-day trip in May\"\n"
+                "• \"I want a nature getaway under 800 EUR\"\n"
+                "• \"What do you know about me?\"",
+            )
     else:
         send_telegram_message(
             chat_id,

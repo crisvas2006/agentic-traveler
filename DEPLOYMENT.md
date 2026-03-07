@@ -28,6 +28,7 @@ TELEGRAM_BOT_TOKEN=your-bot-token-from-botfather
 TELEGRAM_SECRET_TOKEN=your-generated-secret
 GOOGLE_API_KEY=your-gemini-api-key
 GOOGLE_PROJECT_ID=your-gcp-project-id
+GEMINI_REGION=europe-west1
 ```
 
 ## Deploy to Cloud Run
@@ -56,7 +57,7 @@ gcloud run deploy agentic-traveler \
   --allow-unauthenticated \
   --max-instances 1 \
   --concurrency 10 \
-  --set-env-vars "TELEGRAM_BOT_TOKEN=your-bot-token,TELEGRAM_SECRET_TOKEN=your-secret,GOOGLE_API_KEY=your-api-key,GOOGLE_PROJECT_ID=your-project-id" \
+  --set-env-vars "TELEGRAM_BOT_TOKEN=your-bot-token,TELEGRAM_SECRET_TOKEN=your-secret,GOOGLE_API_KEY=your-api-key,GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=europe-west1" \
   --memory 512Mi \
   --timeout 60
 ```
@@ -240,4 +241,22 @@ https://console.cloud.google.com/monitoring/alerting?project=YOUR_PROJECT_ID
 ```powershell
 .\.venv\Scripts\python scripts/register_webhook.py --url dummy --delete
 ```
+
+## Deploying Tally Webhook v2
+
+The Tally Webhook has been separated into its own Cloud Run Function under the `tally_webhook_v2` directory.
+
+To deploy it:
+
+```bash
+cd tally_webhook_v2
+gcloud run deploy tally-webhook-v2 \
+  --source . \
+  --function tally_webhook \
+  --region europe-west1 \
+  --allow-unauthenticated \
+  --set-env-vars="TALLY_WEBHOOK_TOKEN=your-secret-token"
+```
+
+Replace `your-secret-token` with the actual token configured in your Tally form.
 

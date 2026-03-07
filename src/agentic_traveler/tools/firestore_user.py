@@ -90,15 +90,16 @@ class FirestoreUserTool:
 
     def link_telegram_user(
         self, submission_id: str, telegram_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> tuple[Optional[Dict[str, Any]], bool]:
         """
         Find a user by their Tally submissionId and set their telegramUserId.
-
-        Called when a user opens the bot via the /start deep link after
-        completing the Tally form.
+        If the telegram_id already exists in another document, merge the new
+        submission data into the old document and delete the new submission document.
 
         Returns:
-            The user document dict if found and linked, or None.
+            Tuple of (user_dict, is_update) where:
+            - user_dict is the user document dict if found and linked, or None.
+            - is_update is True if an existing profile was updated, False if it was a new profile.
         """
         query = self.users_collection.where(
             filter=FieldFilter("submissionId", "==", submission_id)
@@ -106,15 +107,40 @@ class FirestoreUserTool:
         results = list(query.stream())
 
         if not results:
-            logger.warning(
-                "No user found with submissionId=%s", submission_id
-            )
-            return None
+            logger.warning("No user found with submissionId=%s", submission_id)
+            return None, False
 
-        doc_ref = results[0].reference
-        doc_ref.set({"telegramUserId": telegram_id}, merge=True)
-        logger.info(
-            "Linked telegramUserId=%s to submissionId=%s",
-            telegram_id, submission_id,
-        )
-        return results[0].to_dict()
+        new_doc_snap = results[0]
+        new_doc_dict = new_doc_snap.to_dict()
+        new_doc_ref = new_doc_snap.reference
+
+        # Check if this telegram user already exists
+        existing_doc, existing_ref = self.get_user_with_ref(telegram_id)
+
+        if existing_doc and existing_ref:
+            # Make sure we aren't merging the exact same document
+            if existing_ref.id == new_doc_ref.id:
+                new_doc_ref.set({"telegramUserId": telegram_id}, merge=True)
+                new_doc_dict["telegramUserId"] = telegram_id
+                return new_doc_dict, False
+
+            # Merge new submission into old document
+            merge_data = new_doc_dict.copy()
+            merge_data["telegramUserId"] = telegram_id
+
+            existing_ref.set(merge_data, merge=True)
+            logger.info("Merged submissionId=%s into existing user %s", submission_id, telegram_id)
+
+            # Delete the new orphan submission
+            new_doc_ref.delete()
+
+            updated_doc = existing_doc.copy()
+            updated_doc.update(merge_data)
+            return updated_doc, True
+
+        else:
+            # New linking
+            new_doc_ref.set({"telegramUserId": telegram_id}, merge=True)
+            logger.info("Linked telegramUserId=%s to submissionId=%s", telegram_id, submission_id)
+            new_doc_dict["telegramUserId"] = telegram_id
+            return new_doc_dict, False
