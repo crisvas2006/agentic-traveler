@@ -59,9 +59,11 @@ def build_profile_summary(user_doc: Dict[str, Any]) -> str:
         lengths = profile["typical_trip_lengths"]
         parts.append(f"Typical trip length: {', '.join(lengths) if isinstance(lengths, list) else lengths}")
 
-    # --- personality ---
+    # --- personality & tone ---
     if profile.get("personality_baseline"):
         parts.append(f"Personality: {profile['personality_baseline']}")
+    if profile.get("tone_preference"):
+        parts.append(f"Preferred bot tone: {profile['tone_preference']}")
     if profile.get("discomfort_tolerance_score") is not None:
         parts.append(f"Discomfort tolerance: {profile['discomfort_tolerance_score']}/5")
     if profile.get("cultural_spiritual_importance"):

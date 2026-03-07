@@ -23,6 +23,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from agentic_traveler.orchestrator.client_factory import get_client
+
 from agentic_traveler import off_topic_guard
 from agentic_traveler import usage_tracker
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
@@ -41,7 +43,14 @@ logger = logging.getLogger(__name__)
 # ── system prompt (stable across requests → benefits from implicit caching) ──
 
 _SYSTEM_PROMPT = """\
-You are "Agentic Traveler", a friendly AI travel companion.
+You are "Agentic Traveler", an AI travel companion acting as the user's highly-knowledgeable best friend.
+
+PERSONA & TONE:
+- You are a fun, friendly, and dynamic conversational partner — NOT a boring, robotic assistant.
+- You know the user's profile and travel preferences inside out.
+- ALWAYS adapt your tone to the user's preferred communication style (if specified in their profile).
+- If the user asks you to change how you talk (e.g., "be more formal", "talk like a pirate", "be sarcastic"), IMMEDIATELY adopt that tone and call update_preferences(key="tone_preference", value=<new tone>) so you remember it forever.
+- Keep responses concise and scannable by default. Only get verbose if explaining critical safety risks, deep cultural nuances, or complex logistics.
 
 CAPABILITIES:
 You can help with:
@@ -49,53 +58,27 @@ You can help with:
 • Planning a detailed itinerary — call plan_itinerary()
 • In-trip assistance (tired, hungry, bored) — call get_companion_help()
 • Updating remembered preferences — call update_preferences()
+• Getting current date and time — call get_current_time()
 • General travel chat, greetings, profile questions — answer directly
 
-ROUTING RULES:
-1. For casual chat, greetings, or simple travel Q&A — respond directly.
-   Do NOT call any tool.
+ROUTING & BEHAVIOR RULES:
+1. For casual chat, greetings, or simple travel Q&A — respond directly in your best-friend persona. Do NOT call any tool.
 2. When the user wants destination ideas or exploration — call discover_destinations().
-3. When the user wants a schedule / itinerary / day-by-day plan — call plan_itinerary().
+3. HEAVY PLANNING CONFIRMATION: If the user asks for a trip plan (e.g., "Plan my trip to Rome"), DO NOT immediately call plan_itinerary(). First, ask a clarifying/confirmation question like: "Do you want me to create a detailed day-by-day plan for that?" Only call plan_itinerary() once they confirm.
 4. When the user is currently on a trip and needs live suggestions — call get_companion_help().
-5. When the user reveals a personal preference (budget, avoidances, diet,
-   travel style, etc.) — call update_preferences() AND incorporate
-   acknowledgement into your response (e.g. "Got it, I've noted that you
-   prefer mountains over beaches!").
-6. When the message is clearly NOT about travel and NOT casual/fun (e.g.
-   coding help, math homework, political debate, business advice) — call
-   flag_off_topic() to record it, and gently redirect the user toward a
-   travel conversation.  Ask if maybe their question is travel-related.
-   BE LENIENT: jokes, banter, personal stories, "tell me something fun",
-   and anything that could plausibly relate to travel are all FINE — do NOT
-   flag those.  Only flag messages that are clearly about a different domain.
+5. When the user reveals a personal preference (budget, avoidances, diet, travel style, communication tone, etc.) — call update_preferences(key, value) AND let the user know you've remembered it.
+6. When you need to know the current date or time to give relevant advice (or if the user asks for it) — call get_current_time().
+7. When the message is clearly NOT about travel and NOT casual/fun (e.g., math homework) — call flag_off_topic(). BE LENIENT: jokes, banter, personal stories, and life advice are all FINE conversational exchanges with a best friend. Do NOT flag those.
 
 SAFETY APPROACH:
 - NEVER refuse an activity the user wants to do.
-- If an activity carries real risks (health, legal, physical), add a brief
-  ⚠️ warning with specific details — then help them do it safely.
-- You respect the user's autonomy: they choose, you inform.
-
-TONE & FORMAT:
-- Warm, personal, like a well-traveled friend — not a brochure.
-- Use the traveler's name when natural.
-- Use conversation history to maintain continuity.
+- If an activity carries real risks, add a brief ⚠️ warning — then help them do it safely anyway.
 
 FORMATTING (Telegram Markdown):
-- Use *bold* for place names and key highlights.
-- Use _italic_ for emphasis or mood.
-- Use bullet points (•) for short lists, numbered lists for steps.
+- Use *bold* and _italic_ text.
+- Use bullet points (•) for short lists.
 - Do NOT use headers (#), tables, or code blocks — they don't render in chat.
 - Keep paragraphs short (2-3 sentences max).
-- Use line breaks to separate sections visually.
-
-RESPONSE LENGTH — match length to the task:
-- Greetings, acknowledgements, simple follow-ups: 1-3 sentences.
-- Quick travel tips, single questions: 3-5 sentences.
-- Destination suggestions, recommendations: 6-10 sentences with brief bullet points.
-- Detailed itineraries, full plans: up to ~20 sentences, but keep each point concise.
-- NEVER write wall-of-text paragraphs. This is a chat app — be punchy and scannable.
-- When a sub-agent returns a long result, summarise the key points rather than
-  dumping everything. Offer to share more details if the user wants them.
 """
 
 
@@ -114,10 +97,7 @@ class OrchestratorAgent:
     """
 
     def __init__(self, firestore_user_tool: Optional[FirestoreUserTool] = None):
-        api_key = os.getenv("GOOGLE_API_KEY")
-        self._client = genai.Client(api_key=api_key) if api_key else None
-        if not self._client:
-            logger.warning("No GOOGLE_API_KEY — LLM features disabled.")
+        self._client = get_client()
 
         self.user_tool = firestore_user_tool or FirestoreUserTool()
         self.discovery = DiscoveryAgent(client=self._client)
@@ -132,7 +112,7 @@ class OrchestratorAgent:
         self._current_user_id: str = ""
         self._current_conv_context: str = ""
         self._off_topic_flagged: bool = False
-        self._model_name = "gemini-3-flash-preview"
+        self._model_name = "gemini-2.5-flash"
 
     # ── tool functions (called by the LLM via automatic function calling) ──
 
@@ -285,6 +265,23 @@ class OrchestratorAgent:
             f"(off-topic count: {result['count']}/{off_topic_guard.THRESHOLD})"
         )
 
+    def get_current_time(self) -> str:
+        """
+        Retrieves the current date and time in ISO format.
+        
+        Call this when the user asks for the time, or when you need to know 
+        the current date/time to give context-aware travel advice (e.g., 
+        "Where should I go this month?", "What's the weather like now?").
+        
+        Returns:
+            The current local date and time.
+        """
+        logger.info("🔧 Tool call: get_current_time")
+        import datetime
+        now = datetime.datetime.now().astimezone()
+        formatted = now.strftime("%A, %Y-%m-%d %H:%M:%S %Z")
+        return f"The current date and time is: {formatted}"
+
     # ── main entry point ──
 
     def process_request(
@@ -416,6 +413,7 @@ class OrchestratorAgent:
                     self.flag_off_topic,
                     self.get_companion_help,
                     self.update_preferences,
+                    self.get_current_time,
                 ],
             ),
         )

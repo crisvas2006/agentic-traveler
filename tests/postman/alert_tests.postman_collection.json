@@ -1,0 +1,290 @@
+{
+  "info": {
+    "name": "Agentic Traveler - Alert Tests",
+    "description": "Postman collection for testing all 6 suspicious traffic alerts.\n\nSetup:\n1. Import this collection into Postman\n2. Set collection variables (edit collection → Variables tab)\n3. Run requests individually or use the Collection Runner\n\nFor local testing, set base_url to http://localhost:8080 and ensure SKIP_IP_CHECK=true in .env.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "secret_token",
+      "value": "YOUR_TELEGRAM_SECRET_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "fake_user_id",
+      "value": "999999999",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Alert 1 - Non-Telegram IP",
+      "item": [
+        {
+          "name": "Wrong URL secret (run 6×)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 1,\n  \"message\": {\n    \"message_id\": 1,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"test non-telegram IP\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/wrong_secret_12345",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "wrong_secret_12345"]
+            },
+            "description": "Triggers non_telegram_ip metric. Run 6× to exceed threshold of 5."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alert 2 - Auth Failure",
+      "item": [
+        {
+          "name": "Wrong header token (run 4×)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "wrong_token" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 1,\n  \"message\": {\n    \"message_id\": 1,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"test auth failure\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Triggers auth_failure metric. Run 4× to exceed threshold of 3."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alert 3 - Rate Limit",
+      "item": [
+        {
+          "name": "Valid request (run 12×)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 1,\n  \"message\": {\n    \"message_id\": 1,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"rate limit test\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Triggers rate_limit_hit metric. Run 12× rapidly to exceed threshold of 10/min. Requires SKIP_IP_CHECK=true."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alert 5 - Off-Topic",
+      "item": [
+        {
+          "name": "Off-topic: Solve equation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 1,\n  \"message\": {\n    \"message_id\": 1,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"Can you solve this differential equation: dy/dx = 3x^2 + 2x?\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Off-topic message 1/6. Requires SKIP_IP_CHECK=true and valid Firestore user."
+          }
+        },
+        {
+          "name": "Off-topic: Write Python code",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 2,\n  \"message\": {\n    \"message_id\": 2,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"Write me a Python quicksort function\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Off-topic message 2/6."
+          }
+        },
+        {
+          "name": "Off-topic: Political debate",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 3,\n  \"message\": {\n    \"message_id\": 3,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"What is your opinion on the latest political elections?\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Off-topic message 3/6."
+          }
+        },
+        {
+          "name": "Off-topic: Debug JavaScript",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 4,\n  \"message\": {\n    \"message_id\": 4,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"Help me debug this JavaScript error: TypeError undefined\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Off-topic message 4/6."
+          }
+        },
+        {
+          "name": "Off-topic: Essay about computing",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 5,\n  \"message\": {\n    \"message_id\": 5,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"Can you write me an essay about quantum computing?\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Off-topic message 5/6."
+          }
+        },
+        {
+          "name": "Off-topic: Neural networks",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 6,\n  \"message\": {\n    \"message_id\": 6,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"Explain how neural networks work with backpropagation\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Off-topic message 6/6. Should trigger user restriction."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alert 6 - High Token Usage",
+      "item": [
+        {
+          "name": "Travel: Japan trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 10,\n  \"message\": {\n    \"message_id\": 10,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"I want to go to Japan next spring for 2 weeks\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Travel message generating LLM usage. Run many travel requests to reach 50 events/hour."
+          }
+        },
+        {
+          "name": "Travel: Greece timing",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 11,\n  \"message\": {\n    \"message_id\": 11,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"What's the best time to visit Greece?\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Travel message for token usage tracking."
+          }
+        },
+        {
+          "name": "Travel: Barcelona plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{secret_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 12,\n  \"message\": {\n    \"message_id\": 12,\n    \"from\": { \"id\": {{fake_user_id}}, \"is_bot\": false, \"first_name\": \"AlertTest\" },\n    \"chat\": { \"id\": {{fake_user_id}}, \"type\": \"private\" },\n    \"date\": 1709700000,\n    \"text\": \"Plan a 5-day trip to Barcelona for me\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/{{secret_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "{{secret_token}}"]
+            },
+            "description": "Travel message triggering planner agent (higher token usage)."
+          }
+        }
+      ]
+    }
+  ]
+}

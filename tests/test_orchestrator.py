@@ -30,19 +30,19 @@ def patched_deps():
          patch("agentic_traveler.orchestrator.agent.CompanionAgent") as comp, \
          patch("agentic_traveler.orchestrator.agent.ConversationManager") as conv, \
          patch("agentic_traveler.orchestrator.agent.PreferenceLearner") as pref, \
-         patch("agentic_traveler.orchestrator.agent.genai") as mock_genai:
+         patch("agentic_traveler.orchestrator.agent.get_client") as mock_get_client:
         # conversation context is empty by default
         conv.return_value.build_context_block.return_value = ""
         # genai client mock
         mock_client = MagicMock()
-        mock_genai.Client.return_value = mock_client
+        mock_get_client.return_value = mock_client
         yield {
             "discovery": disc,
             "planner": plan,
             "companion": comp,
             "conversation": conv,
             "preference": pref,
-            "genai": mock_genai,
+            "get_client": mock_get_client,
             "client": mock_client,
         }
 
@@ -121,12 +121,11 @@ def test_tool_functions_are_passed_to_llm(mock_user_tool, patched_deps):
     agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
     agent.process_request("123", "Hello!")
 
-    # Check that generate_content was called with tools
     call_kwargs = patched_deps["client"].models.generate_content.call_args
     config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
     assert config is not None
     assert config.tools is not None
-    assert len(config.tools) == 5  # 5 tool functions (incl. flag_off_topic)
+    assert len(config.tools) == 6  # 6 tool functions (incl. get_current_time)
 
 
 def test_no_client_returns_error(mock_user_tool):
@@ -136,14 +135,13 @@ def test_no_client_returns_error(mock_user_tool):
         {"user_name": "Bob", "user_profile": {}}, doc_ref
     )
 
-    with patch("agentic_traveler.orchestrator.agent.genai") as mock_genai, \
+    with patch("agentic_traveler.orchestrator.agent.get_client") as mock_get_client, \
          patch("agentic_traveler.orchestrator.agent.DiscoveryAgent"), \
          patch("agentic_traveler.orchestrator.agent.PlannerAgent"), \
          patch("agentic_traveler.orchestrator.agent.CompanionAgent"), \
          patch("agentic_traveler.orchestrator.agent.ConversationManager") as conv, \
-         patch("agentic_traveler.orchestrator.agent.PreferenceLearner"), \
-         patch.dict("os.environ", {"GOOGLE_API_KEY": ""}):
-        mock_genai.Client.return_value = None
+         patch("agentic_traveler.orchestrator.agent.PreferenceLearner"):
+        mock_get_client.return_value = None
         conv.return_value.build_context_block.return_value = ""
 
         agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)

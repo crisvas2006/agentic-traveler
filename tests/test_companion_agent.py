@@ -10,8 +10,8 @@ def mock_client():
 
 def test_companion_agent_init(mock_client):
     agent = CompanionAgent(client=mock_client)
-    assert agent.client is not None
-    assert agent.model_name == "gemini-3-flash-preview"
+    assert agent.client == mock_client
+    assert agent.model_name == "gemini-2.5-flash"
 
 
 def test_companion_agent_process_request(mock_client):
@@ -32,9 +32,9 @@ def test_companion_agent_process_request(mock_client):
     assert response["action"] == "COMPANION_RESULTS"
     assert "Café" in response["text"]
 
-    args, kwargs = mock_client.models.generate_content.call_args
-    assert kwargs["model"] == "gemini-3-flash-preview"
-    assert "Alice" in kwargs["contents"]
+    args, kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert kwargs["model"] == "gemini-2.5-flash"
+    assert "conversation context" in kwargs["contents"]
     assert "tired" in kwargs["contents"]
 
 

@@ -10,8 +10,8 @@ def mock_client():
 
 def test_planner_agent_init(mock_client):
     agent = PlannerAgent(client=mock_client)
-    assert agent.client is not None
-    assert agent.model_name == "gemini-3-flash-preview"
+    assert agent.client == mock_client
+    assert agent.model_name == "gemini-2.5-flash"
 
 
 def test_planner_agent_process_request(mock_client):
@@ -29,7 +29,7 @@ def test_planner_agent_process_request(mock_client):
     assert response["action"] == "PLANNER_RESULTS"
     assert "Day 1" in response["text"]
 
-    args, kwargs = mock_client.models.generate_content.call_args
-    assert kwargs['model'] == "gemini-3-flash-preview"
-    assert "Test User" in kwargs['contents']
+    args,    kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert kwargs['model'] == "gemini-2.5-flash"
+    assert "user profile" in kwargs['contents']
     assert "Rome" in kwargs['contents']

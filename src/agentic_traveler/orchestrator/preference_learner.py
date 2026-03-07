@@ -31,6 +31,7 @@ UPDATABLE_PROFILE_FIELDS = {
     "activity_level",
     "daily_rhythm",
     "dream_trip_style",
+    "tone_preference",
     "extra_notes",
 }
 

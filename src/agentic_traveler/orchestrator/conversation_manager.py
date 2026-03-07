@@ -167,7 +167,7 @@ class ConversationManager:
 
         prompt = f"""\
 Summarise the following conversation fragment into a concise paragraph.
-Preserve any concrete facts — destination names, dates, budgets, preferences,
+Preserve any concrete facts — destination names, dates, budgets, preferences (especially tone/communication style requests),
 decisions made, and questions still open.
 
 {existing_block}

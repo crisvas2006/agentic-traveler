@@ -24,9 +24,9 @@ def test_returns_token_counts():
     """log_and_accumulate returns correct token breakdown."""
     resp = _mock_response(prompt_tokens=200, candidates_tokens=80)
     result = log_and_accumulate(
-        agent_name="orchestrator",
-        model_name="gemini-3-flash-preview",
-        user_id="123",
+        agent_name="test_agent",
+        model_name="gemini-2.5-flash",
+        user_id="user123",
         response=resp,
         latency_ms=500,
     )
@@ -41,9 +41,9 @@ def test_accumulates_to_firestore():
     resp = _mock_response(prompt_tokens=100, candidates_tokens=50)
 
     log_and_accumulate(
-        agent_name="discovery",
-        model_name="gemini-3-flash-preview",
-        user_id="456",
+        agent_name="test_agent",
+        model_name="gemini-2.5-flash",
+        user_id="user456",
         response=resp,
         latency_ms=300,
         user_doc_ref=ref,
@@ -52,9 +52,9 @@ def test_accumulates_to_firestore():
     ref.update.assert_called_once()
     call_args = ref.update.call_args[0][0]
     # Model name dots replaced with underscores for Firestore paths
-    assert "usage.gemini-3-flash-preview.total_input_tokens" in call_args
-    assert "usage.gemini-3-flash-preview.total_output_tokens" in call_args
-    assert "usage.gemini-3-flash-preview.call_count" in call_args
+    assert "usage.gemini-2.5-flash.total_input_tokens" in call_args
+    assert "usage.gemini-2.5-flash.total_output_tokens" in call_args
+    assert "usage.gemini-2.5-flash.call_count" in call_args
 
 
 def test_no_accumulation_without_ref():

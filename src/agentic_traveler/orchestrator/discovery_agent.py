@@ -19,7 +19,7 @@ class DiscoveryAgent:
     def __init__(
         self,
         client: Optional[genai.Client] = None,
-        model_name: str = "gemini-3-flash-preview",
+        model_name: str = "gemini-2.5-flash",
     ):
         self.client = client
         self.model_name = model_name

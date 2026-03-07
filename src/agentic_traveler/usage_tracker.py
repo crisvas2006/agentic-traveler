@@ -37,7 +37,7 @@ def log_and_accumulate(
 
     Args:
         agent_name: Which agent made the call (e.g. "orchestrator").
-        model_name: Model used (e.g. "gemini-3-flash-preview").
+        model_name: Model used (e.g. "gemini-2.5-flash").
         user_id: Firestore user document ID.
         response: The GenAI response object (has .usage_metadata).
         latency_ms: How long the call took in milliseconds.
