@@ -17,7 +17,7 @@ Architecture:
 import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 
 from dotenv import load_dotenv
 from google import genai
@@ -54,30 +54,32 @@ PERSONA & TONE:
 
 CAPABILITIES:
 You can help with:
-• Discovering new destinations — call discover_destinations()
-• Planning a detailed itinerary — call plan_itinerary()
-• In-trip assistance (tired, hungry, bored) — call get_companion_help()
+• Discovering new destinations — call discover_destinations(request="<user request> + <desired length/format>")
+• Planning a detailed itinerary — call plan_itinerary(request="<user request> + <desired length/format>")
+• In-trip assistance (tired, hungry, bored) — call get_companion_help(request="<user request> + <desired length/format>")
 • Updating remembered preferences — call update_preferences()
 • Getting current date and time — call get_current_time()
 • General travel chat, greetings, profile questions — answer directly
 
 ROUTING & BEHAVIOR RULES:
 1. For casual chat, greetings, or simple travel Q&A — respond directly in your best-friend persona. Do NOT call any tool.
-2. When the user wants destination ideas or exploration — call discover_destinations().
-3. HEAVY PLANNING CONFIRMATION: If the user asks for a trip plan (e.g., "Plan my trip to Rome"), DO NOT immediately call plan_itinerary(). First, ask a clarifying/confirmation question like: "Do you want me to create a detailed day-by-day plan for that?" Only call plan_itinerary() once they confirm.
+2. When the user wants destination ideas or exploration — call discover_destinations(request="<user request> + keep it to a high-level 2-3 sentence summary of options").
+3. HEAVY PLANNING CONFIRMATION: If the user asks for a trip plan (e.g., "Plan my trip to Rome", "What can I do in Lombok in 1 day?"), DO NOT immediately call plan_itinerary() with a request for a detailed plan. First, call discover_destinations() or get_companion_help() with a request for a short 2-phase answer (e.g. "Give a 2-3 sentence summary of 2 options and ask if they want a detailed plan"). ONLY route to `plan_itinerary` when the user explicitly agrees to a detailed day-by-day plan.
 4. When the user is currently on a trip and needs live suggestions — call get_companion_help().
 5. When the user reveals a personal preference (budget, avoidances, diet, travel style, communication tone, etc.) — call update_preferences(key, value) AND let the user know you've remembered it.
 6. When you need to know the current date or time to give relevant advice (or if the user asks for it) — call get_current_time().
 7. When the message is clearly NOT about travel and NOT casual/fun (e.g., math homework) — call flag_off_topic(). BE LENIENT: jokes, banter, personal stories, and life advice are all FINE conversational exchanges with a best friend. Do NOT flag those.
+8. PASSING THROUGH RESULTS: When you call `discover_destinations` or `plan_itinerary`, the tool will return a detailed response. YOU MUST INCLUDE THAT EXACT RESPONSE in your final message to the user. Do "not" just say "Here is your plan!", you must actually output the text the tool gives you.
+9. DYNAMIC LENGTH: When passing the `request` string to a sub-agent tool, ALWAYS append instructions on how long and detailed the response should be based on the conversational context. (e.g., "Keep it to a playful 2-sentence conversational reply" vs "Give a full, deep-dive itinerary").
 
 SAFETY APPROACH:
 - NEVER refuse an activity the user wants to do.
-- If an activity carries real risks, add a brief ⚠️ warning — then help them do it safely anyway.
+- If an activity carries real risks, add a brief ⚠️ warning — explain the risk and then help them do it safely if they confirm they want to do it.
 
 FORMATTING (Telegram Markdown):
 - Use *bold* and _italic_ text.
-- Use bullet points (•) for short lists.
-- Do NOT use headers (#), tables, or code blocks — they don't render in chat.
+- NEVER use asterisks (*) or hyphens (-) for lists. ALWAYS use the unicode bullet character (•).
+- Do NOT use headers (#), tables, or code blocks — they don't render well in Telegram.
 - Keep paragraphs short (2-3 sentences max).
 """
 
@@ -113,6 +115,7 @@ class OrchestratorAgent:
         self._current_conv_context: str = ""
         self._off_topic_flagged: bool = False
         self._model_name = "gemini-2.5-flash"
+        self._current_status_callback: Optional[Callable[[str], None]] = None
 
     # ── tool functions (called by the LLM via automatic function calling) ──
 
@@ -139,12 +142,16 @@ class OrchestratorAgent:
 
         Args:
             request: What the user wants — their destination criteria,
-                     constraints, or curiosity.
+                     constraints, or curiosity. MUST include a specific
+                     instruction on the desired length/verbosity of the output.
 
         Returns:
             A text block with destination suggestions.
         """
         logger.info("🔧 Tool call: discover_destinations")
+        if self._current_status_callback:
+            self._current_status_callback("I'm scouting the globe for the perfect spots for you! Just a moment... 🌍")
+            
         t = time.time()
         result = self.discovery.process_request(
             self._current_user_doc, request, self._current_conv_context
@@ -159,12 +166,16 @@ class OrchestratorAgent:
 
         Args:
             request: What the user wants planned — destination, dates,
-                     duration, pace preferences.
+                     duration, pace preferences. MUST include a specific
+                     instruction on the desired length/verbosity of the output.
 
         Returns:
             A text block with the itinerary.
         """
         logger.info("🔧 Tool call: plan_itinerary")
+        if self._current_status_callback:
+            self._current_status_callback("I'm putting together a detailed day-by-day plan for you! Give me a few seconds... 🗺️")
+            
         t = time.time()
         result = self.planner.process_request(
             self._current_user_doc, request, self._current_conv_context
@@ -180,7 +191,8 @@ class OrchestratorAgent:
 
         Args:
             request: What the user needs right now (tired, hungry, bored,
-                     lost, looking for something specific).
+                     lost, looking for something specific). MUST include a specific
+                     instruction on the desired length/verbosity of the output.
 
         Returns:
             A text block with actionable in-trip suggestions.
@@ -235,7 +247,7 @@ class OrchestratorAgent:
                 (e.g. "user asked for coding help").
 
         Returns:
-            A warning string to incorporate into your response.
+            An internal instruction on how to reply. DO NOT show or read this string to the user.
         """
         self._off_topic_flagged = True
         logger.info("🚩 Off-topic flagged: %s", reason)
@@ -246,6 +258,7 @@ class OrchestratorAgent:
 
         if result["restricted"]:
             return (
+                "[HIDDEN INSTRUCTION - DO NOT SHOW TO USER]: "
                 "The user has been restricted due to repeated off-topic "
                 "messages. Let them know their access is temporarily limited."
             )
@@ -253,6 +266,7 @@ class OrchestratorAgent:
         if result["count"] >= 3:
             remaining = off_topic_guard.THRESHOLD - result["count"]
             return (
+                f"[HIDDEN INSTRUCTION - DO NOT SHOW TO USER]: "
                 f"This is a travel assistant. Gently redirect the user. "
                 f"IMPORTANT: Warn them that they will be temporarily "
                 f"restricted if they keep sending off-topic messages "
@@ -261,6 +275,7 @@ class OrchestratorAgent:
             )
 
         return (
+            f"[HIDDEN INSTRUCTION - DO NOT SHOW TO USER]: "
             f"This is a travel assistant. Gently redirect the user. "
             f"(off-topic count: {result['count']}/{off_topic_guard.THRESHOLD})"
         )
@@ -285,7 +300,7 @@ class OrchestratorAgent:
     # ── main entry point ──
 
     def process_request(
-        self, telegram_user_id: str, message_text: str
+        self, telegram_user_id: str, message_text: str, status_callback: Optional[Callable[[str], None]] = None
     ) -> Dict[str, Any]:
         """
         Process a user message end-to-end.
@@ -323,6 +338,7 @@ class OrchestratorAgent:
         self._current_conv_context = (
             self.conversation_manager.build_context_block(user_doc)
         )
+        self._current_status_callback = status_callback
 
         # 2. Build the user message (profile + conversation + message)
         profile_summary = build_profile_summary(user_doc)
@@ -331,10 +347,29 @@ class OrchestratorAgent:
         )
 
         # 3. Single LLM call with automatic function calling
+        logger.info("\n=== ORCHESTRATOR PROMPT INPUT ===\n%s\n=================================", user_content)
         t = time.time()
         try:
             raw_response = self._call_llm(user_content)
             response = raw_response.text if hasattr(raw_response, 'text') else raw_response
+            
+            if not response:
+                fr_msg = "I had trouble coming up with a response just now."
+                if hasattr(raw_response, 'candidates') and raw_response.candidates:
+                    fr = raw_response.candidates[0].finish_reason
+                    logger.warning("LLM returned empty text. Finish reason: %s (type: %s)", fr, type(fr))
+                    # In python SDK, finish_reason can be an enum or int
+                    if "MAX_TOKENS" in str(fr) or fr == 3:
+                        fr_msg = "Oops! I had too much to say and hit my message limit! Could you ask for something a bit more specific?"
+                        logger.warning("Message converted to MAX_TOKENS error.")
+                    elif "SAFETY" in str(fr) or fr == 4:
+                        fr_msg = "Sorry, I can't provide that due to safety guidelines."
+                        logger.warning("Message converted to SAFETY error.")
+                    else:
+                        logger.warning("Unhandled finish_reason. Using default empty error msg.")
+                else:
+                    logger.warning("LLM returned no response and no candidates block! Raw: %s", raw_response)
+                response = fr_msg
             # Log token usage
             if hasattr(raw_response, 'usage_metadata'):
                 usage_tracker.log_and_accumulate(
@@ -345,6 +380,9 @@ class OrchestratorAgent:
                     latency_ms=(time.time() - t) * 1000,
                     user_doc_ref=user_doc_ref,
                 )
+            
+            # Save raw response as string for logging/debugging if needed
+            self._last_raw_response = str(raw_response)
         except Exception:
             logger.exception("Orchestrator LLM call failed.")
             name = user_doc.get("user_name", "Traveler")
@@ -366,6 +404,7 @@ class OrchestratorAgent:
             )
             logger.debug("⏱ Conversation save: %s", _elapsed(t))
 
+        logger.info("\n=== ORCHESTRATOR FINAL OUTPUT ===\n%s\n=================================", response)
         logger.info("⏱ TOTAL: %s", _elapsed(t_total))
         return {"text": response, "action": "RESPONSE"}
 
@@ -400,21 +439,40 @@ class OrchestratorAgent:
         if not self._client:
             return "LLM features are unavailable (missing API key)."
 
-        response = self._client.models.generate_content(
-            model=self._model_name,
-            contents=user_content,
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                temperature=0.8,
-                max_output_tokens=2048,
-                tools=[
-                    self.discover_destinations,
-                    self.plan_itinerary,
-                    self.flag_off_topic,
-                    self.get_companion_help,
-                    self.update_preferences,
-                    self.get_current_time,
-                ],
-            ),
-        )
-        return response
+        try:
+            raw_response = self._client.models.generate_content(
+                model=self._model_name,
+                contents=user_content,
+                config=types.GenerateContentConfig(
+                    system_instruction=_SYSTEM_PROMPT,
+                    temperature=0.8,
+                    max_output_tokens=8192,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        maximum_remote_calls=3
+                    ),
+                    safety_settings=[
+                        types.SafetySetting(
+                            category=c,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        ) for c in [
+                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        ]
+                    ],
+                    tools=[
+                        self.discover_destinations,
+                        self.plan_itinerary,
+                        self.flag_off_topic,
+                        self.get_companion_help,
+                        self.update_preferences,
+                        self.get_current_time,
+                    ],
+                ),
+            )
+            response = raw_response.text if hasattr(raw_response, 'text') else raw_response
+            return response
+        except Exception as e:
+            logger.exception("LLM generation failed in _call_llm.")
+            return "I am experiencing heavy traffic and couldn't process this right now. Please wait a moment and try again."

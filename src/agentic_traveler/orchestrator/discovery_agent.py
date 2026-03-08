@@ -49,7 +49,18 @@ class DiscoveryAgent:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.7,
-                    max_output_tokens=1500,
+                    max_output_tokens=4500,
+                    safety_settings=[
+                        types.SafetySetting(
+                            category=c,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        ) for c in [
+                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        ]
+                    ]
                 )
             )
             return {
@@ -88,24 +99,18 @@ Their profile:
 {profile_summary}
 
 IMPORTANT response guidelines:
-- Match the depth of your answer to the user's message.
-  If they are just pondering or casually mentioning a place, give a SHORT
-  conversational reply (2-4 sentences) with a light suggestion and ask a
-  follow-up question to understand their needs better.
-- Only produce a full destination list (up to 3 options) when the user
-  clearly asks for destination recommendations or gives concrete constraints
-  (dates, budget, duration).
-- When giving full recommendations, use this format for each:
-  • *Destination Name* — one-line pitch
-  • Why it fits: 1-2 sentences tying to their profile
-  Keep each option to 3-4 lines max — this is a chat, not a brochure.
+- CRITICAL: Provide a 2- or 3-phase answer! Instead of dumping a huge list, first give a very high-level, 2-line summary of what's possible (e.g. "We could do a nature-focused day covering waterfalls, or a cultural day at the villages.").
+- ONLY produce a full, detailed itinerary or list IF the user's message specifically requests the fine details right now.
+- ALWAYS ask a follow-up question: "Would you like me to make a more detailed plan for one of those options?"
+- Keep your tone friendly, punchy, and conversational, like you're brainstorming with a friend, rather than reading a brochure.
 - Always tie suggestions back to the traveler's profile.
 - Use conversation history — reference things discussed, don't repeat yourself.
 
 Formatting (Telegram):
+- OBEY THE LENGTH/FORMATTING INSTRUCTION IN THE <user_message>. If it asks for a short conversational reply, keep it brief. If it asks for a deep dive, provide more detail.
+- STRICT LENGTH LIMIT: Under NO CIRCUMSTANCES should you write an exhaustive, encyclopedic guide or exceed 3500 characters. If the user asks for "EVERYTHING" or an exhaustive list, politely decline and provide a highly curated, condensed summary instead.
 - Use *bold* for place names and highlights.
 - Use bullet points (•) for lists.
 - Do NOT use headers (#), tables, or code blocks.
-- Keep paragraphs to 2-3 sentences max.
 - Tone: warm, personal, like a well-traveled friend.
 """

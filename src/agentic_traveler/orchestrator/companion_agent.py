@@ -53,7 +53,18 @@ class CompanionAgent:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.8,
-                    max_output_tokens=1000,
+                    max_output_tokens=3000,
+                    safety_settings=[
+                        types.SafetySetting(
+                            category=c,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        ) for c in [
+                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        ]
+                    ]
                 ),
             )
             return {
@@ -98,11 +109,10 @@ For each option:
 • *Option name* — why it fits their mood/energy (1 line)
 • Practical details: rough cost, distance, time needed (1 line)
 
-Keep the total response under 150 words — the user is on the go and
-needs quick, scannable answers.
 If they mention tiredness or low energy, prioritise low-effort options.
 
 Formatting (Telegram):
+- OBEY THE LENGTH/FORMATTING INSTRUCTION IN THE <user_message>. 
 - Use *bold* for option names.
 - Use bullet points (•) for structure.
 - Do NOT use headers (#), tables, or code blocks.

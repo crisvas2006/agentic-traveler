@@ -49,7 +49,18 @@ class PlannerAgent:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.7,
-                    max_output_tokens=1500,
+                    max_output_tokens=4500,
+                    safety_settings=[
+                        types.SafetySetting(
+                            category=c,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        ) for c in [
+                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        ]
+                    ]
                 )
             )
             return {
@@ -94,11 +105,12 @@ energy level.  For each day include:
 Use conversation history for context (destination, dates, preferences).
 
 Formatting (Telegram):
+- OBEY THE LENGTH/FORMATTING INSTRUCTION IN THE <user_message>. If it asks for a short summary, provide that. If it asks for a deep dive itinerary, provide full details.
+- STRICT LENGTH LIMIT: Under NO CIRCUMSTANCES should you write an exhaustive, encyclopedic guide or exceed 3500 characters. If the user asks for "EVERYTHING" or an exhaustive list, politely decline and provide a highly curated, condensed summary instead.
 - Use *bold* for day headings and place names.
 - Use numbered lists (1. 2. 3.) for days, bullet points (•) for activities.
 - Do NOT use headers (#), tables, or code blocks.
 - Keep each activity to one line — name + what makes it special.
-- Total response: aim for ~150-250 words. Concise beats comprehensive.
 - Tone: practical and warm, like a friend who knows the place well.
 - End with a brief "Want me to adjust anything?" to invite follow-up.
 """

@@ -184,7 +184,18 @@ Write ONLY the updated summary, nothing else.
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=800,
+                    max_output_tokens=1800,
+                    safety_settings=[
+                        types.SafetySetting(
+                            category=c,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        ) for c in [
+                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        ]
+                    ]
                 ),
             )
             usage_tracker.log_and_accumulate(

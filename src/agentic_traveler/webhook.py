@@ -147,9 +147,14 @@ def send_telegram_message(chat_id: int | str, text: str) -> int | None:
 
 def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> None:
     """Edit an existing Telegram message with new Markdown text."""
-    # Note: If text > 4096, editing won't work perfectly for chunking,
-    # but LLM responses are typically kept under the limit.
-    text = text[:4096]
+    if not text:
+        text = "Sorry, I had trouble coming up with a response."
+        
+    # Note: If text > 4000, we truncate safely below 4096 UTF-16 code units.
+    if len(str(text)) > 4000:
+        text = str(text)[:4000] + "\n\n...(message truncated)"
+    else:
+        text = str(text)
     try:
         resp = http_requests.post(
             f"{TELEGRAM_API}/editMessageText",
@@ -162,8 +167,8 @@ def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> Non
             timeout=10,
         )
         if not resp.ok:
-            logger.warning("Telegram editMessageText failed (%s), retrying plain text.", resp.status_code)
-            http_requests.post(
+            logger.warning("Telegram editMessageText failed (%s): %s. Retrying plain text.", resp.status_code, resp.text)
+            resp2 = http_requests.post(
                 f"{TELEGRAM_API}/editMessageText",
                 json={
                     "chat_id": chat_id,
@@ -172,6 +177,8 @@ def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> Non
                 },
                 timeout=10,
             )
+            if not resp2.ok:
+                logger.error("Telegram editMessageText plain text fallback failed (%s): %s", resp2.status_code, resp2.text)
     except Exception:
         logger.exception("Failed to edit Telegram message %s", message_id)
 
@@ -257,17 +264,26 @@ def telegram_webhook(secret: str):
     # Show inline placeholder while LLM processes
     placeholder_msg_id = send_telegram_message(chat_id, "⏳ Thinking...")
 
+    def update_status(msg: str):
+        if placeholder_msg_id:
+            edit_telegram_message(chat_id, placeholder_msg_id, msg)
+
     try:
-        response = _orchestrator.process_request(user_id, text)
+        response = _orchestrator.process_request(user_id, text, status_callback=update_status)
+        logger.info("webhook received from orchestrator: %s", response)
         reply = response.get("text", "Something went wrong.")
-    except Exception:
-        logger.exception("Orchestrator error for user %s", user_id)
+    except Exception as e:
+        logger.exception("Orchestrator error for user %s: %s", user_id, str(e))
         reply = "Sorry, I hit an error processing your message. Please try again."
 
     if placeholder_msg_id:
         edit_telegram_message(chat_id, placeholder_msg_id, reply)
+        # Send remaining chunks if response was too large to edit
+        if len(reply) > 4000:
+            remaining_reply = reply[4000:]
+            send_telegram_message(chat_id, remaining_reply)
     else:
-        # Fallback if placeholder failed to send
+        # Fallback if placeholder failed to send (this already chunks internally)
         send_telegram_message(chat_id, reply)
         
     return jsonify({"ok": True}), 200
@@ -292,30 +308,61 @@ def _handle_start(
     user_doc, is_update = _user_tool.link_telegram_user(submission_id, user_id)
     if user_doc:
         name = user_doc.get("name", user_doc.get("user_name", "Traveler"))
-        if is_update:
-            send_telegram_message(
-                chat_id,
-                f"✅ Welcome back, {name}! Your profile was updated with info from the completed form.\n\n"
+        
+        # Send a placeholder
+        placeholder_msg_id = send_telegram_message(chat_id, "⏳ Mapping your travel DNA...")
+        
+        try:
+            from agentic_traveler.orchestrator.profile_agent import ProfileAgent
+            profile_agent = ProfileAgent()
+            
+            # Extract only the safely serializable form response data to avoid Firestore Datetime JSON errors
+            form_data = user_doc.get("user_profile", {}).get("form_response", {})
+            if not form_data:
+                # Fallback if someone sends raw user_doc without form_response 
+                # (We stringify it to be safe)
+                form_data = {str(k): str(v) for k, v in user_doc.get("user_profile", {}).items()}
+                
+            structured_data = profile_agent.build_initial_profile({"form_response": form_data})
+            
+            greeting = structured_data.pop("greeting", None)
+            
+            # Save the new structured keys
+            _user_tool.update_user_fields(user_id, {
+                "user_profile": structured_data
+            })
+            
+            if not greeting:
+                greeting = f"Great to meet you, {name}! Your profile is mapped out and ready to go."
+                
+            examples = (
                 "You can now ask me anything — try:\n"
                 "• \"Suggest me a 5-day trip in May\"\n"
                 "• \"I want a nature getaway under 800 EUR\"\n"
-                "• \"What do you know about me?\"",
+                "• \"What do you know about me?\""
             )
-        else:
-            send_telegram_message(
-                chat_id,
-                f"✅ Welcome, {name}! Your travel profile is linked.\n\n"
-                "You can now ask me anything — try:\n"
-                "• \"Suggest me a 5-day trip in May\"\n"
-                "• \"I want a nature getaway under 800 EUR\"\n"
-                "• \"What do you know about me?\"",
-            )
+            
+            # 1. Edit the placeholder to show success
+            if is_update:
+                edit_telegram_message(chat_id, placeholder_msg_id, f"✅ Welcome back, {name}! Your profile was updated.")
+            else:
+                edit_telegram_message(chat_id, placeholder_msg_id, f"✅ Welcome, {name}! Your travel profile is linked.")
+
+            # 2. Send the personalized greeting as a brand new separate message
+            send_telegram_message(chat_id, f"_{greeting}_\n\n{examples}")
+        
+        except Exception:
+            logger.exception("Failed to build initial profile.")
+            if placeholder_msg_id:
+                edit_telegram_message(chat_id, placeholder_msg_id, "✅ Linked! Ready to chat.")
+            else:
+                send_telegram_message(chat_id, "✅ Linked! Ready to chat.")
     else:
         send_telegram_message(
             chat_id,
             "❌ I couldn't find a profile for that link. "
             "Please make sure you've completed the travel form first:\n"
-            "https://tally.so/r/9qN6p4",
+            "https://tally.so/r/ODPGak",
         )
 
 
