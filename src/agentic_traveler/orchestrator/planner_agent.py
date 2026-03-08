@@ -103,6 +103,7 @@ energy level.  For each day include:
 • Morning, afternoon, and evening — one line each
 • One low-energy alternative per day
 Use conversation history for context (destination, dates, preferences).
+- WEATHER: If weather data is provided in the <user_message>, adapt the itinerary accordingly (e.g., suggest indoor museums if rain is forecast). Mention the weather naturally as a reason for your choices (e.g. "since it looks cloudy on Tuesday..."), but do NOT dump a daily weather breakdown in the itinerary unless asked.
 
 Formatting (Telegram):
 - OBEY THE LENGTH/FORMATTING INSTRUCTION IN THE <user_message>. If it asks for a short summary, provide that. If it asks for a deep dive itinerary, provide full details.

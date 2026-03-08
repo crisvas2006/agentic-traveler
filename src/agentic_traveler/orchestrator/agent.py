@@ -34,6 +34,7 @@ from agentic_traveler.orchestrator.companion_agent import CompanionAgent
 from agentic_traveler.orchestrator.preference_learner import PreferenceLearner
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
+from agentic_traveler.tools.weather import WeatherService
 
 load_dotenv()
 
@@ -59,6 +60,7 @@ You can help with:
 • In-trip assistance (tired, hungry, bored) — call get_companion_help(request="<user request> + <desired length/format>")
 • Updating remembered preferences — call update_preferences()
 • Getting current date and time — call get_current_time()
+• Checking the weather forecast — call check_weather(location="<City>, <Region>, <Country>", days=<number of days>). IMPORTANT: If the user asks for a broad region or island (like "Bali"), you MUST infer a representative city based on their context (e.g., "Kuta, Bali, Indonesia" for beaches, or "Ubud, Bali, Indonesia" for culture) instead of asking them to be more specific.
 • General travel chat, greetings, profile questions — answer directly
 
 ROUTING & BEHAVIOR RULES:
@@ -68,9 +70,12 @@ ROUTING & BEHAVIOR RULES:
 4. When the user is currently on a trip and needs live suggestions — call get_companion_help().
 5. When the user reveals a personal preference (budget, avoidances, diet, travel style, communication tone, etc.) — call update_preferences(key, value) AND let the user know you've remembered it.
 6. When you need to know the current date or time to give relevant advice (or if the user asks for it) — call get_current_time().
-7. When the message is clearly NOT about travel and NOT casual/fun (e.g., math homework) — call flag_off_topic(). BE LENIENT: jokes, banter, personal stories, and life advice are all FINE conversational exchanges with a best friend. Do NOT flag those.
-8. PASSING THROUGH RESULTS: When you call `discover_destinations` or `plan_itinerary`, the tool will return a detailed response. YOU MUST INCLUDE THAT EXACT RESPONSE in your final message to the user. Do "not" just say "Here is your plan!", you must actually output the text the tool gives you.
-9. DYNAMIC LENGTH: When passing the `request` string to a sub-agent tool, ALWAYS append instructions on how long and detailed the response should be based on the conversational context. (e.g., "Keep it to a playful 2-sentence conversational reply" vs "Give a full, deep-dive itinerary").
+7. When you need to know the weather for a specific location or time to give relevant advice (or if the user asks for it) — call check_weather(location="<City>, <Region>, <Country>", days=<number of days>). IMPORTANT: You MUST pass a specific city. If the user only mentions an island or region (like "Bali" or "Tuscany"), DO NOT ask them to specify a city. INSTEAD, infer a representative city based on their conversational context or profile (e.g. choose a beach town if they like beaches, or the capital if unknown) and format it as "City, Region, Country" (e.g. "Kuta, Bali, Indonesia" or "Denpasar, Bali, Indonesia").
+8. When the message is clearly NOT about travel and NOT casual/fun (e.g., math homework) — call flag_off_topic(). BE LENIENT: jokes, banter, personal stories, and life advice are all FINE conversational exchanges with a best friend. Do NOT flag those.
+9. PASSING THROUGH RESULTS: When you call `discover_destinations` or `plan_itinerary`, the tool will return a detailed response. YOU MUST INCLUDE THAT EXACT RESPONSE in your final message to the user. Do "not" just say "Here is your plan!", you must actually output the text the tool gives you.
+10. DYNAMIC LENGTH: When passing the `request` string to a sub-agent tool, ALWAYS append instructions on how long and detailed the response should be based on the conversational context. (e.g., "Keep it to a playful 2-sentence conversational reply" vs "Give a full, deep-dive itinerary").
+11. WEATHER AWARENESS: If weather information is relevant to the user request (e.g., planning outdoor activities, deciding on a destination), call `check_weather` first and append the raw data results to the `request` string you pass to `discover_destinations` or `plan_itinerary`. 
+12. NATURAL PRESENTATION: When presenting weather info to the user (either directly or as part of a suggestion), NEVER just dump the raw list of daily weather. Instead, extract the "vibe" and key highlights (e.g., "It will be quite chilly, below 10°C, so bring a jacket"). Only provide a detailed daily breakdown if the user specifically asks for it.
 
 SAFETY APPROACH:
 - NEVER refuse an activity the user wants to do.
@@ -243,41 +248,22 @@ class OrchestratorAgent:
         banter, or anything that could plausibly relate to travel.
 
         Args:
-            reason: Brief description of why the message is off-topic
-                (e.g. "user asked for coding help").
+            reason: Why the message is off-topic.
 
         Returns:
-            An internal instruction on how to reply. DO NOT show or read this string to the user.
+            Hidden instruction for the model.
         """
+        logger.info("🔧 Tool call: flag_off_topic (reason: %s)", reason)
         self._off_topic_flagged = True
-        logger.info("🚩 Off-topic flagged: %s", reason)
-
-        result = off_topic_guard.record_off_topic(
-            self._current_user_doc, self._current_user_ref,
-        )
-
-        if result["restricted"]:
-            return (
-                "[HIDDEN INSTRUCTION - DO NOT SHOW TO USER]: "
-                "The user has been restricted due to repeated off-topic "
-                "messages. Let them know their access is temporarily limited."
-            )
-
-        if result["count"] >= 3:
-            remaining = off_topic_guard.THRESHOLD - result["count"]
-            return (
-                f"[HIDDEN INSTRUCTION - DO NOT SHOW TO USER]: "
-                f"This is a travel assistant. Gently redirect the user. "
-                f"IMPORTANT: Warn them that they will be temporarily "
-                f"restricted if they keep sending off-topic messages "
-                f"({remaining} more before restriction). "
-                f"(off-topic count: {result['count']}/{off_topic_guard.THRESHOLD})"
+        
+        if self._current_user_doc and self._current_user_ref:
+            off_topic_guard.record_off_topic(
+                self._current_user_doc, self._current_user_ref
             )
 
         return (
-            f"[HIDDEN INSTRUCTION - DO NOT SHOW TO USER]: "
-            f"This is a travel assistant. Gently redirect the user. "
-            f"(off-topic count: {result['count']}/{off_topic_guard.THRESHOLD})"
+            "[HIDDEN INSTRUCTION - DO NOT SHOW TO USER]: "
+            "This is a travel assistant. Gently redirect the user."
         )
 
     def get_current_time(self) -> str:
@@ -297,51 +283,79 @@ class OrchestratorAgent:
         formatted = now.strftime("%A, %Y-%m-%d %H:%M:%S %Z")
         return f"The current date and time is: {formatted}"
 
+    def check_weather(self, location: str, days: int = 7) -> str:
+        """
+        Retrieves the weather forecast for a given location.
+        
+        Call this when the user asks about the weather, or when you need to 
+        provide weather-aware travel advice (e.g., "What's the weather like in 
+        Bali next week?", "Should I bring a jacket to London tomorrow?").
+        
+        Args:
+            location: The most specific location string possible (e.g. "Kuta, Bali, Indonesia"). If the user only provides a region/island, infer a representative city based on their context (e.g. "Denpasar, Bali, Indonesia"). ALWAYS include Region/Island and Country if known to avoid deep ambiguity.
+            days: The number of days for the forecast (default is 7, max 10).
+            
+        Returns:
+            A formatted weather summary for the requested location.
+        """
+        logger.info(f"🔧 Tool call: check_weather(location={location}, days={days})")
+        
+        # 1. Geocode location
+        coords = WeatherService.get_coordinates(location)
+        if not coords:
+            return f"I'm sorry, I couldn't find the location '{location}'. Could you be more specific?"
+        
+        # 2. Fetch weather
+        weather_data = WeatherService.get_weather(coords["lat"], coords["lng"], days=min(days, 10))
+        if not weather_data:
+            return f"I'm sorry, I'm having trouble fetching the weather for {coords['name']} right now."
+            
+        # 3. Format result
+        full_name = f"{coords['name']}, {coords['country']}" if coords.get("country") else coords["name"]
+        return WeatherService.format_weather_summary(full_name, weather_data)
+
     # ── main entry point ──
 
     def process_request(
-        self, telegram_user_id: str, message_text: str, status_callback: Optional[Callable[[str], None]] = None
+        self,
+        telegram_user_id: str,
+        message_text: str,
+        status_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """
-        Process a user message end-to-end.
-
-        Pipeline:
-        1. Fetch user from Firestore (single query)
-        2. Build context (profile + conversation history)
-        3. Single LLM call with tool functions
-        4. Save conversation exchange
+        Process a user message through the single-call orchestrator.
         """
         t_total = time.time()
+        self._current_user_id = telegram_user_id
+        self._current_status_callback = status_callback
+        self._off_topic_flagged = False
 
-        # 1. Fetch user doc + ref in a single Firestore query
-        t = time.time()
-        user_doc, user_doc_ref = self.user_tool.get_user_with_ref(
-            telegram_user_id
-        )
-        logger.debug("⏱ Firestore fetch: %s", _elapsed(t))
-
+        # 1. Fetch user profile
+        user_doc, user_doc_ref = self.user_tool.get_user_with_ref(telegram_user_id)
         if not user_doc:
+            logger.info("New user detected: %s", telegram_user_id)
             return {
                 "text": (
-                    "Welcome to Agentic Traveler! I don't see a profile "
-                    "for you yet. Please fill out our onboarding form to "
-                    "get started: https://tally.so/r/9qN6p4"
+                    "Welcome! I'm Agentic Traveler, your AI travel companion. 🌍\n\n"
+                    "Since it's our first time meeting, I need to know a bit about "
+                    "your travel style to give you the best advice.\n\n"
+                    "Please take 1 minute to fill out this quick profile:\n"
+                    "https://tally.so/r/w2vDA9"
                 ),
                 "action": "ONBOARDING_REQUIRED",
             }
 
-        # Store request-scoped state for tool functions
         self._current_user_doc = user_doc
         self._current_user_ref = user_doc_ref
-        self._current_user_id = user_doc_ref.id if user_doc_ref else telegram_user_id
-        self._off_topic_flagged = False
-        self._current_conv_context = (
-            self.conversation_manager.build_context_block(user_doc)
-        )
-        self._current_status_callback = status_callback
 
-        # 2. Build the user message (profile + conversation + message)
-        profile_summary = build_profile_summary(user_doc)
+        # 2. Build conversational context
+        t = time.time()
+        self._current_conv_context = self.conversation_manager.build_context_block(
+            user_doc
+        )
+        logger.debug("⏱ Context build: %s", _elapsed(t))
+
+        profile_summary = build_profile_summary(user_doc.get("user_profile", {}))
         user_content = self._build_user_content(
             profile_summary, self._current_conv_context, message_text
         )
@@ -420,9 +434,10 @@ class OrchestratorAgent:
         then the new message — this ordering maximises implicit cache
         hits on the Gemini API.
         """
-        parts = [f"Traveler profile:\n{profile}"]
-        if conversation:
-            parts.append(f"\nConversation so far:\n{conversation}")
+        parts = [
+            f"<user_profile_summary>\n{profile}\n</user_profile_summary>",
+            f"<conversation_history>\n{conversation}\n</conversation_history>",
+        ]
         parts.append(f"\n<user_message>\n{message}\n</user_message>")
         return "\n".join(parts)
 
@@ -468,6 +483,7 @@ class OrchestratorAgent:
                         self.get_companion_help,
                         self.update_preferences,
                         self.get_current_time,
+                        self.check_weather,
                     ],
                 ),
             )
