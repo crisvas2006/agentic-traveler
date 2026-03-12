@@ -52,9 +52,9 @@ def test_accumulates_to_firestore():
     ref.update.assert_called_once()
     call_args = ref.update.call_args[0][0]
     # Model name dots replaced with underscores for Firestore paths
-    assert "usage.gemini-2.5-flash.total_input_tokens" in call_args
-    assert "usage.gemini-2.5-flash.total_output_tokens" in call_args
-    assert "usage.gemini-2.5-flash.call_count" in call_args
+    assert "usage.gemini-2_5-flash.total_input_tokens" in call_args
+    assert "usage.gemini-2_5-flash.total_output_tokens" in call_args
+    assert "usage.gemini-2_5-flash.call_count" in call_args
 
 
 def test_no_accumulation_without_ref():

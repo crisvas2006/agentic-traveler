@@ -400,10 +400,11 @@ class OrchestratorAgent:
         except Exception:
             logger.exception("Orchestrator LLM call failed.")
             name = user_doc.get("user_name", "Traveler")
-            response = (
+            response_text = (
                 f"Sorry {name}, I hit a snag processing your message. "
                 "Please try again in a moment."
             )
+            return {"text": response_text, "action": "RESPONSE"}
         logger.info("⏱ LLM call (total incl. tools): %s", _elapsed(t))
 
         # 4. Reset off-topic counter if this was a travel message

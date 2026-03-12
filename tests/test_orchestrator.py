@@ -125,7 +125,7 @@ def test_tool_functions_are_passed_to_llm(mock_user_tool, patched_deps):
     config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
     assert config is not None
     assert config.tools is not None
-    assert len(config.tools) == 6  # 6 tool functions (incl. get_current_time)
+    assert len(config.tools) == 7  # 7 tool functions
 
 
 def test_no_client_returns_error(mock_user_tool):

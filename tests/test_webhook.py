@@ -154,7 +154,7 @@ def test_non_message_update_accepted(client):
 @patch("agentic_traveler.webhook._user_tool")
 def test_start_with_submission_id(mock_tool, mock_send, client, start_update):
     """/start <submissionId> links the user and sends welcome."""
-    mock_tool.link_telegram_user.return_value = {"user_name": "Alice"}
+    mock_tool.link_telegram_user.return_value = ({"user_name": "Alice"}, True)
 
     resp = client.post(
         "/webhook/test-secret",
@@ -173,7 +173,7 @@ def test_start_with_submission_id(mock_tool, mock_send, client, start_update):
 @patch("agentic_traveler.webhook._user_tool")
 def test_start_unknown_submission(mock_tool, mock_send, client):
     """/start with unknown submissionId → error message."""
-    mock_tool.link_telegram_user.return_value = None
+    mock_tool.link_telegram_user.return_value = (None, False)
 
     update = {
         "update_id": 1,
@@ -191,7 +191,7 @@ def test_start_unknown_submission(mock_tool, mock_send, client):
         headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
     )
     assert resp.status_code == 200
-    assert "couldn't find" in mock_send.call_args[0][1].lower()
+    assert "completed the travel form" in mock_send.call_args[0][1].lower()
 
 
 # ── Regular Message Tests ──
@@ -215,7 +215,8 @@ def test_regular_message(mock_orch, mock_edit, mock_send, client, valid_update):
         headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
     )
     assert resp.status_code == 200
-    mock_orch.process_request.assert_called_once_with("67890", "Hello bot!")
+    from unittest.mock import ANY
+    mock_orch.process_request.assert_called_once_with("67890", "Hello bot!", status_callback=ANY)
     
     # Verify the two-step flow
     mock_send.assert_called_once_with(12345, "⏳ Thinking...")

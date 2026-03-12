@@ -111,22 +111,16 @@ The user\_profile field is the main personalization source for the agents.
 
 *   Telegram is the main interface.
     
-*   A Make scenario connects Telegram to the backend:
+*   The Telegram Bot webhook calls the Cloud Run endpoint directly (/webhook/<secret>).
     
-    *   Receives Telegram webhook updates
-        
-    *   Extracts telegramUserId, chatId, messageText, timestamp
-        
-    *   Sends this payload via HTTP POST to Cloud Run (/telegram-webhook)
-        
-    *   Receives replyText and sends it back to the user
-        
+*   The backend sends replies back to Telegram via the Bot API.
+    
 
-This keeps the backend focused on agent logic and state, while Make handles channel plumbing and basic logging.
+This keeps the backend focused on agent logic and state, with Telegram handling the channel plumbing.
 
 #### 3\. Agentic backend on Cloud Run
 
-*   Service: agentic-traveler-orchestrator (Python + Google ADK)
+*   Service: agentic-traveler-orchestrator (Python + Google GenAI SDK)
     
 *   Data: Firestore as source of truth
     
@@ -183,7 +177,7 @@ Core agents (tool-calling architecture):
     *   Maps known fields into `user_profile`, unknown fields into `learned_extras`
     *   List fields (avoidances, vibes) are merged, not overwritten
 
-The backend is stateless: each request reconstructs context from Firestore and tools, then responds via Make to Telegram.
+The backend is stateless: each request reconstructs context from Firestore and tools, then responds directly to Telegram.
 
 ### The Build
 
@@ -199,7 +193,7 @@ Tools and technologies:
         
 *   **Backend & agents**
     
-    *   Python with Google ADK to define the agent graph
+    *   Python with the Google GenAI SDK (function calling) to define the agent flow
         
     *   Small, specialized agents:
         
@@ -221,11 +215,11 @@ Tools and technologies:
         
     *   Telegram bot as interface
         
-    *   Make as integration layer between Telegram and Cloud Run
+    *   Direct Telegram webhook to Cloud Run (no Make)
         
 *   **Safety and monitoring**
     
-    *   Safety Filter for output sanitization and risk wording
+    *   Safety guidance in prompts and model safety settings
         
     *   Logging of:
         
@@ -513,27 +507,22 @@ Main components:
     
     *   Used by the traveler as main interface.
         
-    *   Forwards user messages to an HTTP endpoint in Cloud Run.
+    *   Sends webhook updates directly to the Cloud Run service.
         
-*   **Make scenario (automation layer)**
-    
-    *   Routes Telegram webhooks to the Cloud Run service and routes responses back.
-        
-    *   Handles simple retry and logging.
-        
+
 *   **Cloud Run service “agentic-traveler-orchestrator”**
     
     *   Stateless HTTP service in Python.
         
-    *   Hosts an ADK based multi agent system.
+    *   Hosts a GenAI SDK-based multi-agent system.
         
-    *   Entry point endpoint: /telegram-webhook receives normalized requests from Make.
+    *   Entry point endpoint: `/webhook/<secret>` receives Telegram updates directly.
         
     *   Uses Firestore as the source of truth for profiles, trips, and events.
         
     *   Uses external tools such as web search, weather, and maps as needed.
         
-    *   Applies a safety filter before sending the response back.
+    *   Applies safety guidance and model safety settings before responding.
 
 
 ##
@@ -634,4 +623,7 @@ $env:_INTEGRATION_TESTS="1"; .\.venv\Scripts\python -m pytest -v
 ## Deployment
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for instructions on deploying to Google Cloud.
+
+
+
 
