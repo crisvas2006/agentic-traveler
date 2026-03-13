@@ -150,9 +150,10 @@ def test_non_message_update_accepted(client):
 
 @patch("agentic_traveler.webhook.SECRET_TOKEN", "test-secret")
 @patch.dict("os.environ", {"SKIP_IP_CHECK": "1"})
+@patch("agentic_traveler.webhook.edit_telegram_message")
 @patch("agentic_traveler.webhook.send_telegram_message")
 @patch("agentic_traveler.webhook._user_tool")
-def test_start_with_submission_id(mock_tool, mock_send, client, start_update):
+def test_start_with_submission_id(mock_tool, mock_send, mock_edit, client, start_update):
     """/start <submissionId> links the user and sends welcome."""
     mock_tool.link_telegram_user.return_value = ({"user_name": "Alice"}, True)
 
@@ -163,8 +164,18 @@ def test_start_with_submission_id(mock_tool, mock_send, client, start_update):
     )
     assert resp.status_code == 200
     mock_tool.link_telegram_user.assert_called_once_with("abc123", "67890")
-    mock_send.assert_called_once()
-    assert "Alice" in mock_send.call_args[0][1]
+    
+    # Check that we sent a placeholder and a greeting
+    assert mock_send.call_count >= 1
+    # Check that Alice is either in the edit or the greeting
+    found_alice = False
+    for call in mock_send.call_args_list:
+        if "Alice" in str(call):
+            found_alice = True
+    for call in mock_edit.call_args_list:
+        if "Alice" in str(call):
+            found_alice = True
+    assert found_alice is True
 
 
 @patch("agentic_traveler.webhook.SECRET_TOKEN", "test-secret")

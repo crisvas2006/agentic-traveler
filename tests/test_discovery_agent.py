@@ -29,7 +29,7 @@ def test_discovery_agent_process_request(mock_client):
     assert "Paris" in response["text"]
 
     # Verify call arguments
-    args,    kwargs = mock_client.models.generate_content.call_args.kwargs
+    kwargs = mock_client.models.generate_content.call_args.kwargs
     assert kwargs['model'] == "gemini-2.5-flash"
-    assert "user profile" in kwargs['contents']
+    assert "Name:" in kwargs['contents']
     assert "expensive" in kwargs['contents']

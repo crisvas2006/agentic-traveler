@@ -27,14 +27,15 @@ def test_companion_agent_process_request(mock_client):
     }
     message = "I'm tired and hungry here"
 
-    response = agent.process_request(user_profile, message)
+    response = agent.process_request(user_profile, message, conversation_context="recent history")
 
     assert response["action"] == "COMPANION_RESULTS"
     assert "Café" in response["text"]
 
-    args, kwargs = mock_client.models.generate_content.call_args.kwargs
+    kwargs = mock_client.models.generate_content.call_args.kwargs
     assert kwargs["model"] == "gemini-2.5-flash"
-    assert "conversation context" in kwargs["contents"]
+    assert "Conversation so far:" in kwargs["contents"]
+    assert "recent history" in kwargs["contents"]
     assert "tired" in kwargs["contents"]
 
 

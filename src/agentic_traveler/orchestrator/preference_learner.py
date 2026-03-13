@@ -55,10 +55,13 @@ class PreferenceLearner:
         value: str,
         user_doc: Dict[str, Any],
         user_doc_ref,
+        _sync: bool = False,
     ) -> None:
         """
         Persist a preference extracted by the orchestrator by asynchronously
         asking the ProfileAgent to update the structured profile schema.
+        
+        Set _sync=True for testing.
         """
         import threading
         
@@ -77,11 +80,22 @@ class PreferenceLearner:
                 
                 # Merge the updated scores, tags, additional_info, and summary back
                 user_doc_ref.set({"user_profile": updated_structured_data}, merge=True)
-                logger.info("Asynchronously updated profile structure with: %s = %s", key, value)
+                
+                # Use a try-except to avoid "I/O operation on closed file" when exiting
+                try:
+                    logger.info("Asynchronously updated profile structure with: %s = %s", key, value)
+                except (ValueError, TypeError):
+                    pass
                 
             except Exception:
-                logger.exception("Failed to asynchronously update user profile structure.")
-                
-        # Fire and forget; doesn't block the LLM response to the user
-        thread = threading.Thread(target=_async_update)
-        thread.start()
+                try:
+                    logger.exception("Failed to asynchronously update user profile structure.")
+                except (ValueError, TypeError):
+                    pass
+        
+        if _sync:
+            _async_update()
+        else:
+            # Fire and forget; doesn't block the LLM response to the user
+            thread = threading.Thread(target=_async_update)
+            thread.start()

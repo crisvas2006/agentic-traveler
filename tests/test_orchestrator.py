@@ -104,7 +104,7 @@ def test_llm_failure_returns_error(mock_user_tool, patched_deps):
     agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
     result = agent.process_request("123", "Plan something")
 
-    assert "snag" in result["text"].lower() or "sorry" in result["text"].lower()
+    assert "traffic" in result["text"].lower() or "sorry" in result["text"].lower()
 
 
 def test_tool_functions_are_passed_to_llm(mock_user_tool, patched_deps):
