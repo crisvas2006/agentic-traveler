@@ -1,49 +1,53 @@
-# Task 20: Internet Search Tool Integration
+# Task 15: Internet Search / Grounding for the Travel Companion
 
-> Add a web search tool for discovery and planning when fresh information is required.
+> **STATUS: COMPLETED**
 
-## 1. Task Overview
-- **Summary:** Implement a `WebSearchTool` that retrieves current information and integrates it into discovery/planning prompts.
-- **Background:** Travel suggestions improve with current data (seasonality, events, closures).
-- **Primary Owner:** User
+## Summary
 
-## 2. Objectives & Success Criteria
-- **Goals:**
-    - Provide a tool that returns concise, reliable web search results.
-    - Use it selectively for time-sensitive or local information.
-- **Definition of Done:**
-    - Discovery/Planner can call web search when needed.
-    - Results are summarized and cited internally for traceability.
+Added Google Search grounding to the three sub-agents (Discovery, Planner, Companion)
+so travel responses are anchored in current, real-world data when relevant.
 
-## 3. System Context
-- **Repositories:** `agentic-traveler`.
-- **Architecture Notes:** Tool should be optional and gated to avoid cost blowups.
-- **Relevant Specs:** `task_05_discovery_agent.md`.
+## What Was Implemented
 
-## 4. Constraints & Requirements
-- **Technical Constraints:** Must use a stable search provider API.
-- **Operational Constraints:** Rate limits and cost control.
+### Approach: Gemini Built-in `google_search` Tool
+The Gemini API's native grounding feature was chosen over third-party search APIs
+because it requires zero extra infrastructure (no API keys, no parsing) and works
+seamlessly within the existing `google-genai` SDK.
 
-## 5. Inputs & Resources
-- **Artifacts:**
-    - Orchestrator tool interface
-- **Assumptions:** Search API key is available.
+### Files Changed
 
-## 6. Implementation Plan
-- **High-Level Steps:**
-    1. Implement a `WebSearchTool` wrapper.
-    2. Add a policy for when to call it (fresh data only).
-    3. Inject summaries into prompts, not raw results.
+| File | Change |
+|---|---|
+| `discovery_agent.py` | Added `google_search` tool + light governor + `_grounding_used` return |
+| `planner_agent.py` | Same as discovery |
+| `companion_agent.py` | Same with a **strict governor** to prevent over-triggering |
+| `usage_tracker.py` | Detects `grounding_metadata`, logs `grounding_used`, returns `grounding_cost_credits` |
+| `credit_manager.py` | Added `GROUNDING_COST_PER_PROMPT_USD`, `calculate_grounding_cost()`, updated `calculate_cost()` |
+| `metrics_tracker.py` | Added `_grounding_calls` counter + `record_grounding_used()` + weekly flush |
+| `agent.py` | Accumulates grounding cost in `_token_records` via synthetic records; updated system prompt |
 
-## 7. Testing & Validation
-- **Test Strategy:** Manual tests on time-sensitive queries.
-- **Acceptance Tests:**
-    - Asking about seasonal events triggers a search.
+## How It Works
 
-## 8. Risk Management
-- **Known Risks:** Hallucinations or over-reliance on stale data.
-- **Mitigations:** Require the tool for unstable info; prompt caution.
+1. Each sub-agent includes `types.Tool(google_search=types.ToolGoogleSearch())` in its config.
+2. The model autonomously decides when to trigger search (only for time-sensitive queries).
+3. Grounding is detected via `response.candidates[0].grounding_metadata.grounding_chunks`.
+4. If grounding fired, a synthetic record `{model_name: "grounding", grounding_cost_credits: N}`
+   is appended to `_token_records` and deducted from the user's credits asynchronously.
+5. The weekly metrics document gains a `grounding_calls` counter.
 
-## 9. Delivery & Handoff
-- **Deliverables:** Search tool, routing rules, updated prompts.
+## Cost Model
 
+- **Rate**: $35 / 1,000 grounded prompts (gemini-2.5-flash)
+- **Credits**: `$0.035 × 0.90 EUR/USD × 100 × 2 markup ≈ 6 credits per grounded call`
+- **Min**: 1 credit per grounded call (guaranteed by `max(grounding_count, credits)`)
+
+## Search Governors (Prompt-Level)
+
+| Agent | Governor strength |
+|---|---|
+| Discovery | Light — triggers for visas, advisories, seasonal conditions, event dates |
+| Planner | Light — same as discovery |
+| Companion | **Strict** — ONLY live opening hours, transport status, today's events, entry requirements |
+
+The Companion's strict governor prevents search from firing on casual in-trip messages
+(mood, food suggestions, cultural context, general advice).
