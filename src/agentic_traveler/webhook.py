@@ -37,6 +37,22 @@ setup_logging(verbose=os.getenv("VERBOSE", "").lower() in ("1", "true"))
 
 logger = logging.getLogger(__name__)
 
+# Suppress the WinError 10038 ("not a socket") OSError that Werkzeug's
+# serve_forever thread throws during hot-reload on Windows.  It fires because
+# the dev-server socket is closed by the reloader while Thread-2 is still
+# mid-select().  The reload completes successfully; the traceback is purely
+# cosmetic.  threading.excepthook (Python 3.8+) lets us intercept it cleanly
+# without touching Werkzeug's internals.
+_orig_thread_excepthook = threading.excepthook
+
+def _thread_excepthook(args: threading.ExceptHookArgs) -> None:
+    winerror = getattr(args.exc_value, "winerror", None)
+    if isinstance(args.exc_value, OSError) and winerror == 10038:
+        return  # silently drop — Werkzeug socket closed during hot-reload
+    _orig_thread_excepthook(args)
+
+threading.excepthook = _thread_excepthook
+
 app = Flask(__name__)
 
 # ── configuration ──
