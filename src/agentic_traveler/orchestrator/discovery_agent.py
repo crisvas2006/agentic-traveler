@@ -99,8 +99,8 @@ You are a friendly, knowledgeable travel advisor chatting with a traveler.
 
 SEARCH GOVERNOR: Only use web search when the question specifically requires
 current, time-sensitive data — e.g. visa requirements, travel advisories,
-entry restrictions, or specific event dates. Do NOT search for general
-destination knowledge, cultural context, or geography.
+entry restrictions, specific event dates, or rough estimates for flight/hotel
+prices. Do NOT search for general destination knowledge, cultural context, or geography.
 
 <user_profile_summary>
 {profile_summary}

@@ -15,6 +15,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 from collections import defaultdict
 from threading import Lock
@@ -85,10 +86,14 @@ def _is_rate_limited(user_id: str) -> bool:
 def handle_sigterm(signum, frame):
     """Graceful shutdown for Cloud Run (SIGTERM)."""
     logger.info("Received SIGTERM. Starting graceful shutdown...")
-    # Flush metrics synchronously before exiting
+    # Flush metrics synchronously before exiting.
+    # os._exit(0) is used instead of sys.exit(0) to terminate immediately
+    # at the OS level without raising SystemExit, which would propagate
+    # through background threads (e.g. Werkzeug's serve_forever) and cause
+    # WinError 10038 / EBADF as those threads try to use now-closed sockets.
     metrics_tracker.flush(sync=True)
     logger.info("Graceful shutdown complete. Exiting.")
-    sys.exit(0)
+    os._exit(0)
 
 
 signal.signal(signal.SIGTERM, handle_sigterm)
@@ -227,12 +232,59 @@ def get_orchestrator() -> OrchestratorAgent:
     return _orchestrator_instance
 
 
+# ── background processing functions ──
+
+def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
+    """Process a regular user message in a background thread."""
+    # Off-topic restriction check (blocks before LLM call to save costs)
+    user_doc = get_user_tool().get_user_by_telegram_id(user_id)
+    if user_doc:
+        restriction_msg = off_topic_guard.is_restricted(user_doc)
+        if restriction_msg:
+            send_telegram_message(chat_id, restriction_msg)
+            return
+
+    # Show inline placeholder while LLM processes
+    placeholder_msg_id = send_telegram_message(chat_id, "⏳ Thinking...")
+
+    def update_status(msg: str):
+        if placeholder_msg_id:
+            edit_telegram_message(chat_id, placeholder_msg_id, msg)
+
+    try:
+        response = get_orchestrator().process_request(user_id, text, status_callback=update_status)
+        logger.info("webhook received from orchestrator: %s", response)
+        reply = response.get("text", "Something went wrong.")
+    except Exception:
+        logger.exception("Orchestrator error for user %s", user_id)
+        reply = "Sorry, I hit an error processing your message. Please try again."
+
+    if placeholder_msg_id:
+        edit_telegram_message(chat_id, placeholder_msg_id, reply)
+        # Send remaining chunks if response was too large to edit
+        if len(reply) > 4000:
+            send_telegram_message(chat_id, reply[4000:])
+    else:
+        # Fallback if placeholder failed to send (this already chunks internally)
+        send_telegram_message(chat_id, reply)
+
+
+def _dispatch(target, *args) -> None:
+    """Spawn a daemon thread for background processing."""
+    t = threading.Thread(target=target, args=args, daemon=True)
+    t.start()
+
+
 # ── webhook endpoint ──
 
 @app.route("/webhook/<secret>", methods=["POST"])
 def telegram_webhook(secret: str):
     """
     Handle incoming Telegram updates.
+
+    Validation (secret, IP, rate limit) is synchronous and fast.
+    All processing is dispatched to a background daemon thread so
+    that Telegram receives a 200 immediately, preventing retries.
 
     URL: POST /webhook/<TELEGRAM_SECRET_TOKEN>
     The <secret> path segment acts as Layer 2 (secret URL path).
@@ -255,9 +307,10 @@ def telegram_webhook(secret: str):
 
     # Parse update payload
     update = request.get_json(silent=True)
-    logger.debug("Webhook received update: %s", update)
     if not update:
         return jsonify({"ok": False}), 400
+
+    logger.debug("Webhook received update: %s", update)
 
     # Layer 5: Payload validation — only handle text messages
     message = update.get("message")
@@ -281,54 +334,17 @@ def telegram_webhook(secret: str):
         )
         return jsonify({"ok": True}), 200
 
-    # ── Handle /start <submissionId> ──
+    # ── Dispatch to background thread & return 200 immediately ──
     if text.startswith("/start"):
-        logger.info("Handling /start command for user %s", user_id)
-        _handle_start(chat_id, user_id, from_user, text)
-        return jsonify({"ok": True}), 200
-
-    # ── Handle /promo <CODE> ──
-    if text.startswith("/promo"):
-        logger.info("Handling /promo command for user %s", user_id)
-        _handle_promo(chat_id, user_id, text)
-        return jsonify({"ok": True}), 200
-
-    # ── Regular message → orchestrator ──
-    logger.info("Processing regular message from user %s: %s", user_id, text[:80])
-
-    # Off-topic restriction check (blocks before LLM call to save costs)
-    user_doc = get_user_tool().get_user_by_telegram_id(user_id)
-    if user_doc:
-        restriction_msg = off_topic_guard.is_restricted(user_doc)
-        if restriction_msg:
-            send_telegram_message(chat_id, restriction_msg)
-            return jsonify({"ok": True}), 200
-
-    # Show inline placeholder while LLM processes
-    placeholder_msg_id = send_telegram_message(chat_id, "⏳ Thinking...")
-
-    def update_status(msg: str):
-        if placeholder_msg_id:
-            edit_telegram_message(chat_id, placeholder_msg_id, msg)
-
-    try:
-        response = get_orchestrator().process_request(user_id, text, status_callback=update_status)
-        logger.info("webhook received from orchestrator: %s", response)
-        reply = response.get("text", "Something went wrong.")
-    except Exception as e:
-        logger.exception("Orchestrator error for user %s: %s", user_id, str(e))
-        reply = "Sorry, I hit an error processing your message. Please try again."
-
-    if placeholder_msg_id:
-        edit_telegram_message(chat_id, placeholder_msg_id, reply)
-        # Send remaining chunks if response was too large to edit
-        if len(reply) > 4000:
-            remaining_reply = reply[4000:]
-            send_telegram_message(chat_id, remaining_reply)
+        logger.info("Dispatching /start for user %s", user_id)
+        _dispatch(_handle_start, chat_id, user_id, from_user, text)
+    elif text.startswith("/promo"):
+        logger.info("Dispatching /promo for user %s", user_id)
+        _dispatch(_handle_promo, chat_id, user_id, text)
     else:
-        # Fallback if placeholder failed to send (this already chunks internally)
-        send_telegram_message(chat_id, reply)
-        
+        logger.info("Dispatching message for user %s: %s", user_id, text[:80])
+        _dispatch(_process_message_bg, chat_id, user_id, text)
+
     return jsonify({"ok": True}), 200
 
 

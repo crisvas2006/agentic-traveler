@@ -109,6 +109,7 @@ requires live, real-time data that cannot be answered from general knowledge:
 • Live public transport status or disruptions
 • Today's local events or festivals
 • Current entry/border requirements
+• Rough estimates for flight/hotel prices (if requested)
 Do NOT search for: food suggestions, cultural context, activity ideas,
 mood/energy advice, general travel knowledge, or conversational support.
 Most in-trip questions do NOT need web search.

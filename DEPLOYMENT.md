@@ -57,10 +57,16 @@ gcloud run deploy agentic-traveler \
   --allow-unauthenticated \
   --max-instances 1 \
   --concurrency 10 \
+  --no-cpu-throttling \
   --set-env-vars "TELEGRAM_BOT_TOKEN=your-bot-token,TELEGRAM_SECRET_TOKEN=your-secret,GOOGLE_API_KEY=your-api-key,GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=europe-west1" \
   --memory 512Mi \
   --timeout 60
 ```
+
+> **Note on `--no-cpu-throttling`:** Required for background thread processing. Without it, Cloud Run throttles CPU to near-zero after the HTTP `200` is returned, stalling the background thread before it completes the LLM call and Telegram reply.
+> This does **not** mean "always-on" billing — the instance still scales to zero when idle. CPU is simply kept active until all background threads finish.
+
+
 
 > **Note:** `--allow-unauthenticated` is required because Telegram can't use Google IAM.
 > All authentication happens at the application level (secret token + IP whitelist).
@@ -100,7 +106,7 @@ $env:SKIP_IP_CHECK="1"
 ngrok http 8080
 ```
 
-Copy the `https://xxx.ngrok-free.app` URL.
+Copy the `https://xxx.ngrok-free.dev` URL.
 
 ### 3. Register webhook with ngrok
 
