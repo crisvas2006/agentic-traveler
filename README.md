@@ -73,13 +73,13 @@ High level, the system has three layers.
 
 #### 1\. Personalization intake
 
-A Tally form, “Know Thy Damn Self (for Travel),” collects a deep but structured profile:
+A Tally form, “The Odyssey Onboarding” collects a deep but structured profile:
 
-*   Context: age band, home base, budget style
+*   Context: home base, budget style
     
 *   Lifestyle & energy: daily rhythm, physical activity, typical tempo
     
-*   Travel style: preferred trip vibes (nature, culture, spiritual, party, etc), structure preference, solo comfort
+*   Travel style: preferred trip vibes (nature, culture, party, etc), structure preference, solo comfort
     
 *   Personality & values: spontaneous vs reflective, social vs independent, motivations to travel, risk tolerance, spiritual interest
     
@@ -130,54 +130,80 @@ This keeps the backend focused on agent logic and state, with Telegram handling 
         
     *   events: suggestion and feedback logs for lightweight learning
         
-
 Core agents (tool-calling architecture):
 
 1.  **Orchestrator Agent** (single entry point)
 
-    *   Receives every Telegram message
-    *   Loads user from Firestore (single query for doc + ref)
-    *   If no profile, directs user to complete the Tally form
-    *   **Decides intent itself** — no separate classifier
+    *   Receives every Telegram message.
+    *   Loads user context from Firestore.
+    *   If no profile, directs user to complete the Tally form.
+    *   **Decides intent itself** — no separate classifier.
     *   Routes to specialized agents via **GenAI automatic function calling**:
-        *   `discover_destinations()` — calls the Discovery Agent
-        *   `plan_itinerary()` — calls the Planner Agent
-        *   `get_companion_help()` — calls the Companion Agent
-        *   `update_preferences()` — persists learned preferences to Firestore
-    *   For simple chat — responds directly (no tool call, fastest path)
-    *   **Safety approach**: warns about risks with ⚠️ but never blocks — respects user autonomy
+        *   `discover_destinations()` — calls the Discovery Agent.
+        *   `plan_itinerary()` — calls the Planner Agent.
+        *   `get_companion_help()` — calls the Companion Agent.
+        *   `update_preferences()` — persists learned preferences to Firestore.
+    *   Ensures conversation remains on-topic via the **Off-topic Guard**.
+    *   **Safety approach**: warns about risks with ⚠️ but never blocks — respects user autonomy.
 
-2.  **Discovery Agent** (tool function)
+2.  **Profile Agent**
 
-    *   Input: enriched profile + trip constraints from chat
-    *   Produces 3–5 destination candidates with fit explanation, budget band, and travel effort
-    *   Temperature: 0.7 (creative)
+    *   Converts raw Tally form responses into a structured "Traveler DNA" profile.
+    *   Generates a personalized, persona-driven greeting upon first interaction.
+    *   Organizes data into dimensions: spontaneity, energy, risk tolerance, etc.
 
-3.  **Planner Agent** (tool function)
+3.  **Discovery Agent** (tool function)
 
-    *   Creates flexible day-by-day itineraries tailored to the user's style
-    *   Includes morning/afternoon/evening suggestions with low-energy alternatives
-    *   Temperature: 0.7 (creative)
+    *   Input: enriched profile + trip constraints from chat.
+    *   Produces 3–5 destination candidates with fit explanation, budget band, and travel effort.
+    *   Temperature: 0.7 (creative).
 
-4.  **Companion Agent** (tool function)
+4.  **Planner Agent** (tool function)
 
-    *   In-trip assistance — adapts suggestions to mood, energy, weather, time of day
-    *   Returns 2–3 actionable options with practical details
-    *   Temperature: 0.8 (conversational)
+    *   Creates flexible day-by-day itineraries tailored to the user's style.
+    *   Includes morning/afternoon/evening suggestions with low-energy alternatives.
 
-5.  **Conversation Manager**
+5.  **Companion Agent** (tool function)
 
-    *   Stores recent messages + compacted summary in Firestore
-    *   Compacts via LLM when buffer exceeds 10 entries
-    *   Provides conversation context to all agent prompts
+    *   In-trip assistance — adapts suggestions to mood, energy, weather, and time of day.
+    *   Uses **Real-time Weather Tool** to synthesize actionable recommendations.
+    *   Returns 2–3 options with practical details (e.g., "Museum for a rainy afternoon").
 
-6.  **Preference Learner** (tool function)
+6.  **Conversation Manager**
 
-    *   Persists preferences extracted by the orchestrator
-    *   Maps known fields into `user_profile`, unknown fields into `learned_extras`
-    *   List fields (avoidances, vibes) are merged, not overwritten
+    *   Stores recent messages + compacted summary in Firestore.
+    *   Compacts via LLM when buffer exceeds 10 entries to stay within context limits.
+
+7.  **Preference Learner** (tool function)
+
+    *   Extracts signals from ongoing chat to update the long-term profile.
+    *   Maps known fields into `user_profile` and unknown fields into `learned_extras`.
+
+8.  **Off-topic Guard**
+
+    *   Monitors consecutive off-topic messages.
+    *   Implements a cooling-off restriction if the user repeatedly drifts from travel topics.
+    *   State is persisted in Firestore to survive container restarts.
 
 The backend is stateless: each request reconstructs context from Firestore and tools, then responds directly to Telegram.
+
+### Security & Safety
+
+The system implements defense-in-depth for the Telegram webhook:
+1.  **Secret URL Path**: Webhook receives updates at `/webhook/<secret_token>`.
+2.  **Secret Token Validation**: Verifies the `X-Telegram-Bot-Api-Secret-Token` header.
+3.  **IP Whitelisting**: Only accepts requests from official Telegram CIDR ranges.
+4.  **Rate Limiting**: Per-user in-memory limits (10 messages/min, 60/hour).
+5.  **Payload Validation**: Ensures only valid text messages are processed.
+6.  **Infrastructure Limits**: Cloud Run configured with max-instances and concurrency limits to prevent cost spikes or DDoS.
+
+### Analytics & Observability
+
+The orchestrator includes a custom metrics system designed for Cloud Run:
+*   **In-Memory Buffering**: Captures interactions and token usage without blocking requests.
+*   **Threshold-based Flush**: Weekly metrics are written to Firestore (analytics collection) every 50 events or on process shutdown.
+*   **Deduplicated Tracking**: Monitors active users per ISO week.
+*   **Token Accounting**: Tracks input/output tokens per model and per agent call.
 
 ### The Build
 
@@ -535,8 +561,13 @@ isort .
 
 ## Features
 
-- **AI Travel Agent**: Generates unique travel ideas based on your budget, climate, activity preferences, and duration.
-- **Interactive CLI**: Chat with the agent locally, impersonating an existing Firestore user.
+- **AI-Powered Travel Personalization**: Uses a deep onboarding questionnaire (Tally) and localized mapping to create a unique "Traveler DNA".
+- **Multi-Agent Orchestration**: Specialised agents for Discovery, Planning, and in-trip Companionship.
+- **Real-time Context Awareness**: Weather-aware suggestions and adaptive itineraries based on current mood and energy.
+- **Safety & Moderation**: Integrated off-topic guard and multi-layer webhook security.
+- **Usage & Metrics Tracking**: Weekly analytics flush to Firestore covering interactions, active users, and token costs.
+- **Interactive CLI & Webhook**: Support for both local development (CLI) and production Telegram bot interactions.
+- **Feedback Loop**: Integrated tool for capturing user sentiment to refine future suggestions.
 
 ## Setup
 
