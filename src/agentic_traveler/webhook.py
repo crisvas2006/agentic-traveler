@@ -13,6 +13,8 @@ Security layers (defense-in-depth):
 import ipaddress
 import logging
 import os
+import signal
+import sys
 import time
 from collections import defaultdict
 from threading import Lock
@@ -21,7 +23,9 @@ import requests as http_requests
 from dotenv import load_dotenv
 from flask import Flask, Request, jsonify, request
 
+from agentic_traveler import credit_manager
 from agentic_traveler import off_topic_guard
+from agentic_traveler import metrics_tracker
 from agentic_traveler.logging_config import setup_logging
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
 from agentic_traveler.sanitize import sanitize_user_input
@@ -38,6 +42,7 @@ app = Flask(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 SECRET_TOKEN = os.getenv("TELEGRAM_SECRET_TOKEN", "")
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 # Telegram webhook IP ranges (may change — check @BotNews)
@@ -73,6 +78,20 @@ def _is_rate_limited(user_id: str) -> bool:
 
         timestamps.append(now)
         return False
+
+
+# ── Graceful Shutdown ──
+
+def handle_sigterm(signum, frame):
+    """Graceful shutdown for Cloud Run (SIGTERM)."""
+    logger.info("Received SIGTERM. Starting graceful shutdown...")
+    # Flush metrics synchronously before exiting
+    metrics_tracker.flush(sync=True)
+    logger.info("Graceful shutdown complete. Exiting.")
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, handle_sigterm)
 
 
 # ── IP whitelist ──
@@ -186,10 +205,26 @@ def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> Non
 
 
 
-# ── globals (initialized once per container) ──
+# ── lazy-loaded globals (initialized on first request) ──
 
-_user_tool = FirestoreUserTool()
-_orchestrator = OrchestratorAgent(firestore_user_tool=_user_tool)
+_user_tool_instance = None
+_orchestrator_instance = None
+
+
+def get_user_tool() -> FirestoreUserTool:
+    global _user_tool_instance
+    if _user_tool_instance is None:
+        logger.info("Initializing lazy FirestoreUserTool...")
+        _user_tool_instance = FirestoreUserTool()
+    return _user_tool_instance
+
+
+def get_orchestrator() -> OrchestratorAgent:
+    global _orchestrator_instance
+    if _orchestrator_instance is None:
+        logger.info("Initializing lazy OrchestratorAgent...")
+        _orchestrator_instance = OrchestratorAgent(firestore_user_tool=get_user_tool())
+    return _orchestrator_instance
 
 
 # ── webhook endpoint ──
@@ -220,6 +255,7 @@ def telegram_webhook(secret: str):
 
     # Parse update payload
     update = request.get_json(silent=True)
+    logger.debug("Webhook received update: %s", update)
     if not update:
         return jsonify({"ok": False}), 400
 
@@ -247,14 +283,21 @@ def telegram_webhook(secret: str):
 
     # ── Handle /start <submissionId> ──
     if text.startswith("/start"):
+        logger.info("Handling /start command for user %s", user_id)
         _handle_start(chat_id, user_id, from_user, text)
         return jsonify({"ok": True}), 200
 
+    # ── Handle /promo <CODE> ──
+    if text.startswith("/promo"):
+        logger.info("Handling /promo command for user %s", user_id)
+        _handle_promo(chat_id, user_id, text)
+        return jsonify({"ok": True}), 200
+
     # ── Regular message → orchestrator ──
-    logger.info("Message from user %s: %s", user_id, text[:80])
+    logger.info("Processing regular message from user %s: %s", user_id, text[:80])
 
     # Off-topic restriction check (blocks before LLM call to save costs)
-    user_doc = _user_tool.get_user_by_telegram_id(user_id)
+    user_doc = get_user_tool().get_user_by_telegram_id(user_id)
     if user_doc:
         restriction_msg = off_topic_guard.is_restricted(user_doc)
         if restriction_msg:
@@ -269,7 +312,7 @@ def telegram_webhook(secret: str):
             edit_telegram_message(chat_id, placeholder_msg_id, msg)
 
     try:
-        response = _orchestrator.process_request(user_id, text, status_callback=update_status)
+        response = get_orchestrator().process_request(user_id, text, status_callback=update_status)
         logger.info("webhook received from orchestrator: %s", response)
         reply = response.get("text", "Something went wrong.")
     except Exception as e:
@@ -304,8 +347,9 @@ def _handle_start(
         )
         return
 
+    logger.debug("Submission ID: %s, User ID: %s", submission_id, user_id)
     # Try to link Telegram user to Firestore profile
-    user_doc, is_update = _user_tool.link_telegram_user(submission_id, user_id)
+    user_doc, is_update = get_user_tool().link_telegram_user(submission_id, user_id)
     if user_doc:
         name = user_doc.get("name", user_doc.get("user_name", "Traveler"))
         
@@ -328,7 +372,7 @@ def _handle_start(
             greeting = structured_data.pop("greeting", None)
             
             # Save the new structured keys
-            _user_tool.update_user_fields(user_id, {
+            get_user_tool().update_user_fields(user_id, {
                 "user_profile": structured_data
             })
             
@@ -350,7 +394,16 @@ def _handle_start(
 
             # 2. Send the personalized greeting as a brand new separate message
             send_telegram_message(chat_id, f"_{greeting}_\n\n{examples}")
-        
+
+            # Record new-user metric (app-level, fire-and-forget)
+            metrics_tracker.record_interaction(user_id=user_id, is_new_user=not is_update)
+
+            # Initialize credits for new users
+            if not is_update:
+                user_ref = get_user_tool().get_user_ref_by_telegram_id(user_id)
+                if user_ref:
+                    credit_manager.initialize_credits(user_ref)
+
         except Exception:
             logger.exception("Failed to build initial profile.")
             if placeholder_msg_id:
@@ -366,12 +419,86 @@ def _handle_start(
         )
 
 
+def _handle_promo(chat_id: int, user_id: str, text: str) -> int:
+    """Handle /promo <CODE> command — redeem a promo code via Telegram.
+
+    Returns:
+        Number of credits added (0 on failure).
+    """
+    parts = text.split(maxsplit=1)
+    code = parts[1].strip() if len(parts) > 1 else ""
+
+    if not code:
+        send_telegram_message(
+            chat_id,
+            "🎫 To redeem a promo code, send:\n/promo YOUR_CODE",
+        )
+        return 0
+
+    user_doc, user_ref = get_user_tool().get_user_with_ref(user_id)
+    if not user_doc or not user_ref:
+        send_telegram_message(
+            chat_id,
+            "❌ You need to complete your travel profile first before using a promo code.",
+        )
+        return 0
+
+    success, message, credits_added = credit_manager.redeem_promo(user_doc, user_ref, code)
+    send_telegram_message(chat_id, message)
+    return credits_added
+
+
 # ── health check ──
 
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint for Cloud Run."""
     return jsonify({"status": "ok"}), 200
+
+
+# ── admin endpoints ──
+
+@app.route("/admin/add-credits", methods=["POST"])
+def admin_add_credits():
+    """Add credits to a user. Requires X-Admin-Key header."""
+    if not ADMIN_API_KEY:
+        return jsonify({"ok": False, "error": "Admin API not configured"}), 500
+
+    if request.headers.get("X-Admin-Key") != ADMIN_API_KEY:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 403
+
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id", ""))
+    amount = int(data.get("amount", 0))
+
+    if not user_id or amount <= 0:
+        return jsonify({"ok": False, "error": "user_id and positive amount required"}), 400
+
+    user_ref = get_user_tool().get_user_ref_by_telegram_id(user_id)
+    if not user_ref:
+        return jsonify({"ok": False, "error": f"User {user_id} not found"}), 404
+
+    credit_manager.add_credits(user_ref, amount)
+    return jsonify({"ok": True, "added": amount, "user_id": user_id}), 200
+
+
+@app.route("/promo/redeem", methods=["POST"])
+def promo_redeem():
+    """Redeem a promo code via HTTP. No special auth required."""
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id", ""))
+    code = str(data.get("code", "")).strip()
+
+    if not user_id or not code:
+        return jsonify({"ok": False, "error": "user_id and code required"}), 400
+
+    user_doc, user_ref = get_user_tool().get_user_with_ref(user_id)
+    if not user_doc or not user_ref:
+        return jsonify({"ok": False, "error": f"User {user_id} not found"}), 404
+
+    success, message, credits_added = credit_manager.redeem_promo(user_doc, user_ref, code)
+    status = 200 if success else 400
+    return jsonify({"ok": success, "message": message, "credits_added": credits_added}), status
 
 
 # ── local dev server ──

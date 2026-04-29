@@ -50,6 +50,10 @@ class PlannerAgent:
                 config=types.GenerateContentConfig(
                     temperature=0.7,
                     max_output_tokens=4500,
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        maximum_remote_calls=3
+                    ),
                     safety_settings=[
                         types.SafetySetting(
                             category=c,
@@ -63,11 +67,13 @@ class PlannerAgent:
                     ]
                 )
             )
+            grounding_used = _has_grounding(response)
             return {
                 "text": response.text,
                 "action": "PLANNER_RESULTS",
                 "_raw_response": response,
                 "_latency_ms": (time.time() - t) * 1000,
+                "_grounding_used": grounding_used,
             }
         except Exception as e:
             logger.exception("Planner agent LLM call failed.")
@@ -86,17 +92,23 @@ class PlannerAgent:
 
         context_block = ""
         if conversation_context:
-            context_block = f"\nConversation so far:\n{conversation_context}\n"
+            context_block = f"\n<conversation_history>\n{conversation_context}\n</conversation_history>\n"
 
         return f"""\
 You are a friendly, expert travel planner chatting with a traveler.
 
+SEARCH GOVERNOR: Only use web search when the itinerary requires current,
+time-sensitive data — e.g. entry requirements, travel advisories, seasonal
+floods/closures, public holiday dates, or specific event schedules. Do NOT
+search for general destination knowledge, geography, or cultural context.
+
+<user_profile_summary>
+{profile_summary}
+</user_profile_summary>
+{context_block}
 <user_message>
 {message_text}
 </user_message>
-{context_block}
-Their profile:
-{profile_summary}
 
 Create a flexible day-by-day itinerary tailored to this person's style and
 energy level.  For each day include:
@@ -104,6 +116,7 @@ energy level.  For each day include:
 • One low-energy alternative per day
 Use conversation history for context (destination, dates, preferences).
 - WEATHER: If weather data is provided in the <user_message>, adapt the itinerary accordingly (e.g., suggest indoor museums if rain is forecast). Mention the weather naturally as a reason for your choices (e.g. "since it looks cloudy on Tuesday..."), but do NOT dump a daily weather breakdown in the itinerary unless asked.
+- SOURCES: If you searched the web, briefly cite the source for any time-sensitive fact.
 
 Formatting (Telegram):
 - OBEY THE LENGTH/FORMATTING INSTRUCTION IN THE <user_message>. If it asks for a short summary, provide that. If it asks for a deep dive itinerary, provide full details.
@@ -115,3 +128,15 @@ Formatting (Telegram):
 - Tone: practical and warm, like a friend who knows the place well.
 - End with a brief "Want me to adjust anything?" to invite follow-up.
 """
+
+
+def _has_grounding(response: Any) -> bool:
+    """Return True if Google Search grounding was used in the response."""
+    try:
+        for candidate in (getattr(response, "candidates", None) or []):
+            meta = getattr(candidate, "grounding_metadata", None)
+            if meta and getattr(meta, "grounding_chunks", None):
+                return True
+    except Exception:
+        pass
+    return False

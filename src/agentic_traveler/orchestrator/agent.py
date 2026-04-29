@@ -25,14 +25,17 @@ from google.genai import types
 
 from agentic_traveler.orchestrator.client_factory import get_client
 
+from agentic_traveler import credit_manager
 from agentic_traveler import off_topic_guard
 from agentic_traveler import usage_tracker
+from agentic_traveler import metrics_tracker
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
 from agentic_traveler.orchestrator.discovery_agent import DiscoveryAgent
 from agentic_traveler.orchestrator.planner_agent import PlannerAgent
 from agentic_traveler.orchestrator.companion_agent import CompanionAgent
 from agentic_traveler.orchestrator.preference_learner import PreferenceLearner
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
+from agentic_traveler.tools.feedback_tool import FeedbackTool
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
 from agentic_traveler.tools.weather import WeatherService
 
@@ -76,6 +79,7 @@ ROUTING & BEHAVIOR RULES:
 10. DYNAMIC LENGTH: When passing the `request` string to a sub-agent tool, ALWAYS append instructions on how long and detailed the response should be based on the conversational context. (e.g., "Keep it to a playful 2-sentence conversational reply" vs "Give a full, deep-dive itinerary").
 11. WEATHER AWARENESS: If weather information is relevant to the user request (e.g., planning outdoor activities, deciding on a destination), call `check_weather` first and append the raw data results to the `request` string you pass to `discover_destinations` or `plan_itinerary`. 
 12. NATURAL PRESENTATION: When presenting weather info to the user (either directly or as part of a suggestion), NEVER just dump the raw list of daily weather. Instead, extract the "vibe" and key highlights (e.g., "It will be quite chilly, below 10°C, so bring a jacket"). Only provide a detailed daily breakdown if the user specifically asks for it.
+13. WEB SEARCH: Sub-agents (discover_destinations, plan_itinerary, get_companion_help) can search the web for time-sensitive facts such as visa requirements, travel advisories, current entry rules, and event dates. Trust and pass through any web-sourced facts they return, including their source citations.
 
 SAFETY APPROACH:
 - NEVER refuse an activity the user wants to do.
@@ -112,6 +116,7 @@ class OrchestratorAgent:
         self.companion = CompanionAgent(client=self._client)
         self.conversation_manager = ConversationManager(client=self._client)
         self.preference_learner = PreferenceLearner()
+        self.feedback_tool = FeedbackTool()
 
         # State used during a single request (set in process_request)
         self._current_user_doc: Dict[str, Any] = {}
@@ -121,6 +126,8 @@ class OrchestratorAgent:
         self._off_topic_flagged: bool = False
         self._model_name = "gemini-2.5-flash"
         self._current_status_callback: Optional[Callable[[str], None]] = None
+        # Token records accumulated during the current request (for credit calc)
+        self._token_records: list[Dict[str, Any]] = []
 
     # ── tool functions (called by the LLM via automatic function calling) ──
 
@@ -132,7 +139,7 @@ class OrchestratorAgent:
             sub_model = getattr(raw, "_model_name", None)
             # Sub-agents use their own model_name; fall back to "unknown"
             model = sub_model or self._model_name
-            usage_tracker.log_and_accumulate(
+            usage_info = usage_tracker.log_and_accumulate(
                 agent_name=agent_name,
                 model_name=model,
                 user_id=self._current_user_id,
@@ -140,6 +147,19 @@ class OrchestratorAgent:
                 latency_ms=latency,
                 user_doc_ref=self._current_user_ref,
             )
+            # Accumulate token cost for credit deduction
+            if usage_info.get("total_tokens", 0) > 0:
+                self._token_records.append(usage_info)
+            # Accumulate grounding cost separately (flat per-prompt charge)
+            grounding_credits = usage_info.get("grounding_cost_credits", 0)
+            if grounding_credits > 0:
+                self._token_records.append({
+                    "model_name": "grounding",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "grounding_cost_credits": grounding_credits,
+                })
 
     def discover_destinations(self, request: str) -> str:
         """
@@ -266,6 +286,36 @@ class OrchestratorAgent:
             "This is a travel assistant. Gently redirect the user."
         )
 
+    def record_feedback(self, category: str, text: str) -> str:
+        """
+        Record a user feedback signal to the analytics backend.
+
+        Call this whenever the user expresses any signal about their experience
+        — positive, negative, confusion, a retry request, a feature suggestion,
+        or any other implicit signal that reveals how well the system is serving
+        them.  This runs asynchronously and will NOT delay your reply.
+
+        Args:
+            category: One of: positive, negative, confusion, retry,
+                      suggestion, other.
+            text:     The user's message or the feedback as expressed.
+
+        Returns:
+            Hidden instruction for the model to still reply to the user.
+        """
+        logger.info("🔧 Tool call: record_feedback(category=%s)", category)
+        self.feedback_tool.record(
+            user_id=self._current_user_id,
+            text=text,
+            category=category,
+            user_doc=self._current_user_doc,
+            _sync=False,  # always async — never block the response
+        )
+        return (
+            "[HIDDEN — DO NOT SHOW TO USER] "
+            "Feedback recorded. Now respond naturally to the user's message."
+        )
+
     def get_current_time(self) -> str:
         """
         Retrieves the current date and time in ISO format.
@@ -329,6 +379,7 @@ class OrchestratorAgent:
         self._current_user_id = telegram_user_id
         self._current_status_callback = status_callback
         self._off_topic_flagged = False
+        self._token_records = []
 
         # 1. Fetch user profile
         user_doc, user_doc_ref = self.user_tool.get_user_with_ref(telegram_user_id)
@@ -347,6 +398,14 @@ class OrchestratorAgent:
 
         self._current_user_doc = user_doc
         self._current_user_ref = user_doc_ref
+
+        # 1b. Credit gate — block before any LLM call if credits exhausted
+        if not credit_manager.has_credits(user_doc):
+            logger.info("User %s has no credits. Blocking request.", telegram_user_id)
+            return {
+                "text": credit_manager.CREDITS_EXHAUSTED_MSG,
+                "action": "NO_CREDITS",
+            }
 
         # 2. Build conversational context
         t = time.time()
@@ -386,7 +445,7 @@ class OrchestratorAgent:
                 response = fr_msg
             # Log token usage
             if hasattr(raw_response, 'usage_metadata'):
-                usage_tracker.log_and_accumulate(
+                orch_usage = usage_tracker.log_and_accumulate(
                     agent_name="orchestrator",
                     model_name=self._model_name,
                     user_id=telegram_user_id,
@@ -394,6 +453,8 @@ class OrchestratorAgent:
                     latency_ms=(time.time() - t) * 1000,
                     user_doc_ref=user_doc_ref,
                 )
+                if orch_usage.get("total_tokens", 0) > 0:
+                    self._token_records.append(orch_usage)
             
             # Save raw response as string for logging/debugging if needed
             self._last_raw_response = str(raw_response)
@@ -421,6 +482,19 @@ class OrchestratorAgent:
 
         logger.info("\n=== ORCHESTRATOR FINAL OUTPUT ===\n%s\n=================================", response)
         logger.info("⏱ TOTAL: %s", _elapsed(t_total))
+
+        # 6. Record interaction metric (app-level, never exposed to LLM)
+        metrics_tracker.record_interaction(
+            user_id=telegram_user_id,
+            is_new_user=False,
+        )
+
+        # 7. Deduct credits asynchronously (never blocks the response)
+        if self._token_records and user_doc_ref:
+            cost = credit_manager.calculate_cost(self._token_records)
+            if cost > 0:
+                credit_manager.deduct_credits_async(user_doc_ref, cost)
+
         return {"text": response, "action": "RESPONSE"}
 
     # ── private helpers ──
@@ -442,54 +516,52 @@ class OrchestratorAgent:
         parts.append(f"\n<user_message>\n{message}\n</user_message>")
         return "\n".join(parts)
 
-    def _call_llm(self, user_content: str) -> str:
+    def _call_llm(self, user_content: str):
         """
         Make the LLM call with automatic function calling enabled.
+
+        Returns the raw GenerateContentResponse so the caller can inspect
+        candidates, finish_reason, and usage_metadata.
 
         The SDK will:
         1. Send the prompt to the model
         2. If the model returns a function_call, execute the tool
         3. Feed the tool result back to the model
-        4. Return the model's final text response
+        4. Return the model's final response
         """
         if not self._client:
-            return "LLM features are unavailable (missing API key)."
+            raise RuntimeError("LLM features are unavailable (missing API key).")
 
-        try:
-            raw_response = self._client.models.generate_content(
-                model=self._model_name,
-                contents=user_content,
-                config=types.GenerateContentConfig(
-                    system_instruction=_SYSTEM_PROMPT,
-                    temperature=0.8,
-                    max_output_tokens=8192,
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=3
-                    ),
-                    safety_settings=[
-                        types.SafetySetting(
-                            category=c,
-                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        ) for c in [
-                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        ]
-                    ],
-                    tools=[
-                        self.discover_destinations,
-                        self.plan_itinerary,
-                        self.flag_off_topic,
-                        self.get_companion_help,
-                        self.update_preferences,
-                        self.get_current_time,
-                        self.check_weather,
-                    ],
+        return self._client.models.generate_content(
+            model=self._model_name,
+            contents=user_content,
+            config=types.GenerateContentConfig(
+                system_instruction=_SYSTEM_PROMPT,
+                temperature=0.8,
+                max_output_tokens=8192,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    maximum_remote_calls=3
                 ),
-            )
-            response = raw_response.text if hasattr(raw_response, 'text') else raw_response
-            return response
-        except Exception as e:
-            logger.exception("LLM generation failed in _call_llm.")
-            return "I am experiencing heavy traffic and couldn't process this right now. Please wait a moment and try again."
+                safety_settings=[
+                    types.SafetySetting(
+                        category=c,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    ) for c in [
+                        types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    ]
+                ],
+                tools=[
+                    self.discover_destinations,
+                    self.plan_itinerary,
+                    self.flag_off_topic,
+                    self.get_companion_help,
+                    self.update_preferences,
+                    self.get_current_time,
+                    self.check_weather,
+                    self.record_feedback,
+                ],
+            ),
+        )

@@ -152,10 +152,10 @@ def test_non_message_update_accepted(client):
 @patch.dict("os.environ", {"SKIP_IP_CHECK": "1"})
 @patch("agentic_traveler.webhook.edit_telegram_message")
 @patch("agentic_traveler.webhook.send_telegram_message")
-@patch("agentic_traveler.webhook._user_tool")
+@patch("agentic_traveler.webhook.get_user_tool")
 def test_start_with_submission_id(mock_tool, mock_send, mock_edit, client, start_update):
     """/start <submissionId> links the user and sends welcome."""
-    mock_tool.link_telegram_user.return_value = ({"user_name": "Alice"}, True)
+    mock_tool.return_value.link_telegram_user.return_value = ({"user_name": "Alice"}, True)
 
     resp = client.post(
         "/webhook/test-secret",
@@ -163,7 +163,7 @@ def test_start_with_submission_id(mock_tool, mock_send, mock_edit, client, start
         headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
     )
     assert resp.status_code == 200
-    mock_tool.link_telegram_user.assert_called_once_with("abc123", "67890")
+    mock_tool.return_value.link_telegram_user.assert_called_once_with("abc123", "67890")
     
     # Check that we sent a placeholder and a greeting
     assert mock_send.call_count >= 1
@@ -181,10 +181,10 @@ def test_start_with_submission_id(mock_tool, mock_send, mock_edit, client, start
 @patch("agentic_traveler.webhook.SECRET_TOKEN", "test-secret")
 @patch.dict("os.environ", {"SKIP_IP_CHECK": "1"})
 @patch("agentic_traveler.webhook.send_telegram_message")
-@patch("agentic_traveler.webhook._user_tool")
+@patch("agentic_traveler.webhook.get_user_tool")
 def test_start_unknown_submission(mock_tool, mock_send, client):
     """/start with unknown submissionId → error message."""
-    mock_tool.link_telegram_user.return_value = (None, False)
+    mock_tool.return_value.link_telegram_user.return_value = (None, False)
 
     update = {
         "update_id": 1,
@@ -212,10 +212,10 @@ def test_start_unknown_submission(mock_tool, mock_send, client):
 @patch.dict("os.environ", {"SKIP_IP_CHECK": "1"})
 @patch("agentic_traveler.webhook.send_telegram_message")
 @patch("agentic_traveler.webhook.edit_telegram_message")
-@patch("agentic_traveler.webhook._orchestrator")
+@patch("agentic_traveler.webhook.get_orchestrator")
 def test_regular_message(mock_orch, mock_edit, mock_send, client, valid_update):
     """Regular message → orchestrator → reply."""
-    mock_orch.process_request.return_value = {"text": "Hello Alice!"}
+    mock_orch.return_value.process_request.return_value = {"text": "Hello Alice!"}
 
     # mock_send returns a dummy message_id for the placeholder
     mock_send.return_value = 42
@@ -227,7 +227,7 @@ def test_regular_message(mock_orch, mock_edit, mock_send, client, valid_update):
     )
     assert resp.status_code == 200
     from unittest.mock import ANY
-    mock_orch.process_request.assert_called_once_with("67890", "Hello bot!", status_callback=ANY)
+    mock_orch.return_value.process_request.assert_called_once_with("67890", "Hello bot!", status_callback=ANY)
     
     # Verify the two-step flow
     mock_send.assert_called_once_with(12345, "⏳ Thinking...")

@@ -27,10 +27,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # How many raw message entries to keep before compacting.
-# Each exchange = 2 entries (user + agent), so 10 = last 5 exchanges.
-MAX_RECENT = 10
-# How many entries to keep after compaction (the newest ones).
-KEEP_AFTER_COMPACT = 4
+# Each exchange = 2 entries (user + agent), so 12 = last 6 exchanges.
+MAX_RECENT = 12
+# How many entries to keep after compaction (the newest ones: 3 exchanges).
+KEEP_AFTER_COMPACT = 6
 
 
 class ConversationManager:

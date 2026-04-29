@@ -54,6 +54,10 @@ class CompanionAgent:
                 config=types.GenerateContentConfig(
                     temperature=0.8,
                     max_output_tokens=3000,
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        maximum_remote_calls=3
+                    ),
                     safety_settings=[
                         types.SafetySetting(
                             category=c,
@@ -67,11 +71,13 @@ class CompanionAgent:
                     ]
                 ),
             )
+            grounding_used = _has_grounding(response)
             return {
                 "text": response.text,
                 "action": "COMPANION_RESULTS",
                 "_raw_response": response,
                 "_latency_ms": (time.time() - t) * 1000,
+                "_grounding_used": grounding_used,
             }
         except Exception as e:
             logger.exception("Companion agent LLM call failed.")
@@ -91,18 +97,29 @@ class CompanionAgent:
 
         context_block = ""
         if conversation_context:
-            context_block = f"\nConversation so far:\n{conversation_context}\n"
+            context_block = f"\n<conversation_history>\n{conversation_context}\n</conversation_history>\n"
 
         return f"""\
 You are a friendly, adaptive travel companion chatting with a traveler
 who is currently on a trip.
 
+STRICT SEARCH GOVERNOR: Only use web search if the question EXPLICITLY
+requires live, real-time data that cannot be answered from general knowledge:
+• Current opening hours for a specific venue
+• Live public transport status or disruptions
+• Today's local events or festivals
+• Current entry/border requirements
+Do NOT search for: food suggestions, cultural context, activity ideas,
+mood/energy advice, general travel knowledge, or conversational support.
+Most in-trip questions do NOT need web search.
+
+<user_profile_summary>
+{profile_summary}
+</user_profile_summary>
+{context_block}
 <user_message>
 {message_text}
 </user_message>
-{context_block}
-Their profile:
-{profile_summary}
 
 Suggest 2-3 concrete, actionable options the traveler can do right now.
 For each option:
@@ -110,6 +127,7 @@ For each option:
 • Practical details: rough cost, distance, time needed (1 line)
 
 If they mention tiredness or low energy, prioritise low-effort options.
+- SOURCES: If you searched the web, briefly cite the source for any live fact.
 
 Formatting (Telegram):
 - OBEY THE LENGTH/FORMATTING INSTRUCTION IN THE <user_message>. 
@@ -118,3 +136,15 @@ Formatting (Telegram):
 - Do NOT use headers (#), tables, or code blocks.
 - Tone: warm and supportive, like a friend who's been to the place.
 """
+
+
+def _has_grounding(response: Any) -> bool:
+    """Return True if Google Search grounding was used in the response."""
+    try:
+        for candidate in (getattr(response, "candidates", None) or []):
+            meta = getattr(candidate, "grounding_metadata", None)
+            if meta and getattr(meta, "grounding_chunks", None):
+                return True
+    except Exception:
+        pass
+    return False
