@@ -60,12 +60,11 @@ gcloud run deploy agentic-traveler \
   --no-cpu-throttling \
   --set-env-vars "TELEGRAM_BOT_TOKEN=your-bot-token,TELEGRAM_SECRET_TOKEN=your-secret,GOOGLE_API_KEY=your-api-key,GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=europe-west1" \
   --memory 512Mi \
-  --timeout 60
+  --timeout 120
 ```
 
 > **Note on `--no-cpu-throttling`:** Required for background thread processing. Without it, Cloud Run throttles CPU to near-zero after the HTTP `200` is returned, stalling the background thread before it completes the LLM call and Telegram reply.
 > This does **not** mean "always-on" billing — the instance still scales to zero when idle. CPU is simply kept active until all background threads finish.
-
 
 
 > **Note:** `--allow-unauthenticated` is required because Telegram can't use Google IAM.

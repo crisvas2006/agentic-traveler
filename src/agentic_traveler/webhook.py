@@ -11,6 +11,7 @@ Security layers (defense-in-depth):
 """
 
 import ipaddress
+import json
 import logging
 import os
 import signal
@@ -375,7 +376,7 @@ def _handle_start(
         send_telegram_message(
             chat_id,
             "👋 Welcome to TripGenie! To get started, please fill out "
-            "your travel profile:\nhttps://tally.so/r/9qN6p4",
+            "your travel profile:\nhttps://tally.so/r/ODPGak",
         )
         return
 
@@ -392,21 +393,40 @@ def _handle_start(
             from agentic_traveler.orchestrator.profile_agent import ProfileAgent
             profile_agent = ProfileAgent()
             
-            # Extract only the safely serializable form response data to avoid Firestore Datetime JSON errors
-            form_data = user_doc.get("user_profile", {}).get("form_response", {})
-            if not form_data:
-                # Fallback if someone sends raw user_doc without form_response 
-                # (We stringify it to be safe)
-                form_data = {str(k): str(v) for k, v in user_doc.get("user_profile", {}).items()}
-                
-            structured_data = profile_agent.build_initial_profile({"form_response": form_data})
+            # The Tally webhook stores all form answers under user_profile.form_response.
+            # Safe-serialize it to handle any Firestore DatetimeWithNanoseconds values.
+            def _safe_serialize(obj):
+                if isinstance(obj, dict):
+                    return {k: _safe_serialize(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [_safe_serialize(v) for v in obj]
+                try:
+                    json.dumps(obj)
+                    return obj
+                except (TypeError, ValueError):
+                    return str(obj)
+
+            form_response = user_doc.get("user_profile", {}).get("form_response", {})
+            if not form_response:
+                logger.warning("user_profile.form_response is empty for user %s — profile may be incomplete.", user_id)
+
+            safe_form_data = _safe_serialize(form_response)
+            logger.info("Building profile from form_response with %d keys.", len(safe_form_data))
+
+            structured_data = profile_agent.build_initial_profile({"form_response": safe_form_data})
             
             greeting = structured_data.pop("greeting", None)
             
-            # Save the new structured keys
-            get_user_tool().update_user_fields(user_id, {
-                "user_profile": structured_data
-            })
+            # Save each computed field into user_profile using dot-notation keys.
+            # This preserves the raw Tally form answers already stored under
+            # user_profile.* — a plain {"user_profile": structured_data} set would
+            # overwrite and erase those 26 form fields.
+            dot_fields = {
+                f"user_profile.{k}": v
+                for k, v in structured_data.items()
+            }
+            get_user_tool().update_user_fields(user_id, dot_fields)
+
             
             if not greeting:
                 greeting = f"Great to meet you, {name}! Your profile is mapped out and ready to go."

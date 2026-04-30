@@ -64,6 +64,7 @@ You can help with:
 • Updating remembered preferences — call update_preferences()
 • Getting current date and time — call get_current_time()
 • Checking the weather forecast — call check_weather(location="<City>, <Region>, <Country>", days=<number of days>). IMPORTANT: If the user asks for a broad region or island (like "Bali"), you MUST infer a representative city based on their context (e.g., "Kuta, Bali, Indonesia" for beaches, or "Ubud, Bali, Indonesia" for culture) instead of asking them to be more specific.
+• Checking their remaining credits — call get_my_credits()
 • General travel chat, greetings, profile questions — answer directly
 
 ROUTING & BEHAVIOR RULES:
@@ -80,6 +81,7 @@ ROUTING & BEHAVIOR RULES:
 11. WEATHER AWARENESS: If weather information is relevant to the user request (e.g., planning outdoor activities, deciding on a destination), call `check_weather` first and append the raw data results to the `request` string you pass to `discover_destinations` or `plan_itinerary`. 
 12. NATURAL PRESENTATION: When presenting weather info to the user (either directly or as part of a suggestion), NEVER just dump the raw list of daily weather. Instead, extract the "vibe" and key highlights (e.g., "It will be quite chilly, below 10°C, so bring a jacket"). Only provide a detailed daily breakdown if the user specifically asks for it.
 13. WEB SEARCH: Sub-agents (discover_destinations, plan_itinerary, get_companion_help) can search the web for time-sensitive facts such as visa requirements, travel advisories, current entry rules, and event dates. Trust and pass through any web-sourced facts they return, including their source citations.
+14. CREDITS: When the user asks how many credits they have, how much balance they have left, or anything about their credit/usage status — call get_my_credits().
 
 SAFETY APPROACH:
 - NEVER refuse an activity the user wants to do.
@@ -333,6 +335,28 @@ class OrchestratorAgent:
         formatted = now.strftime("%A, %Y-%m-%d %H:%M:%S %Z")
         return f"The current date and time is: {formatted}"
 
+    def get_my_credits(self) -> str:
+        """
+        Returns the user's current credit balance.
+
+        Call this when the user asks how many credits they have left,
+        what their balance is, or anything related to their usage/credit status.
+
+        Returns:
+            A message with the user's current credit balance and a brief
+            explanation of what credits are used for.
+        """
+        logger.info("🔧 Tool call: get_my_credits")
+        balance = credit_manager.get_balance(self._current_user_doc)
+        return (
+            f"[RETURN THIS TO USER] "
+            f"You have *{balance} credits* remaining. "
+            f"Credits are used for AI-powered features like destination discovery, "
+            f"itinerary planning, and weather checks. "
+            f"Each interaction costs 1 or more credits depending on complexity. "
+            f"You can top up with a promo code via /promo YOUR_CODE."
+        )
+
     def check_weather(self, location: str, days: int = 7) -> str:
         """
         Retrieves the weather forecast for a given location.
@@ -391,7 +415,7 @@ class OrchestratorAgent:
                     "Since it's our first time meeting, I need to know a bit about "
                     "your travel style to give you the best advice.\n\n"
                     "Please take 1 minute to fill out this quick profile:\n"
-                    "https://tally.so/r/w2vDA9"
+                    "https://tally.so/r/ODPGak"
                 ),
                 "action": "ONBOARDING_REQUIRED",
             }
@@ -414,16 +438,46 @@ class OrchestratorAgent:
         )
         logger.debug("⏱ Context build: %s", _elapsed(t))
 
-        profile_summary = build_profile_summary(user_doc.get("user_profile", {}))
+        profile_summary = build_profile_summary(user_doc)
         user_content = self._build_user_content(
             profile_summary, self._current_conv_context, message_text
         )
 
-        # 3. Single LLM call with automatic function calling
+        # 3. Single LLM call with automatic function calling.
+        # Retries up to 2x on 429 RESOURCE_EXHAUSTED (Vertex AI quota) with
+        # exponential backoff.  The SDK's built-in tenacity exhausts quickly;
+        # our outer loop gives the quota bucket time to recover.
         logger.info("\n=== ORCHESTRATOR PROMPT INPUT ===\n%s\n=================================", user_content)
         t = time.time()
+        _max_retries = 2
+        _retry_waits = [3, 6]  # seconds between attempts
         try:
-            raw_response = self._call_llm(user_content)
+            raw_response = None
+            for _attempt in range(_max_retries + 1):
+                try:
+                    raw_response = self._call_llm(user_content)
+                    break  # success — exit retry loop
+                except Exception as _exc:
+                    # Extract detailed error info
+                    is_429 = "429" in str(_exc) or "RESOURCE_EXHAUSTED" in str(_exc)
+                    error_details = str(_exc)
+                    if hasattr(_exc, 'response_json') and _exc.response_json:
+                        import json
+                        error_details = f"{error_details} | JSON: {json.dumps(_exc.response_json)}"
+                    
+                    if is_429 and _attempt < _max_retries:
+                        wait = _retry_waits[_attempt]
+                        logger.warning(
+                            "Orchestrator LLM 429 (attempt %d/%d). Retrying in %ds. Error: %s",
+                            _attempt + 1, _max_retries + 1, wait, error_details
+                        )
+                        if status_callback:
+                            status_callback("⏳ Still thinking...")
+                        time.sleep(wait)
+                    else:
+                        if is_429:
+                            logger.error("Orchestrator LLM 429 persistent error: %s", error_details)
+                        raise  # re-raise for the outer except to handle
             response = raw_response.text if hasattr(raw_response, 'text') else raw_response
             
             if not response:
@@ -562,6 +616,7 @@ class OrchestratorAgent:
                     self.get_current_time,
                     self.check_weather,
                     self.record_feedback,
+                    self.get_my_credits,
                 ],
             ),
         )

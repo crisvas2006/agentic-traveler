@@ -51,7 +51,7 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
 
 # USD per grounded prompt (flat add-on charge, billed per sub-agent call that
 # actually triggers a Google Search during generation)
-GROUNDING_COST_PER_PROMPT_USD = 0.015  # $15 / 1,000 prompts
+GROUNDING_COST_PER_PROMPT_USD = 0.035  # $35 / 1,000 prompts
 
 # Fallback if we encounter an unknown model
 _DEFAULT_PRICING = {"input": 0.50, "output": 3.00}

@@ -61,7 +61,10 @@ class FirestoreUserTool:
 
     def update_user_fields(self, telegram_id: str, fields: Dict[str, Any]) -> bool:
         """
-        Perform a partial (merge) update on a user document.
+        Perform a partial update on a user document.
+
+        Supports dot-notation keys (e.g. "user_profile.summary") to write
+        into nested maps without overwriting sibling fields.
 
         Args:
             telegram_id: Telegram user ID to look up.
@@ -75,7 +78,9 @@ class FirestoreUserTool:
             logger.warning("Cannot update — user %s not found.", telegram_id)
             return False
 
-        ref.set(fields, merge=True)
+        # ref.update() (unlike ref.set(..., merge=True)) correctly interprets
+        # dot-notation keys as nested Firestore paths and does a partial merge.
+        ref.update(fields)
         logger.info("Updated user %s with fields: %s", telegram_id, list(fields.keys()))
         return True
 

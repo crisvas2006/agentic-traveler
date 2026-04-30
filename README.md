@@ -328,7 +328,7 @@ The main interaction channel is Telegram chat. There is no custom web frontend i
 
 ### 1.2 Personalization and data intake
 
-User personalization is collected through a Tally form (https://tally.so/r/9qN6p4):
+User personalization is collected through a Tally form (https://tally.so/r/ODPGak):
 
 *   Form: “Know Thy Damn Self (for Travel)”
     

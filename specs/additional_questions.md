@@ -1,6 +1,6 @@
 The "Pulse Check" Question Set
 
-Ask user one of the questions that he did not answer yet and update profile.
+Ask user one of the questions that he did not answer yet and update profile. The time for asking should be every say 50 interactions. A flag for having answered all questions should be set in the profile.
 
 1. The "Sunday Morning" Test
 
