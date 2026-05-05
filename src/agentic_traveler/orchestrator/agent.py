@@ -126,7 +126,7 @@ class OrchestratorAgent:
         self._current_user_id: str = ""
         self._current_conv_context: str = ""
         self._off_topic_flagged: bool = False
-        self._model_name = "gemini-2.5-flash"
+        self._model_name = "gemini-3-flash-preview"
         self._current_status_callback: Optional[Callable[[str], None]] = None
         # Token records accumulated during the current request (for credit calc)
         self._token_records: list[Dict[str, Any]] = []

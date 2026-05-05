@@ -185,6 +185,18 @@ Core agents (tool-calling architecture):
     *   Implements a cooling-off restriction if the user repeatedly drifts from travel topics.
     *   State is persisted in Firestore to survive container restarts.
 
+#### Current Model Stack
+
+The system uses a tiered model approach to balance reasoning quality and cost:
+
+| Agent | Model | Rationale |
+| :--- | :--- | :--- |
+| **Orchestrator** | `gemini-3-flash-preview` | Superior tool-calling and intent detection. |
+| **Planner** | `gemini-3-flash-preview` | Complex reasoning for tailored itineraries. |
+| **Discovery** | `gemini-2.5-flash` | High-speed, creative destination brainstorming. |
+| **Companion** | `gemini-2.5-flash` | Reliable, context-aware chat during trips. |
+| **Analytics** | `gemini-2.5-flash-lite` | Extremely low-cost summarization of logs. |
+
 The backend is stateless: each request reconstructs context from Firestore and tools, then responds directly to Telegram.
 
 ### Security & Safety
