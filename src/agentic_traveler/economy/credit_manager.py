@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from google.cloud.firestore_v1 import transforms  # type: ignore
 
-from agentic_traveler.promo_codes import PROMO_CODES
+from agentic_traveler.economy.promo_codes import PROMO_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +293,7 @@ def redeem_promo(
         )
         # Track in weekly metrics (fire-and-forget, in-memory)
         try:
-            from agentic_traveler import metrics_tracker
+            from agentic_traveler.analytics import metrics_tracker
             metrics_tracker.record_promo_redeemed(normalized)
         except Exception:
             logger.exception("Failed to record promo metric for code %s.", normalized)

@@ -6,7 +6,7 @@ Uses mocks for the Firestore DocumentReference — no real Firestore calls.
 
 from unittest.mock import MagicMock
 
-from agentic_traveler.usage_tracker import log_and_accumulate
+from agentic_traveler.analytics.usage_tracker import log_and_accumulate
 
 
 def _mock_response(prompt_tokens=100, candidates_tokens=50):

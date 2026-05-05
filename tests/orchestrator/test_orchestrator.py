@@ -60,7 +60,7 @@ def test_direct_chat_response(mock_user_tool, patched_deps):
     """For simple chat, the LLM responds directly (no tool calls)."""
     doc_ref = MagicMock()
     mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Alice", "user_profile": {}}, doc_ref
+        {"user_name": "Alice", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
     )
 
     # Mock the LLM to return a simple text with no tool calls
@@ -79,7 +79,7 @@ def test_conversation_saved_after_response(mock_user_tool, patched_deps):
     """Conversation history is saved after every exchange."""
     doc_ref = MagicMock()
     mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Alice", "user_profile": {}}, doc_ref
+        {"user_name": "Alice", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
     )
 
     mock_response = MagicMock()
@@ -96,7 +96,7 @@ def test_llm_failure_returns_error(mock_user_tool, patched_deps):
     """If the LLM call fails, the user gets a friendly error message."""
     doc_ref = MagicMock()
     mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Bob", "user_profile": {}}, doc_ref
+        {"user_name": "Bob", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
     )
 
     patched_deps["client"].models.generate_content.side_effect = RuntimeError("LLM down")
@@ -111,7 +111,7 @@ def test_tool_functions_are_passed_to_llm(mock_user_tool, patched_deps):
     """Verify that the LLM call includes tool functions."""
     doc_ref = MagicMock()
     mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Alice", "user_profile": {}}, doc_ref
+        {"user_name": "Alice", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
     )
 
     mock_response = MagicMock()
@@ -125,14 +125,14 @@ def test_tool_functions_are_passed_to_llm(mock_user_tool, patched_deps):
     config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
     assert config is not None
     assert config.tools is not None
-    assert len(config.tools) == 8  # 8 tool functions
+    assert len(config.tools) == 9  # 9 tool functions
 
 
 def test_no_client_returns_error(mock_user_tool):
     """Without an API key, LLM features are unavailable."""
     doc_ref = MagicMock()
     mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Bob", "user_profile": {}}, doc_ref
+        {"user_name": "Bob", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
     )
 
     with patch("agentic_traveler.orchestrator.agent.get_client") as mock_get_client, \

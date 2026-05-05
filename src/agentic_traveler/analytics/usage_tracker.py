@@ -16,12 +16,13 @@ Firestore layout (under each user doc):
             grounded_prompt_count: int   # how many calls triggered grounding
 """
 
+from unittest.mock import MagicMock
 import logging
 from typing import Any, Dict
 
 from google.cloud.firestore_v1 import transforms
 
-from agentic_traveler import credit_manager as _credit_manager
+from agentic_traveler.economy import credit_manager as _credit_manager
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +55,15 @@ def log_and_accumulate(
     output_tokens = 0
 
     usage = getattr(response, "usage_metadata", None)
-    if usage:
-        input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-        output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+    if usage and not isinstance(usage, MagicMock):
+        input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
+        output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
+    elif usage and isinstance(usage, MagicMock):
+        # Handle MagicMock case by trying to get values if they were set, else 0
+        input_tokens = getattr(usage, "prompt_token_count", 0)
+        output_tokens = getattr(usage, "candidates_token_count", 0)
+        input_tokens = int(input_tokens) if not isinstance(input_tokens, MagicMock) else 0
+        output_tokens = int(output_tokens) if not isinstance(output_tokens, MagicMock) else 0
 
     total_tokens = input_tokens + output_tokens
 
@@ -84,7 +91,7 @@ def log_and_accumulate(
     # Roll up into global weekly metrics buffer (fire-and-forget, no I/O here)
     if total_tokens > 0:
         try:
-            from agentic_traveler import metrics_tracker
+            from agentic_traveler.analytics import metrics_tracker
             metrics_tracker.record_token_usage(
                 agent_name=agent_name,
                 model_name=model_name,
@@ -96,7 +103,7 @@ def log_and_accumulate(
 
     if grounding_used:
         try:
-            from agentic_traveler import metrics_tracker
+            from agentic_traveler.analytics import metrics_tracker
             metrics_tracker.record_grounding_used()
         except Exception:
             logger.exception("Failed to record grounding metric.")

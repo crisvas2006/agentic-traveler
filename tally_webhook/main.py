@@ -3,7 +3,7 @@ import functions_framework
 from flask import jsonify
 from google.cloud import firestore
 
-PROJECT_ID = "graphic-jet-472816-v9"
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 DATABASE_ID = "agentic-traveler-db"
 USERS_COLLECTION = "users"
 
@@ -12,34 +12,21 @@ TALLY_WEBHOOK_TOKEN = os.getenv("TALLY_WEBHOOK_TOKEN")
 db = firestore.Client(project=PROJECT_ID, database=DATABASE_ID)
 
 QUESTION_KEY_MAP = {
-    "question_kEDXAd": "age_group",
-    "question_vY7VBX": "location",
-    "question_K17Aoz": "travel_budget_style",
-    "question_Za4p2V": "budget_priority",
-    "question_RPX1ep": "weekday_energy",
-    "question_oGrYNX": "daily_rhythm",
-    "question_GlNaE2": "activity_level",
-    "question_OGpKqp": "trip_vibe",
-    "question_VJRXWE": "structure_preference",
-    "question_POMLZd": "solo_travel_comfort",
-    "question_EWjeoq": "travel_deal_breakers",
-    "question_OGpW7a": "personality_baseline",
-    "question_VJRkzj": "travel_motivations",
-    "question_POMaz1": "cultural_spiritual_importance",
-    "question_EWj4xl": "discomfort_tolerance_score",
-    "question_rPNxoo": "favorite_past_trip",
-    "question_4rWgKr": "disliked_trip_patterns",
-    "question_jPdOlQ": "solo_travel_experience",
-    "question_2PqMKe": "hardest_part_solo_travel",
-    "question_xYkeJd": "typical_trip_lengths",
-    "question_NoKe70": "diet_lifestyle_constraints",
-    "question_qVx2RO": "absolute_avoidances",
-    "question_QVg67Y": "absolute_avoidances_other",
-    "question_9QLz7E": "next_trip_outcome_goals",
-    "question_gGyRXJ": "dream_trip_style",
-    "question_yYKWrd": "extra_notes",
-    "question_X0VKdz": "name",
-    "question_8xv0Vr": "phone_number",
+    "question_WAg4pv": "trip_success_factors",
+    "question_aByWrb": "travel_bubble",
+    "question_GrgWr2": "cultural_spiritual_importance",
+    "question_6d9q1J": "local_immersion",
+    "question_OAgvAp": "solo_freedom",
+    "question_7deQJR": "morning_vibe",
+    "question_blDa2Z": "physical_intensity",
+    "question_Al0k6z": "energy_strategy",
+    "question_rlp70X": "discomfort_tolerance_score",
+    "question_BGgvLK": "unexpected_event_reaction",
+    "question_kYpL0e": "splurge_priority",
+    "question_vNpR0D": "budget_personality",
+    "question_KMgXPV": "deal_breakers",
+    "question_Ldg8Ep": "name",
+    "question_1rxjbl": "location"
 }
 
 def _flatten_tally_fields(fields: list[dict]) -> dict:
@@ -113,9 +100,14 @@ def tally_webhook(request):
     flat["webhook_received_at"] = firestore.SERVER_TIMESTAMP
     flat["source"] = "tally"
 
-    flat["user_name"] = userFields.pop("name", None)
-    flat["phone_number"] = userFields.pop("phone_number", None)
-    flat["user_profile"] = userFields
+    flat["name"] = userFields.pop("name", None)
+    #flat["phone_number"] = userFields.pop("phone_number", None)
+    flat["location"] = userFields.pop("location", None)
+    
+    # Everything else goes into user_profile.form_response
+    flat["user_profile"] = {
+        "form_response": userFields
+    }
 
     db.collection(USERS_COLLECTION).document(response_id).set(flat, merge=True)
 

@@ -7,7 +7,7 @@ Tests use plain dicts and mocks — no real Firestore calls.
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from agentic_traveler.off_topic_guard import (
+from agentic_traveler.guards.off_topic_guard import (
     RESET_WINDOW_SECONDS,
     THRESHOLD,
     is_restricted,

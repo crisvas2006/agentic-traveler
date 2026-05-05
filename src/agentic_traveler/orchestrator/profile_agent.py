@@ -128,34 +128,47 @@ class ProfileAgent:
 
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
         """Calls the LLM and forces JSON output."""
-        try:
-            response = self._client.models.generate_content(
-                model=self._model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=_PROFILE_SYSTEM_PROMPT,
-                    temperature=0.2, # Low temp for consistent JSON
-                    response_mime_type="application/json",
-                ),
-            )
-            
-            raw_text = response.text if hasattr(response, 'text') else str(response)
-            
-            # The model is forced to application/json, so it should be valid
-            result = json.loads(raw_text)
-            
-            # Ensure all 15 dimensions exist in some form
-            scores = result.get("personality_dimensions_scores", {})
-            for dim in _DIMENSIONS_LIST:
-                if dim not in scores:
-                    scores[dim] = 0.5 # Default to balanced if missing
-            result["personality_dimensions_scores"] = scores
-            
-            return result
-            
-        except Exception as e:
-            logger.exception("Failed to generate profile structure: %s", e)
-            return self._build_fallback()
+        _max_retries = 2
+        _retry_waits = [3, 6]
+        
+        for _attempt in range(_max_retries + 1):
+            try:
+                response = self._client.models.generate_content(
+                    model=self._model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=_PROFILE_SYSTEM_PROMPT,
+                        temperature=0.2, # Low temp for consistent JSON
+                        response_mime_type="application/json",
+                    ),
+                )
+                
+                raw_text = response.text if hasattr(response, 'text') else str(response)
+                
+                # The model is forced to application/json, so it should be valid
+                result = json.loads(raw_text)
+                
+                # Ensure all 15 dimensions exist in some form
+                scores = result.get("personality_dimensions_scores", {})
+                for dim in _DIMENSIONS_LIST:
+                    if dim not in scores:
+                        scores[dim] = 0.5 # Default to balanced if missing
+                result["personality_dimensions_scores"] = scores
+                
+                return result
+                
+            except Exception as e:
+                is_429 = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+                if is_429 and _attempt < _max_retries:
+                    wait = _retry_waits[_attempt]
+                    logger.warning("ProfileAgent LLM 429 (attempt %d/%d). Retrying in %ds.", _attempt + 1, _max_retries + 1, wait)
+                    import time
+                    time.sleep(wait)
+                else:
+                    logger.exception("Failed to generate profile structure: %s", e)
+                    return self._build_fallback()
+        
+        return self._build_fallback()
 
     def _build_fallback(self) -> Dict[str, Any]:
         """Returns a safe default structure if the LLM fails."""

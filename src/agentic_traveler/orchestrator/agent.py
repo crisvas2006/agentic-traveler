@@ -25,10 +25,10 @@ from google.genai import types
 
 from agentic_traveler.orchestrator.client_factory import get_client
 
-from agentic_traveler import credit_manager
-from agentic_traveler import off_topic_guard
-from agentic_traveler import usage_tracker
-from agentic_traveler import metrics_tracker
+from agentic_traveler.economy import credit_manager
+from agentic_traveler.guards import off_topic_guard
+from agentic_traveler.analytics import usage_tracker
+from agentic_traveler.analytics import metrics_tracker
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
 from agentic_traveler.orchestrator.discovery_agent import DiscoveryAgent
 from agentic_traveler.orchestrator.planner_agent import PlannerAgent
@@ -512,6 +512,12 @@ class OrchestratorAgent:
             
             # Save raw response as string for logging/debugging if needed
             self._last_raw_response = str(raw_response)
+        except RuntimeError as e:
+            if "unavailable" in str(e).lower():
+                return {"text": "LLM features are currently unavailable.", "action": "RESPONSE"}
+            logger.exception("Orchestrator LLM call failed.")
+            name = user_doc.get("user_name", "Traveler")
+            return {"text": f"Sorry {name}, I hit a snag processing your message.", "action": "RESPONSE"}
         except Exception:
             logger.exception("Orchestrator LLM call failed.")
             name = user_doc.get("user_name", "Traveler")

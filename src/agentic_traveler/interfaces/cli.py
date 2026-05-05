@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agentic_traveler.logging_config import setup_logging
+from agentic_traveler.core.logging_config import setup_logging
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
 

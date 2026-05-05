@@ -34,7 +34,7 @@ def test_companion_agent_process_request(mock_client):
 
     kwargs = mock_client.models.generate_content.call_args.kwargs
     assert kwargs["model"] == "gemini-2.5-flash"
-    assert "Conversation so far:" in kwargs["contents"]
+    assert "<conversation_history>" in kwargs["contents"]
     assert "recent history" in kwargs["contents"]
     assert "tired" in kwargs["contents"]
 

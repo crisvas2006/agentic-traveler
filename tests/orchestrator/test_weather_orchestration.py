@@ -28,7 +28,7 @@ def test_check_weather_registration(mock_user_tool, patched_deps):
     """Verify that check_weather is registered in the LLM config."""
     doc_ref = MagicMock()
     mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Alice", "user_profile": {}}, doc_ref
+        {"user_name": "Alice", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
     )
     
     mock_response = MagicMock()

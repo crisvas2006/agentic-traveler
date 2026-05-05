@@ -31,6 +31,21 @@ GOOGLE_PROJECT_ID=your-gcp-project-id
 GEMINI_REGION=europe-west1
 ```
 
+## Pre-Deployment Regression Check
+
+Before deploying any major changes, you **must** run the regression test suite to ensure existing features haven't broken.
+
+1. **Run Automated Tests:**
+   Ensure the `pytest` suite passes with zero errors:
+   ```powershell
+   .\.venv\Scripts\pytest
+   ```
+2. **Run Manual Staging Tests:**
+   Start the local webhook (`python -m agentic_traveler.interfaces.webhook`) and route Telegram to it using ngrok. 
+   Then, follow the step-by-step instructions in `tests/manual_test_flow.md` to validate core agent capabilities (Profile linking, Routing, Memory, Tools) via Telegram.
+
+Once both automated and manual tests pass, proceed with deployment.
+
 ## Deploy to Cloud Run
 
 ### Step 1: Set your project
@@ -94,7 +109,7 @@ For testing the webhook locally without deploying:
 
 ```powershell
 $env:SKIP_IP_CHECK="1"
-.\.venv\Scripts\python -m agentic_traveler.webhook
+.\.venv\Scripts\python -m agentic_traveler.interfaces.webhook
 ```
 
 > `SKIP_IP_CHECK=1` disables the Telegram IP whitelist for local testing.

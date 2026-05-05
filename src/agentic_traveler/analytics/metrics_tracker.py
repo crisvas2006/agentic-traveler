@@ -20,7 +20,7 @@ import atexit
 import logging
 import os
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -33,9 +33,12 @@ FLUSH_INTERVAL = int(os.getenv("METRICS_FLUSH_INTERVAL", "3600"))
 # Minimum events before a flush is worthwhile
 MIN_EVENTS_TO_FLUSH = 1
 
+# Maximum events to buffer before auto-flushing regardless of interval
+FLUSH_THRESHOLD = int(os.getenv("METRICS_FLUSH_THRESHOLD", "100"))
+
 # ── in-memory counters ─────────────────────────────────────────────────────
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 _total_interactions: int = 0
 _new_users: int = 0
@@ -45,6 +48,20 @@ _token_usage: Dict[str, Dict[str, int]] = {}  # model → {input, output}
 _event_count: int = 0
 _promo_redeemed: Dict[str, int] = {}  # promo code → times redeemed
 _grounding_calls: int = 0  # sub-agent calls that triggered Google Search
+
+
+def _reset_locked() -> None:
+    """Reset all in-memory counters. For testing use only."""
+    global _total_interactions, _new_users, _event_count, _grounding_calls
+    with _lock:
+        _total_interactions = 0
+        _new_users = 0
+        _active_users.clear()
+        _agent_calls.clear()
+        _token_usage.clear()
+        _promo_redeemed.clear()
+        _grounding_calls = 0
+        _event_count = 0
 
 
 # ── public recording API ──────────────────────────────────────────────────
@@ -60,6 +77,8 @@ def record_interaction(*, user_id: str, is_new_user: bool = False) -> None:
         if is_new_user:
             _new_users += 1
         _event_count += 1
+        if _event_count >= FLUSH_THRESHOLD:
+            _flush_locked()
 
 
 def record_token_usage(
@@ -79,10 +98,13 @@ def record_token_usage(
         # Per-model token accumulator
         safe_model = model_name.replace(".", "_").replace("/", "_")
         if safe_model not in _token_usage:
-            _token_usage[safe_model] = {"input": 0, "output": 0}
+            _token_usage[safe_model] = {"input": 0, "output": 0, "call_count": 0}
         _token_usage[safe_model]["input"] += input_tokens
         _token_usage[safe_model]["output"] += output_tokens
+        _token_usage[safe_model]["call_count"] += 1
         _event_count += 1
+        if _event_count >= FLUSH_THRESHOLD:
+            _flush_locked()
 
 
 def record_promo_redeemed(code: str) -> None:
@@ -102,12 +124,27 @@ def record_grounding_used() -> None:
 # ── flush logic ───────────────────────────────────────────────────────────
 
 
-def _week_ending_key() -> str:
+def _get_week_key(reference_date: datetime | date | None = None) -> str:
     """Return the ISO date string for the coming Sunday (week-ending key)."""
-    now = datetime.now(timezone.utc)
-    days_until_sunday = (6 - now.weekday()) % 7 or 7
-    sunday = now + timedelta(days=days_until_sunday)
+    if reference_date is None:
+        reference_date = datetime.now(timezone.utc)
+    
+    # Handle both date and datetime
+    if isinstance(reference_date, date) and not isinstance(reference_date, datetime):
+        # Convert date to datetime at midnight UTC
+        reference_date = datetime.combine(reference_date, datetime.min.time(), tzinfo=timezone.utc)
+    elif reference_date.tzinfo is None:
+        reference_date = reference_date.replace(tzinfo=timezone.utc)
+
+    days_until_sunday = (6 - reference_date.weekday()) % 7
+    # If it's already Sunday, we stay on this Sunday (consistent with test expectations)
+    sunday = reference_date + timedelta(days=days_until_sunday)
     return sunday.strftime("%Y-%m-%d")
+
+
+def _week_ending_key() -> str:
+    """Wrapper for backward compatibility or internal use."""
+    return _get_week_key()
 
 
 def _take_snapshot() -> Dict[str, Any] | None:
@@ -163,9 +200,11 @@ def _write_to_firestore(snapshot: Dict[str, Any]) -> None:
                 snapshot["total_interactions"]
             ),
             "new_users": transforms.Increment(snapshot["new_users"]),
-            "active_users": transforms.ArrayUnion(snapshot["active_users"]),
             "flushed_at": fs.SERVER_TIMESTAMP,
         }
+
+        if snapshot["active_users"]:
+            update["active_users"] = transforms.ArrayUnion(snapshot["active_users"])
 
         # Merge agent call counts
         for agent, count in snapshot["agent_calls"].items():

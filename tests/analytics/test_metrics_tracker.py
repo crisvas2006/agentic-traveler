@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch, call
 
 
 def test_get_week_key_returns_sunday():
-    from agentic_traveler.metrics_tracker import _get_week_key
+    from agentic_traveler.analytics.metrics_tracker import _get_week_key
     # Monday 2026-03-09 → Sunday 2026-03-15
     monday = date(2026, 3, 9)
     assert _get_week_key(monday) == "2026-03-15"
@@ -25,7 +25,7 @@ def test_get_week_key_returns_sunday():
 
 def test_record_interaction_accumulates():
     """Buffer should accumulate interactions without writing to Firestore."""
-    import agentic_traveler.metrics_tracker as mt
+    import agentic_traveler.analytics.metrics_tracker as mt
     mt._reset_locked()  # start fresh
 
     mt.record_interaction(user_id="user1", is_new_user=True)
@@ -40,7 +40,7 @@ def test_record_interaction_accumulates():
 
 def test_record_token_usage_accumulates():
     """Token rollup should accumulate per-model data."""
-    import agentic_traveler.metrics_tracker as mt
+    import agentic_traveler.analytics.metrics_tracker as mt
     mt._reset_locked()
 
     mt.record_token_usage(
@@ -57,8 +57,8 @@ def test_record_token_usage_accumulates():
     )
 
     safe_model = "gemini-2_5-flash"
-    assert mt._token_usage[safe_model]["total_input_tokens"] == 150
-    assert mt._token_usage[safe_model]["total_output_tokens"] == 280
+    assert mt._token_usage[safe_model]["input"] == 150
+    assert mt._token_usage[safe_model]["output"] == 280
     assert mt._token_usage[safe_model]["call_count"] == 2
     assert mt._agent_calls["orchestrator"] == 1
     assert mt._agent_calls["discovery"] == 1
@@ -66,7 +66,7 @@ def test_record_token_usage_accumulates():
 
 def test_flush_writes_correct_firestore_paths():
     """Flush should write atomic increments to the correct collection/document."""
-    import agentic_traveler.metrics_tracker as mt
+    import agentic_traveler.analytics.metrics_tracker as mt
     mt._reset_locked()
 
     mt.record_interaction(user_id="userA", is_new_user=True)
@@ -77,7 +77,7 @@ def test_flush_writes_correct_firestore_paths():
         output_tokens=20,
     )
 
-    with patch("agentic_traveler.metrics_tracker._write_to_firestore") as mock_write:
+    with patch("agentic_traveler.analytics.metrics_tracker._write_to_firestore") as mock_write:
         # manually trigger flush
         with mt._lock:
             mt._flush_locked()
@@ -95,11 +95,11 @@ def test_flush_writes_correct_firestore_paths():
 
 def test_threshold_flush_triggers():
     """Buffer should auto-flush when FLUSH_THRESHOLD events are reached."""
-    import agentic_traveler.metrics_tracker as mt
+    import agentic_traveler.analytics.metrics_tracker as mt
     mt._reset_locked()
 
     with patch.object(mt, "FLUSH_THRESHOLD", 3):
-        with patch("agentic_traveler.metrics_tracker._write_to_firestore") as mock_write:
+        with patch("agentic_traveler.analytics.metrics_tracker._write_to_firestore") as mock_write:
             mt.record_interaction(user_id="u1")
             mt.record_interaction(user_id="u2")
             # Third event should trigger flush

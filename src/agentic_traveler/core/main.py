@@ -9,7 +9,7 @@ orchestrator_agent = OrchestratorAgent()
 @functions_framework.http
 def telegram_webhook(request: Request):
     """
-    HTTP Cloud Function that receives Telegram updates via Make.
+    HTTP Cloud Function that receives Telegram updates.
     """
     
     # 1. Security Check
@@ -24,7 +24,7 @@ def telegram_webhook(request: Request):
     if not request_json:
         return jsonify({"error": "Invalid JSON"}), 400
 
-    # Expected payload structure from Make:
+    # Expected payload structure:
     # {
     #   "telegramUserId": "123456",
     #   "messageText": "Hello",

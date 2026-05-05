@@ -9,7 +9,7 @@ Covers:
 - Empty/whitespace input
 """
 
-from agentic_traveler.sanitize import sanitize_user_input
+from agentic_traveler.core.sanitize import sanitize_user_input
 
 
 def test_normal_text_unchanged():

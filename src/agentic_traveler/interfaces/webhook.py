@@ -25,12 +25,12 @@ import requests as http_requests
 from dotenv import load_dotenv
 from flask import Flask, Request, jsonify, request
 
-from agentic_traveler import credit_manager
-from agentic_traveler import off_topic_guard
-from agentic_traveler import metrics_tracker
-from agentic_traveler.logging_config import setup_logging
+from agentic_traveler.economy import credit_manager
+from agentic_traveler.guards import off_topic_guard
+from agentic_traveler.analytics import metrics_tracker
+from agentic_traveler.core.logging_config import setup_logging
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
-from agentic_traveler.sanitize import sanitize_user_input
+from agentic_traveler.core.sanitize import sanitize_user_input
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
 
 load_dotenv()

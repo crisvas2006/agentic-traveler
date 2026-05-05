@@ -569,6 +569,21 @@ isort .
 - **Interactive CLI & Webhook**: Support for both local development (CLI) and production Telegram bot interactions.
 - **Feedback Loop**: Integrated tool for capturing user sentiment to refine future suggestions.
 
+## Project Structure
+
+The project follows a modular, domain-driven architecture:
+
+```text
+src/agentic_traveler/
+├── analytics/         # Metrics tracking & usage logging (flushed to Firestore)
+├── core/              # Foundational logic (sanitization, shared utilities)
+├── economy/           # User credits & promo code management
+├── guards/            # Security layers (off-topic guard)
+├── interfaces/        # Entry points (CLI, Webhook handler)
+├── orchestrator/      # Multi-agent system (Orchestrator, Discovery, Planner, Companion)
+└── tools/             # External tool implementations (Firestore, Weather, Search)
+```
+
 ## Setup
 
 ### 1. Create and activate the virtual environment
@@ -610,13 +625,13 @@ GOOGLE_APPLICATION_CREDENTIALS=path/to/application_default_credentials.json
 Chat with the orchestrator locally by impersonating an existing Firestore user:
 
 ```powershell
-.\.venv\Scripts\python -m agentic_traveler.cli
+.\.venv\Scripts\python -m agentic_traveler.interfaces.cli
 ```
 
 This lists all users in Firestore, lets you pick one, then opens an interactive chat loop. You can also pass a Telegram ID directly:
 
 ```powershell
-.\.venv\Scripts\python -m agentic_traveler.cli --telegram-id 12345
+.\.venv\Scripts\python -m agentic_traveler.interfaces.cli --telegram-id 12345
 ```
 
 ## Testing

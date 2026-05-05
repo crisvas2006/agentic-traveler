@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-from agentic_traveler import usage_tracker
+from agentic_traveler.analytics import usage_tracker
 
 load_dotenv()
 
