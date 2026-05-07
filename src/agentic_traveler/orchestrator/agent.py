@@ -1,98 +1,47 @@
 """
-Orchestrator Agent — the single entry point for user messages.
+Orchestrator Coordinator — the single entry point for user messages.
 
-Architecture:
-    One LLM call with function-calling tools.  The model decides intent
-    itself and invokes specialised sub-agents (discovery, planner,
-    companion) as tool functions only when deeper expertise is needed.
-    Simple chat is answered directly — no extra LLM round-trip.
+Architecture (v2 — Thin Router + Specialized Agents):
+    1. Fetch user profile + credit gate.
+    2. Check off-topic restriction.
+    3. Build conversation context.
+    4. RouterAgent classifies intent (CHAT | TRIP | PLAN | OFF_TOPIC)
+       and handles lightweight tools (preferences, feedback, credits).
+    5. Dispatch to the appropriate specialized agent:
+       - CHAT      → ChatAgent   (gemini-3.1-flash-lite-preview)
+       - TRIP      → TripAgent   (gemini-3-flash-preview)
+       - PLAN      → PlannerAgent (gemini-3-flash-preview)
+       - OFF_TOPIC → router's natural redirection; off_topic_guard
+                     increments counter silently.
+    6. Log token usage for router + agent separately.
+    7. Deduct credits asynchronously.
+    8. Save conversation history.
 
-    Safety is embedded in the system prompt: the agent warns about risks
-    but never blocks activities the user wants.
-
-    Preference updates detected by the model trigger a tool call that
-    persists them to Firestore and surfaces an acknowledgement.
+Token savings vs v1:
+    - Simple chat: ~51% fewer input tokens
+    - Discovery/trip: ~54% fewer input tokens
+    - Planning: ~56% fewer input tokens
+    - Off-topic: ~84% fewer input tokens (router only, no sub-agent)
 """
 
+import datetime
 import logging
-import os
 import time
-from typing import Any, Dict, Optional, Callable
-
-from dotenv import load_dotenv
-from google import genai
-from google.genai import types
-
-from agentic_traveler.orchestrator.client_factory import get_client
+from typing import Any, Callable, Dict, Optional
 
 from agentic_traveler.economy import credit_manager
 from agentic_traveler.guards import off_topic_guard
 from agentic_traveler.analytics import usage_tracker
 from agentic_traveler.analytics import metrics_tracker
+from agentic_traveler.orchestrator.client_factory import get_client
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
-from agentic_traveler.orchestrator.discovery_agent import DiscoveryAgent
+from agentic_traveler.orchestrator.router_agent import RouterAgent
+from agentic_traveler.orchestrator.chat_agent import ChatAgent
+from agentic_traveler.orchestrator.trip_agent import TripAgent
 from agentic_traveler.orchestrator.planner_agent import PlannerAgent
-from agentic_traveler.orchestrator.companion_agent import CompanionAgent
-from agentic_traveler.orchestrator.preference_learner import PreferenceLearner
-from agentic_traveler.orchestrator.profile_utils import build_profile_summary
-from agentic_traveler.tools.feedback_tool import FeedbackTool
 from agentic_traveler.tools.firestore_user import FirestoreUserTool
-from agentic_traveler.tools.weather import WeatherService
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-
-# ── system prompt (stable across requests → benefits from implicit caching) ──
-
-_SYSTEM_PROMPT = """\
-You are "Agentic Traveler", an AI travel companion acting as the user's highly-knowledgeable best friend.
-
-PERSONA & TONE:
-- You are a fun, friendly, and dynamic conversational partner — NOT a boring, robotic assistant.
-- You know the user's profile and travel preferences inside out.
-- ALWAYS adapt your tone to the user's preferred communication style (if specified in their profile).
-- If the user asks you to change how you talk (e.g., "be more formal", "talk like a pirate", "be sarcastic"), IMMEDIATELY adopt that tone and call update_preferences(key="tone_preference", value=<new tone>) so you remember it forever.
-- Keep responses concise and scannable by default. Only get verbose if explaining critical safety risks, deep cultural nuances, or complex logistics.
-
-CAPABILITIES:
-You can help with:
-• Discovering new destinations — call discover_destinations(request="<user request> + <desired length/format>")
-• Planning a detailed itinerary — call plan_itinerary(request="<user request> + <desired length/format>")
-• In-trip assistance (tired, hungry, bored) — call get_companion_help(request="<user request> + <desired length/format>")
-• Updating remembered preferences — call update_preferences()
-• Getting current date and time — call get_current_time()
-• Checking the weather forecast — call check_weather(location="<City>, <Region>, <Country>", days=<number of days>). IMPORTANT: If the user asks for a broad region or island (like "Bali"), you MUST infer a representative city based on their context (e.g., "Kuta, Bali, Indonesia" for beaches, or "Ubud, Bali, Indonesia" for culture) instead of asking them to be more specific.
-• Checking their remaining credits — call get_my_credits()
-• General travel chat, greetings, profile questions — answer directly
-
-ROUTING & BEHAVIOR RULES:
-1. For casual chat, greetings, or simple travel Q&A — respond directly in your best-friend persona. Do NOT call any tool.
-2. When the user wants destination ideas or exploration — call discover_destinations(request="<user request> + keep it to a high-level 2-3 sentence summary of options").
-3. HEAVY PLANNING CONFIRMATION: If the user asks for a trip plan (e.g., "Plan my trip to Rome", "What can I do in Lombok in 1 day?"), DO NOT immediately call plan_itinerary() with a request for a detailed plan. First, call discover_destinations() or get_companion_help() with a request for a short 2-phase answer (e.g. "Give a 2-3 sentence summary of 2 options and ask if they want a detailed plan"). ONLY route to `plan_itinerary` when the user explicitly agrees to a detailed day-by-day plan.
-4. When the user is currently on a trip and needs live suggestions — call get_companion_help().
-5. When the user reveals a personal preference (budget, avoidances, diet, travel style, communication tone, etc.) — call update_preferences(key, value) AND let the user know you've remembered it.
-6. When you need to know the current date or time to give relevant advice (or if the user asks for it) — call get_current_time().
-7. When you need to know the weather for a specific location or time to give relevant advice (or if the user asks for it) — call check_weather(location="<City>, <Region>, <Country>", days=<number of days>). IMPORTANT: You MUST pass a specific city. If the user only mentions an island or region (like "Bali" or "Tuscany"), DO NOT ask them to specify a city. INSTEAD, infer a representative city based on their conversational context or profile (e.g. choose a beach town if they like beaches, or the capital if unknown) and format it as "City, Region, Country" (e.g. "Kuta, Bali, Indonesia" or "Denpasar, Bali, Indonesia").
-8. When the message is clearly NOT about travel and NOT casual/fun (e.g., math homework) — call flag_off_topic(). BE LENIENT: jokes, banter, personal stories, and life advice are all FINE conversational exchanges with a best friend. Do NOT flag those.
-9. PASSING THROUGH RESULTS: When you call `discover_destinations` or `plan_itinerary`, the tool will return a detailed response. YOU MUST INCLUDE THAT EXACT RESPONSE in your final message to the user. Do "not" just say "Here is your plan!", you must actually output the text the tool gives you.
-10. DYNAMIC LENGTH: When passing the `request` string to a sub-agent tool, ALWAYS append instructions on how long and detailed the response should be based on the conversational context. (e.g., "Keep it to a playful 2-sentence conversational reply" vs "Give a full, deep-dive itinerary").
-11. WEATHER AWARENESS: If weather information is relevant to the user request (e.g., planning outdoor activities, deciding on a destination), call `check_weather` first and append the raw data results to the `request` string you pass to `discover_destinations` or `plan_itinerary`. 
-12. NATURAL PRESENTATION: When presenting weather info to the user (either directly or as part of a suggestion), NEVER just dump the raw list of daily weather. Instead, extract the "vibe" and key highlights (e.g., "It will be quite chilly, below 10°C, so bring a jacket"). Only provide a detailed daily breakdown if the user specifically asks for it.
-13. WEB SEARCH: Sub-agents (discover_destinations, plan_itinerary, get_companion_help) can search the web for time-sensitive facts such as visa requirements, travel advisories, current entry rules, and event dates. Trust and pass through any web-sourced facts they return, including their source citations.
-14. CREDITS: When the user asks how many credits they have, how much balance they have left, or anything about their credit/usage status — call get_my_credits().
-
-SAFETY APPROACH:
-- NEVER refuse an activity the user wants to do.
-- If an activity carries real risks, add a brief ⚠️ warning — explain the risk and then help them do it safely if they confirm they want to do it.
-
-FORMATTING (Telegram Markdown):
-- Use *bold* and _italic_ text.
-- NEVER use asterisks (*) or hyphens (-) for lists. ALWAYS use the unicode bullet character (•).
-- Do NOT use headers (#), tables, or code blocks — they don't render well in Telegram.
-- Keep paragraphs short (2-3 sentences max).
-"""
 
 
 def _elapsed(t0: float) -> str:
@@ -100,295 +49,31 @@ def _elapsed(t0: float) -> str:
     return f"{(time.time() - t0) * 1000:.0f}ms"
 
 
+def _current_time_str() -> str:
+    """Return a human-readable current datetime string."""
+    now = datetime.datetime.now().astimezone()
+    return now.strftime("%A, %Y-%m-%d %H:%M:%S %Z")
+
+
 class OrchestratorAgent:
     """
-    Single-agent orchestrator using GenAI automatic function calling.
+    Orchestration coordinator — routes messages to specialized agents.
 
-    The LLM decides when to call tool functions (sub-agents) and the SDK
-    handles the tool-call loop automatically.  This replaces the previous
-    3-serial-LLM-call pipeline (classifier → agent → safety filter).
+    Delegates to RouterAgent for intent classification, then dispatches to
+    ChatAgent, TripAgent, or PlannerAgent. All agent instances are reused
+    across requests for efficiency.
     """
 
     def __init__(self, firestore_user_tool: Optional[FirestoreUserTool] = None):
         self._client = get_client()
-
         self.user_tool = firestore_user_tool or FirestoreUserTool()
-        self.discovery = DiscoveryAgent(client=self._client)
-        self.planner = PlannerAgent(client=self._client)
-        self.companion = CompanionAgent(client=self._client)
         self.conversation_manager = ConversationManager(client=self._client)
-        self.preference_learner = PreferenceLearner()
-        self.feedback_tool = FeedbackTool()
 
-        # State used during a single request (set in process_request)
-        self._current_user_doc: Dict[str, Any] = {}
-        self._current_user_ref = None
-        self._current_user_id: str = ""
-        self._current_conv_context: str = ""
-        self._off_topic_flagged: bool = False
-        self._model_name = "gemini-3-flash-preview"
-        self._current_status_callback: Optional[Callable[[str], None]] = None
-        # Token records accumulated during the current request (for credit calc)
-        self._token_records: list[Dict[str, Any]] = []
-
-    # ── tool functions (called by the LLM via automatic function calling) ──
-
-    def _log_sub_agent_usage(self, agent_name: str, result: Dict[str, Any]) -> None:
-        """Log token usage from a sub-agent result if available."""
-        raw = result.get("_raw_response")
-        latency = result.get("_latency_ms", 0)
-        if raw:
-            sub_model = getattr(raw, "_model_name", None)
-            # Sub-agents use their own model_name; fall back to "unknown"
-            model = sub_model or self._model_name
-            usage_info = usage_tracker.log_and_accumulate(
-                agent_name=agent_name,
-                model_name=model,
-                user_id=self._current_user_id,
-                response=raw,
-                latency_ms=latency,
-                user_doc_ref=self._current_user_ref,
-            )
-            # Accumulate token cost for credit deduction
-            if usage_info.get("total_tokens", 0) > 0:
-                self._token_records.append(usage_info)
-            # Accumulate grounding cost separately (flat per-prompt charge)
-            grounding_credits = usage_info.get("grounding_cost_credits", 0)
-            if grounding_credits > 0:
-                self._token_records.append({
-                    "model_name": "grounding",
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0,
-                    "grounding_cost_credits": grounding_credits,
-                })
-
-    def discover_destinations(self, request: str) -> str:
-        """
-        Discover and suggest travel destinations.
-
-        Args:
-            request: What the user wants — their destination criteria,
-                     constraints, or curiosity. MUST include a specific
-                     instruction on the desired length/verbosity of the output.
-
-        Returns:
-            A text block with destination suggestions.
-        """
-        logger.info("🔧 Tool call: discover_destinations")
-        if self._current_status_callback:
-            self._current_status_callback("I'm scouting the globe for the perfect spots for you! Just a moment... 🌍")
-            
-        t = time.time()
-        result = self.discovery.process_request(
-            self._current_user_doc, request, self._current_conv_context
-        )
-        logger.info("⏱ discover_destinations: %s", _elapsed(t))
-        self._log_sub_agent_usage("discovery", result)
-        return result.get("text", "")
-
-    def plan_itinerary(self, request: str) -> str:
-        """
-        Create a detailed day-by-day trip itinerary.
-
-        Args:
-            request: What the user wants planned — destination, dates,
-                     duration, pace preferences. MUST include a specific
-                     instruction on the desired length/verbosity of the output.
-
-        Returns:
-            A text block with the itinerary.
-        """
-        logger.info("🔧 Tool call: plan_itinerary")
-        if self._current_status_callback:
-            self._current_status_callback("I'm putting together a detailed day-by-day plan for you! Give me a few seconds... 🗺️")
-            
-        t = time.time()
-        result = self.planner.process_request(
-            self._current_user_doc, request, self._current_conv_context
-        )
-        logger.info("⏱ plan_itinerary: %s", _elapsed(t))
-        self._log_sub_agent_usage("planner", result)
-        return result.get("text", "")
-
-    def get_companion_help(self, request: str) -> str:
-        """
-        Provide in-trip assistance — the user is currently traveling and
-        needs immediate, contextual suggestions.
-
-        Args:
-            request: What the user needs right now (tired, hungry, bored,
-                     lost, looking for something specific). MUST include a specific
-                     instruction on the desired length/verbosity of the output.
-
-        Returns:
-            A text block with actionable in-trip suggestions.
-        """
-        logger.info("🔧 Tool call: get_companion_help")
-        t = time.time()
-        result = self.companion.process_request(
-            self._current_user_doc, request, self._current_conv_context
-        )
-        logger.info("⏱ get_companion_help: %s", _elapsed(t))
-        self._log_sub_agent_usage("companion", result)
-        return result.get("text", "")
-
-    def update_preferences(self, preference_key: str, preference_value: str) -> str:
-        """
-        Persist a newly learned user preference to their profile.
-
-        Call this when the user reveals or changes a personal preference
-        such as budget, travel style, dietary needs, avoidances, etc.
-
-        Args:
-            preference_key: Short identifier for the preference
-                (e.g. "budget", "avoidances", "diet", "travel_style",
-                 "trip_vibe", "activity_level").
-            preference_value: The preference value to store
-                (e.g. "under 800 EUR", "no crowded beaches").
-
-        Returns:
-            Confirmation message.
-        """
-        logger.info(
-            "🔧 Tool call: update_preferences(%s=%s)",
-            preference_key, preference_value,
-        )
-        if self._current_user_ref:
-            self.preference_learner.save_preference(
-                preference_key, preference_value,
-                self._current_user_doc, self._current_user_ref,
-            )
-        return f"Noted: {preference_key} = {preference_value}"
-
-    def flag_off_topic(self, reason: str) -> str:
-        """
-        Flag a message as off-topic (not related to travel).
-
-        Call this when the user's message is clearly about a non-travel
-        domain (e.g. coding, math, politics).  Do NOT call for jokes,
-        banter, or anything that could plausibly relate to travel.
-
-        Args:
-            reason: Why the message is off-topic.
-
-        Returns:
-            Hidden instruction for the model.
-        """
-        logger.info("🔧 Tool call: flag_off_topic (reason: %s)", reason)
-        self._off_topic_flagged = True
-        
-        if self._current_user_doc and self._current_user_ref:
-            off_topic_guard.record_off_topic(
-                self._current_user_doc, self._current_user_ref
-            )
-
-        return (
-            "[HIDDEN INSTRUCTION - DO NOT SHOW TO USER]: "
-            "This is a travel assistant. Gently redirect the user."
-        )
-
-    def record_feedback(self, category: str, text: str) -> str:
-        """
-        Record a user feedback signal to the analytics backend.
-
-        Call this whenever the user expresses any signal about their experience
-        — positive, negative, confusion, a retry request, a feature suggestion,
-        or any other implicit signal that reveals how well the system is serving
-        them.  This runs asynchronously and will NOT delay your reply.
-
-        Args:
-            category: One of: positive, negative, confusion, retry,
-                      suggestion, other.
-            text:     The user's message or the feedback as expressed.
-
-        Returns:
-            Hidden instruction for the model to still reply to the user.
-        """
-        logger.info("🔧 Tool call: record_feedback(category=%s)", category)
-        self.feedback_tool.record(
-            user_id=self._current_user_id,
-            text=text,
-            category=category,
-            user_doc=self._current_user_doc,
-            _sync=False,  # always async — never block the response
-        )
-        return (
-            "[HIDDEN — DO NOT SHOW TO USER] "
-            "Feedback recorded. Now respond naturally to the user's message."
-        )
-
-    def get_current_time(self) -> str:
-        """
-        Retrieves the current date and time in ISO format.
-        
-        Call this when the user asks for the time, or when you need to know 
-        the current date/time to give context-aware travel advice (e.g., 
-        "Where should I go this month?", "What's the weather like now?").
-        
-        Returns:
-            The current local date and time.
-        """
-        logger.info("🔧 Tool call: get_current_time")
-        import datetime
-        now = datetime.datetime.now().astimezone()
-        formatted = now.strftime("%A, %Y-%m-%d %H:%M:%S %Z")
-        return f"The current date and time is: {formatted}"
-
-    def get_my_credits(self) -> str:
-        """
-        Returns the user's current credit balance.
-
-        Call this when the user asks how many credits they have left,
-        what their balance is, or anything related to their usage/credit status.
-
-        Returns:
-            A message with the user's current credit balance and a brief
-            explanation of what credits are used for.
-        """
-        logger.info("🔧 Tool call: get_my_credits")
-        balance = credit_manager.get_balance(self._current_user_doc)
-        return (
-            f"[RETURN THIS TO USER] "
-            f"You have *{balance} credits* remaining. "
-            f"Credits are used for AI-powered features like destination discovery, "
-            f"itinerary planning, and weather checks. "
-            f"Each interaction costs 1 or more credits depending on complexity. "
-            f"You can top up with a promo code via /promo YOUR_CODE."
-        )
-
-    def check_weather(self, location: str, days: int = 7) -> str:
-        """
-        Retrieves the weather forecast for a given location.
-        
-        Call this when the user asks about the weather, or when you need to 
-        provide weather-aware travel advice (e.g., "What's the weather like in 
-        Bali next week?", "Should I bring a jacket to London tomorrow?").
-        
-        Args:
-            location: The most specific location string possible (e.g. "Kuta, Bali, Indonesia"). If the user only provides a region/island, infer a representative city based on their context (e.g. "Denpasar, Bali, Indonesia"). ALWAYS include Region/Island and Country if known to avoid deep ambiguity.
-            days: The number of days for the forecast (default is 7, max 10).
-            
-        Returns:
-            A formatted weather summary for the requested location.
-        """
-        logger.info(f"🔧 Tool call: check_weather(location={location}, days={days})")
-        
-        # 1. Geocode location
-        coords = WeatherService.get_coordinates(location)
-        if not coords:
-            return f"I'm sorry, I couldn't find the location '{location}'. Could you be more specific?"
-        
-        # 2. Fetch weather
-        weather_data = WeatherService.get_weather(coords["lat"], coords["lng"], days=min(days, 10))
-        if not weather_data:
-            return f"I'm sorry, I'm having trouble fetching the weather for {coords['name']} right now."
-            
-        # 3. Format result
-        full_name = f"{coords['name']}, {coords['country']}" if coords.get("country") else coords["name"]
-        return WeatherService.format_weather_summary(full_name, weather_data)
-
-    # ── main entry point ──
+        # Specialized agents (stateless, shared instances)
+        self._router_agent = RouterAgent(client=self._client)
+        self._chat_agent = ChatAgent(client=self._client)
+        self._trip_agent = TripAgent(client=self._client)
+        self._planner_agent = PlannerAgent(client=self._client)
 
     def process_request(
         self,
@@ -397,15 +82,14 @@ class OrchestratorAgent:
         status_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """
-        Process a user message through the single-call orchestrator.
+        Route a user message to the appropriate specialized agent.
+
+        Returns {"text": str, "action": str}.
         """
         t_total = time.time()
-        self._current_user_id = telegram_user_id
-        self._current_status_callback = status_callback
-        self._off_topic_flagged = False
-        self._token_records = []
+        token_records: list[Dict[str, Any]] = []
 
-        # 1. Fetch user profile
+        # ── 1. Fetch user profile ───────────────────────────────────────────
         user_doc, user_doc_ref = self.user_tool.get_user_with_ref(telegram_user_id)
         if not user_doc:
             logger.info("New user detected: %s", telegram_user_id)
@@ -420,209 +104,237 @@ class OrchestratorAgent:
                 "action": "ONBOARDING_REQUIRED",
             }
 
-        self._current_user_doc = user_doc
-        self._current_user_ref = user_doc_ref
-
-        # 1b. Credit gate — block before any LLM call if credits exhausted
+        # ── 1b. Credit gate ─────────────────────────────────────────────────
         if not credit_manager.has_credits(user_doc):
-            logger.info("User %s has no credits. Blocking request.", telegram_user_id)
-            return {
-                "text": credit_manager.CREDITS_EXHAUSTED_MSG,
-                "action": "NO_CREDITS",
-            }
+            logger.info("User %s has no credits.", telegram_user_id)
+            return {"text": credit_manager.CREDITS_EXHAUSTED_MSG, "action": "NO_CREDITS"}
 
-        # 2. Build conversational context
+        # ── 2. Restriction check ────────────────────────────────────────────
+        restriction_msg = off_topic_guard.is_restricted(user_doc)
+        if restriction_msg:
+            logger.info("User %s is restricted.", telegram_user_id)
+            return {"text": restriction_msg, "action": "RESTRICTED"}
+
+        # ── 3. Build conversation context ───────────────────────────────────
         t = time.time()
-        self._current_conv_context = self.conversation_manager.build_context_block(
-            user_doc
-        )
+        conv_context = self.conversation_manager.build_context_block(user_doc)
         logger.debug("⏱ Context build: %s", _elapsed(t))
 
-        profile_summary = build_profile_summary(user_doc)
-        user_content = self._build_user_content(
-            profile_summary, self._current_conv_context, message_text
-        )
+        current_time = _current_time_str()
+        user_name = user_doc.get("user_name", "Traveler")
+        profile = user_doc.get("user_profile", {})
+        tone_preference = profile.get("tone_preference", "casual and friendly")
 
-        # 3. Single LLM call with automatic function calling.
-        # Retries up to 2x on 429 RESOURCE_EXHAUSTED (Vertex AI quota) with
-        # exponential backoff.  The SDK's built-in tenacity exhausts quickly;
-        # our outer loop gives the quota bucket time to recover.
-        logger.info("\n=== ORCHESTRATOR PROMPT INPUT ===\n%s\n=================================", user_content)
+        # ── 4. Router — classify intent ─────────────────────────────────────
         t = time.time()
-        _max_retries = 2
-        _retry_waits = [3, 6]  # seconds between attempts
-        try:
-            raw_response = None
-            for _attempt in range(_max_retries + 1):
-                try:
-                    raw_response = self._call_llm(user_content)
-                    break  # success — exit retry loop
-                except Exception as _exc:
-                    # Extract detailed error info
-                    is_429 = "429" in str(_exc) or "RESOURCE_EXHAUSTED" in str(_exc)
-                    error_details = str(_exc)
-                    if hasattr(_exc, 'response_json') and _exc.response_json:
-                        import json
-                        error_details = f"{error_details} | JSON: {json.dumps(_exc.response_json)}"
-                    
-                    if is_429 and _attempt < _max_retries:
-                        wait = _retry_waits[_attempt]
-                        logger.warning(
-                            "Orchestrator LLM 429 (attempt %d/%d). Retrying in %ds. Error: %s",
-                            _attempt + 1, _max_retries + 1, wait, error_details
-                        )
-                        if status_callback:
-                            status_callback("⏳ Still thinking...")
-                        time.sleep(wait)
-                    else:
-                        if is_429:
-                            logger.error("Orchestrator LLM 429 persistent error: %s", error_details)
-                        raise  # re-raise for the outer except to handle
-            response = raw_response.text if hasattr(raw_response, 'text') else raw_response
-            
-            if not response:
-                fr_msg = "I had trouble coming up with a response just now."
-                if hasattr(raw_response, 'candidates') and raw_response.candidates:
-                    fr = raw_response.candidates[0].finish_reason
-                    logger.warning("LLM returned empty text. Finish reason: %s (type: %s)", fr, type(fr))
-                    # In python SDK, finish_reason can be an enum or int
-                    if "MAX_TOKENS" in str(fr) or fr == 3:
-                        fr_msg = "Oops! I had too much to say and hit my message limit! Could you ask for something a bit more specific?"
-                        logger.warning("Message converted to MAX_TOKENS error.")
-                    elif "SAFETY" in str(fr) or fr == 4:
-                        fr_msg = "Sorry, I can't provide that due to safety guidelines."
-                        logger.warning("Message converted to SAFETY error.")
-                    else:
-                        logger.warning("Unhandled finish_reason. Using default empty error msg.")
-                else:
-                    logger.warning("LLM returned no response and no candidates block! Raw: %s", raw_response)
-                response = fr_msg
-            # Log token usage
-            if hasattr(raw_response, 'usage_metadata'):
-                orch_usage = usage_tracker.log_and_accumulate(
-                    agent_name="orchestrator",
-                    model_name=self._model_name,
-                    user_id=telegram_user_id,
-                    response=raw_response,
-                    latency_ms=(time.time() - t) * 1000,
-                    user_doc_ref=user_doc_ref,
+        router_result = self._router_agent.classify(
+            message=message_text,
+            user_doc=user_doc,
+            user_doc_ref=user_doc_ref,
+            user_id=telegram_user_id,
+            user_name=user_name,
+            tone_preference=tone_preference,
+            current_time=current_time,
+        )
+        logger.info("⏱ Router: %s", _elapsed(t))
+
+        # Log router token usage
+        raw_router = router_result.get("raw_response")
+        if raw_router and hasattr(raw_router, "usage_metadata"):
+            router_usage = usage_tracker.log_and_accumulate(
+                agent_name="router",
+                model_name="gemini-3.1-flash-lite-preview",
+                user_id=telegram_user_id,
+                response=raw_router,
+                latency_ms=router_result.get("latency_ms", 0),
+                user_doc_ref=user_doc_ref,
+            )
+            if router_usage.get("total_tokens", 0) > 0:
+                token_records.append(router_usage)
+
+        intent = router_result.get("intent", "CHAT")
+        preference_updated = router_result.get("preference_updated")
+        router_response = router_result.get("response")
+
+        logger.info("Intent: %s | Preference update: %s", intent, preference_updated)
+
+        # ── 5. Handle intent ────────────────────────────────────────────────
+
+        # ── 5a. OFF_TOPIC or direct router response ─────────────────────────
+        if intent == "OFF_TOPIC":
+            guard_result = off_topic_guard.record_off_topic(user_doc, user_doc_ref)
+            if guard_result.get("restricted"):
+                # Threshold hit — use the hard restriction message
+                restriction_msg = off_topic_guard.is_restricted(
+                    {**user_doc, "off_topic": {
+                        "restricted_until": guard_result.get("restricted_until")
+                    }}
                 )
-                if orch_usage.get("total_tokens", 0) > 0:
-                    self._token_records.append(orch_usage)
-            
-            # Save raw response as string for logging/debugging if needed
-            self._last_raw_response = str(raw_response)
-        except RuntimeError as e:
-            if "unavailable" in str(e).lower():
-                return {"text": "LLM features are currently unavailable.", "action": "RESPONSE"}
-            logger.exception("Orchestrator LLM call failed.")
-            name = user_doc.get("user_name", "Traveler")
-            return {"text": f"Sorry {name}, I hit a snag processing your message.", "action": "RESPONSE"}
-        except Exception:
-            logger.exception("Orchestrator LLM call failed.")
-            name = user_doc.get("user_name", "Traveler")
-            response_text = (
-                f"Sorry {name}, I hit a snag processing your message. "
-                "Please try again in a moment."
+                response_text = restriction_msg or "You're temporarily restricted due to off-topic messages."
+            else:
+                # Use the router's natural, warm redirection response
+                response_text = router_response or (
+                    "I'm really only good at travel stuff! 😄 "
+                    "Got any trips on your mind?"
+                )
+            _save_and_finish(
+                self, user_doc, user_doc_ref, message_text, response_text,
+                telegram_user_id, token_records, t_total,
             )
             return {"text": response_text, "action": "RESPONSE"}
-        logger.info("⏱ LLM call (total incl. tools): %s", _elapsed(t))
 
-        # 4. Reset off-topic counter if this was a travel message
-        if not self._off_topic_flagged and user_doc_ref:
+        # If the router provided a direct response (e.g., for get_my_credits)
+        elif router_response:
+            if user_doc_ref:
+                off_topic_guard.reset(user_doc_ref)
+            _save_and_finish(
+                self, user_doc, user_doc_ref, message_text, router_response,
+                telegram_user_id, token_records, t_total,
+            )
+            return {"text": router_response, "action": "RESPONSE"}
+
+        # ── 5b. Travel intents — reset off-topic counter ────────────────────
+        if user_doc_ref:
             off_topic_guard.reset(user_doc_ref)
 
-        # 5. Save conversation history
-        if user_doc_ref:
-            t = time.time()
-            self.conversation_manager.append_and_save(
-                user_doc, user_doc_ref, message_text, response
+        # ── 5c. Dispatch to specialized agent ───────────────────────────────
+        agent_result = _dispatch(
+            self, intent, user_doc, message_text, conv_context,
+            current_time, preference_updated, status_callback,
+        )
+
+        response_text = agent_result.get("text", "")
+
+        # Handle empty/error responses
+        if not response_text:
+            response_text = "I had trouble coming up with a response just now. Please try again."
+
+        # Log specialized agent usage
+        raw_agent = agent_result.get("_raw_response")
+        if raw_agent and hasattr(raw_agent, "usage_metadata"):
+            agent_name = {"CHAT": "chat", "TRIP": "trip", "PLAN": "planner"}.get(intent, "agent")
+            model_name = {
+                "CHAT": "gemini-3.1-flash-lite-preview",
+                "TRIP": "gemini-3-flash-preview",
+                "PLAN": "gemini-3-flash-preview",
+            }.get(intent, "gemini-3-flash-preview")
+            agent_usage = usage_tracker.log_and_accumulate(
+                agent_name=agent_name,
+                model_name=model_name,
+                user_id=telegram_user_id,
+                response=raw_agent,
+                latency_ms=agent_result.get("_latency_ms", 0),
+                user_doc_ref=user_doc_ref,
             )
-            logger.debug("⏱ Conversation save: %s", _elapsed(t))
+            if agent_usage.get("total_tokens", 0) > 0:
+                token_records.append(agent_usage)
 
-        logger.info("\n=== ORCHESTRATOR FINAL OUTPUT ===\n%s\n=================================", response)
-        logger.info("⏱ TOTAL: %s", _elapsed(t_total))
+        # Log SearchAgent usage (including grounding)
+        search_responses = agent_result.get("_search_responses", [])
+        for sr in search_responses:
+            raw_search = sr.get("raw")
+            if raw_search and hasattr(raw_search, "usage_metadata"):
+                search_usage = usage_tracker.log_and_accumulate(
+                    agent_name="search",
+                    model_name="gemini-3.1-flash-lite-preview",
+                    user_id=telegram_user_id,
+                    response=raw_search,
+                    latency_ms=sr.get("lat", 0),
+                    user_doc_ref=user_doc_ref,
+                )
+                if search_usage.get("total_tokens", 0) > 0:
+                    token_records.append(search_usage)
+                
+                grounding_credits = search_usage.get("grounding_cost_credits", 0)
+                if grounding_credits > 0:
+                    token_records.append({
+                        "model_name": "grounding",
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "grounding_cost_credits": grounding_credits,
+                    })
 
-        # 6. Record interaction metric (app-level, never exposed to LLM)
-        metrics_tracker.record_interaction(
-            user_id=telegram_user_id,
-            is_new_user=False,
+        # ── 6. Save history + metrics + deduct credits ──────────────────────
+        _save_and_finish(
+            self, user_doc, user_doc_ref, message_text, response_text,
+            telegram_user_id, token_records, t_total,
         )
 
-        # 7. Deduct credits asynchronously (never blocks the response)
-        if self._token_records and user_doc_ref:
-            cost = credit_manager.calculate_cost(self._token_records)
-            if cost > 0:
-                credit_manager.deduct_credits_async(user_doc_ref, cost)
+        logger.info("\n=== FINAL OUTPUT ===\n%s\n===================", response_text)
+        return {"text": response_text, "action": "RESPONSE"}
 
-        return {"text": response, "action": "RESPONSE"}
 
-    # ── private helpers ──
+# ── private helpers ──────────────────────────────────────────────────────────
 
-    def _build_user_content(
-        self, profile: str, conversation: str, message: str
-    ) -> str:
-        """
-        Assemble the user-message portion of the prompt.
-
-        Structure: stable profile first, then conversation context,
-        then the new message — this ordering maximises implicit cache
-        hits on the Gemini API.
-        """
-        parts = [
-            f"<user_profile_summary>\n{profile}\n</user_profile_summary>",
-            f"<conversation_history>\n{conversation}\n</conversation_history>",
-        ]
-        parts.append(f"\n<user_message>\n{message}\n</user_message>")
-        return "\n".join(parts)
-
-    def _call_llm(self, user_content: str):
-        """
-        Make the LLM call with automatic function calling enabled.
-
-        Returns the raw GenerateContentResponse so the caller can inspect
-        candidates, finish_reason, and usage_metadata.
-
-        The SDK will:
-        1. Send the prompt to the model
-        2. If the model returns a function_call, execute the tool
-        3. Feed the tool result back to the model
-        4. Return the model's final response
-        """
-        if not self._client:
-            raise RuntimeError("LLM features are unavailable (missing API key).")
-
-        return self._client.models.generate_content(
-            model=self._model_name,
-            contents=user_content,
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                temperature=0.8,
-                max_output_tokens=8192,
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                    maximum_remote_calls=3
-                ),
-                safety_settings=[
-                    types.SafetySetting(
-                        category=c,
-                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                    ) for c in [
-                        types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                    ]
-                ],
-                tools=[
-                    self.discover_destinations,
-                    self.plan_itinerary,
-                    self.flag_off_topic,
-                    self.get_companion_help,
-                    self.update_preferences,
-                    self.get_current_time,
-                    self.check_weather,
-                    self.record_feedback,
-                    self.get_my_credits,
-                ],
-            ),
+def _dispatch(
+    coordinator: OrchestratorAgent,
+    intent: str,
+    user_doc: Dict[str, Any],
+    message: str,
+    conv_context: str,
+    current_time: str,
+    preference_updated: Optional[Dict[str, str]],
+    status_callback: Optional[Callable[[str], None]],
+) -> Dict[str, Any]:
+    """Dispatch to the correct specialized agent based on intent."""
+    if intent == "TRIP":
+        if status_callback:
+            status_callback("I'm scouting the globe for the perfect spots for you! Just a moment... 🌍")
+        return coordinator._trip_agent.process_request(
+            user_doc=user_doc,
+            message=message,
+            conversation_context=conv_context,
+            current_time=current_time,
+            preference_updated=preference_updated,
         )
+    elif intent == "PLAN":
+        if status_callback:
+            status_callback("I'm putting together a detailed day-by-day plan for you! Give me a few seconds... 🗺️")
+        return coordinator._planner_agent.process_request(
+            user_doc=user_doc,
+            message=message,
+            conversation_context=conv_context,
+            current_time=current_time,
+            preference_updated=preference_updated,
+        )
+    else:  # CHAT (default)
+        return coordinator._chat_agent.process_request(
+            user_doc=user_doc,
+            message=message,
+            conversation_context=conv_context,
+            current_time=current_time,
+            preference_updated=preference_updated,
+        )
+
+
+def _save_and_finish(
+    coordinator: OrchestratorAgent,
+    user_doc: Dict[str, Any],
+    user_doc_ref: Any,
+    message_text: str,
+    response_text: str,
+    telegram_user_id: str,
+    token_records: list,
+    t_total: float,
+) -> None:
+    """Save history, record metrics, and deduct credits."""
+    # Save conversation history
+    if user_doc_ref:
+        coordinator.conversation_manager.append_and_save(
+            user_doc, user_doc_ref, message_text, response_text
+        )
+
+    # Record interaction metric
+    metrics_tracker.record_interaction(
+        user_id=telegram_user_id,
+        is_new_user=False,
+    )
+
+    # Deduct credits asynchronously
+    if token_records and user_doc_ref:
+        cost = credit_manager.calculate_cost(token_records)
+        if cost > 0:
+            credit_manager.deduct_credits_async(user_doc_ref, cost)
+
+    logger.info("⏱ TOTAL: %s", _elapsed(t_total))

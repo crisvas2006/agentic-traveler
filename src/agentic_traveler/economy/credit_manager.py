@@ -44,10 +44,11 @@ MARKUP_MULTIPLIER_GROUNDING = 2
 
 # USD per 1 M tokens
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
-    "gemini-2.5-flash":      {"input": 0.30, "output": 2.50},
-    "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40},
-    "gemini-3.0-flash":      {"input": 0.50, "output": 3.00},
-    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
+    "gemini-2.5-flash":              {"input": 0.30, "output": 2.50},
+    "gemini-2.5-flash-lite":         {"input": 0.10, "output": 0.40},
+    "gemini-3.0-flash":              {"input": 0.50, "output": 3.00},
+    "gemini-3-flash-preview":        {"input": 0.50, "output": 3.00},
+    "gemini-3.1-flash-lite-preview": {"input": 0.10, "output": 0.40},
 }
 
 # USD per grounded prompt (flat add-on charge, billed per sub-agent call that

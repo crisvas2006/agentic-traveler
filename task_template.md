@@ -2,6 +2,14 @@
 
 > This template helps you create comprehensive task documents for AI-driven development. Fill out each section thoroughly to ensure the AI agent has all necessary context and can execute the task systematically.
 
+> **Golden Rule: The spec must be self-contained.** An implementer (human or AI)
+> must be able to execute the task from this file alone, with zero prior context.
+> Never cross-reference a planning document, conversation artifact, or external
+> chat. If something was designed during planning (prompts, schemas, configs,
+> data models, API contracts), **embed it verbatim here**. Prompts in particular
+> capture significant design intent that takes many iterations to reach — do not
+> summarize them or reference an external artifact.
+
 ## 1. Task Overview
 - **Summary:** _Briefly describe the task and desired impact._
 - **Background:** _Relevant history, prior attempts, or related work._
@@ -29,8 +37,17 @@
 
 ## 6. Implementation Plan
 - **High-Level Steps:** _Ordered list of major milestones._
-- **Detailed Tasks:** _Break steps into actionable subtasks._
+- **Detailed Tasks:** _Break steps into actionable subtasks with verification steps._
 - **Dependencies:** _Tasks or teams that must finish first._
+
+> **Embed designed artifacts inline.** For each component that involves a designed
+> artifact, include it directly in the relevant step:
+> - **LLM system prompts** — paste the full prompt text, not a summary.
+> - **JSON schemas / output formats** — include the exact schema.
+> - **Tool definitions** — include the full function signature and docstring.
+> - **Data models / config values** — include exact field names and types.
+> - **Key behavioral rules** (e.g. personalization, safety, routing rules)
+>   — embed them verbatim, not paraphrased.
 
 ## 7. Testing & Validation
 - **Test Strategy:** _Unit, integration, e2e, or manual validation plan._
@@ -56,4 +73,3 @@
 - **Glossary:** _Define acronyms or domain-specific terms._
 - **Reference Materials:** _Links to tickets, specs, research, or dashboards._
 - **Change Log:** _Record iterations of this task document._
-

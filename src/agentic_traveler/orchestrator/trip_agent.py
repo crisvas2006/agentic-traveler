@@ -1,15 +1,12 @@
 """
-Planner Agent — structured multi-day itinerary builder.
+Trip Agent — travel discovery and in-trip companion.
 
-Kept separate from TripAgent because the output format is fundamentally
-different: day-by-day blocks with morning/afternoon/evening activities,
-logistics, and alternatives. This requires:
-  - A dedicated output format enforced by the prompt
-  - Higher reasoning demand for multi-day coherence
-  - A larger output token budget (4500 vs 4000)
+Merges the responsibilities of the former DiscoveryAgent and CompanionAgent.
+Handles all travel-specific tasks that don't require a structured itinerary:
+destination suggestions, in-trip help, travel advice, comparisons.
 
-Google Search grounding is NOT directly enabled — real-time data is
-fetched via the SearchAgent proxy (opt-in only).
+Uses gemini-3-flash-preview. Google Search grounding is NOT directly enabled —
+real-time data is fetched via the SearchAgent proxy (opt-in only).
 """
 
 import logging
@@ -29,55 +26,56 @@ logger = logging.getLogger(__name__)
 _MODEL = "gemini-3-flash-preview"
 
 _SYSTEM_PROMPT = """\
-You are a friendly, expert travel planner chatting with a traveler
-you know personally.
+You are a friendly, deeply knowledgeable travel advisor chatting with
+a traveler you know personally.
 
 You understand their personality, preferences, and travel style from
-their profile. Use this to make every itinerary feel tailor-made —
-not a generic tourist schedule.
+their profile. Use this knowledge to make every suggestion feel natural
+and human — as if you instinctively know what they'd love.
 
-PERSONALIZATION RULES (same as Trip Agent):
-- Weave preferences into the plan implicitly using descriptive adjectives.
-  GOOD: "Tuesday evening at a candlelit trattoria in Trastevere"
-        (because you know they love romance — but you don't say that)
-  BAD: "Since you prefer romantic settings, I chose Trastevere"
-- If they ask WHY something is in the plan, then explain based on
-  their specific preferences.
-- If preference_updated is provided in the context, acknowledge it naturally.
+PERSONALIZATION RULES:
+- Weave their preferences into suggestions implicitly, not explicitly.
+  GOOD: "There's a stunning little gallery tucked away in the old town"
+        (because you know they love art — but you don't say that)
+  BAD: "Since you mentioned you don't like Banksy, I'll skip street art"
+        (never name-drop specific preferences as justifications)
+- Use descriptive adjectives that align with their vibe (romantic,
+  adventurous, serene) — these feel natural.
+- If they ask WHY you suggested something, then it is fine to reference
+  their specific preferences explicitly.
+- If preference_updated is provided in the context, acknowledge it naturally
+  in your response.
 
-OUTPUT FORMAT:
-- Day-by-day structure. For each day:
-  • *Morning* — one activity (1 line: name + what makes it special)
-  • *Afternoon* — one activity (1 line)
-  • *Evening* — one activity (1 line)
-  • Low-energy alternative for the day (1 line)
-- End with: "Want me to adjust anything?"
+BEHAVIOR:
+- Give a 2-3 option high-level summary first, then ask if they want details.
+- For in-trip help: prioritize actionable, immediate options.
+- For discovery: be creative but grounded in what you know about them.
+- Use conversation history — reference things discussed, don't repeat.
 
 SAFETY: You may always discuss what the user brings up. If something is
 harmful or illegal, gently note a concern while still being helpful.
 Never refuse outright — redirect warmly.
 
-WEATHER: If you are planning a trip within the next 10 days, call
-check_weather() proactively. Adapt activities to the forecast and mention
-weather naturally as a reason for choices (e.g. "since it looks cloudy
-on Tuesday..."). Do NOT dump a day-by-day weather breakdown.
+WEATHER: If you are suggesting activities or plans within the next 10 days,
+proactively call check_weather() to inform your recommendations.
+Integrate weather naturally (e.g. "looks like clear skies Tuesday,
+perfect for that coastal hike"). Do NOT dump a day-by-day weather list.
 
-REAL-TIME DATA: For time-sensitive logistics (entry requirements,
-seasonal closures, public holiday dates, event schedules), call
-search_web() — don't guess. Briefly cite sources.
+REAL-TIME DATA: When you need current facts (visa rules, event dates,
+prices, opening hours), call search_web() — don't guess.
 
 Formatting (Telegram):
-- STRICT LENGTH LIMIT: Never exceed 3500 characters. If the user asks
-  for "EVERYTHING", provide a curated summary instead.
-- Use *bold* for day headings and place names.
-- Use numbered lists (1. 2. 3.) for days, bullet points (•) for activities.
+- STRICT LENGTH LIMIT: Never exceed 3500 characters. Curate, don't dump.
+- Use *bold* for place names and highlights.
+- Use bullet points (•) for lists.
 - Do NOT use headers (#), tables, or code blocks.
+- Tone: warm, personal, like a well-traveled friend.
 """
 
 
-class PlannerAgent:
+class TripAgent:
     """
-    Itinerary builder for PLAN-intent messages.
+    Travel agent for TRIP-intent messages.
 
     Stateless service — initialize once, reuse across parallel requests.
     """
@@ -95,7 +93,7 @@ class PlannerAgent:
         preference_updated: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
-        Generate a structured day-by-day itinerary.
+        Generate a personalized travel suggestion or in-trip response.
 
         Returns dict with keys: text, action, _raw_response, _latency_ms,
         _grounding_used.
@@ -126,7 +124,7 @@ class PlannerAgent:
             f"<user_message>\n{message}\n</user_message>"
         )
 
-        logger.debug("PlannerAgent prompt length: %d chars", len(user_content))
+        logger.debug("TripAgent prompt length: %d chars", len(user_content))
         t = time.time()
         try:
             response = self._client.models.generate_content(
@@ -135,7 +133,10 @@ class PlannerAgent:
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,
                     temperature=0.7,
-                    max_output_tokens=4500,
+                    max_output_tokens=3500,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_budget=512,  # tokens
+                    ),
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
                         maximum_remote_calls=3,
                     ),
@@ -157,16 +158,16 @@ class PlannerAgent:
             grounding_used = has_grounding(response)
             return {
                 "text": response.text or "",
-                "action": "PLANNER_RESULTS",
+                "action": "TRIP_RESULTS",
                 "_raw_response": response,
                 "_search_responses": search_responses,
                 "_latency_ms": latency_ms,
                 "_grounding_used": grounding_used,
             }
         except Exception:
-            logger.exception("PlannerAgent LLM call failed.")
+            logger.exception("TripAgent LLM call failed.")
             name = user_doc.get("user_name", "there")
             return {
-                "text": f"Sorry {name}, I hit a snag building the itinerary. Please try again.",
+                "text": f"Sorry {name}, I hit a snag. Please try again in a moment.",
                 "action": "ERROR",
             }

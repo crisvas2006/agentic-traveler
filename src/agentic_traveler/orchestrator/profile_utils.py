@@ -23,7 +23,6 @@ def build_profile_summary(user_doc: Dict[str, Any]) -> str:
     name = user_doc.get("name", user_doc.get("user_name", "Traveler"))
     profile = user_doc.get("user_profile", {})
     extras = user_doc.get("learned_extras", {})
-    conv_summary = user_doc.get("conversation_history", {}).get("summary", "")
 
     parts = [f"Name: {name}"]
     
@@ -82,9 +81,5 @@ def build_profile_summary(user_doc: Dict[str, Any]) -> str:
         parts.append("\nAgent-learned preferences:")
         for k, v in extras.items():
             parts.append(f"  {k}: {v}")
-
-    # --- conversation history summary ---
-    if conv_summary:
-        parts.append(f"\nConversation history summary:\n{conv_summary}")
 
     return "\n".join(parts)
