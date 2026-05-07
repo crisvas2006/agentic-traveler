@@ -132,58 +132,48 @@ This keeps the backend focused on agent logic and state, with Telegram handling 
         
 Core agents (tool-calling architecture):
 
-1.  **Orchestrator Agent** (single entry point)
+1.  **Coordinator** (entry point — no LLM call)
 
     *   Receives every Telegram message.
     *   Loads user context from Firestore.
-    *   If no profile, directs user to complete the Tally form.
-    *   **Decides intent itself** — no separate classifier.
-    *   Routes to specialized agents via **GenAI automatic function calling**:
-        *   `discover_destinations()` — calls the Discovery Agent.
-        *   `plan_itinerary()` — calls the Planner Agent.
-        *   `get_companion_help()` — calls the Companion Agent.
-        *   `update_preferences()` — persists learned preferences to Firestore.
-    *   Ensures conversation remains on-topic via the **Off-topic Guard**.
-    *   **Safety approach**: warns about risks with ⚠️ but never blocks — respects user autonomy.
+    *   Calls the **Router Agent** for intent classification.
+    *   Dispatches to the appropriate specialized agent.
+    *   Handles off-topic restriction and credit deduction.
 
-2.  **Profile Agent**
+2.  **Router Agent** — intent classifier
+
+    *   Classifies user messages: CHAT | TRIP | PLAN | OFF_TOPIC.
+    *   Handles lightweight tools directly: `update_preferences()`, `record_feedback()`, `get_my_credits()`.
+    *   For OFF_TOPIC: generates a warm, natural redirection response.
+
+3.  **Chat Agent** — conversational companion
+
+    *   Handles greetings, banter, emotional support, life advice, casual Q&A.
+    *   Full personality profile + dimension scores injected.
+
+4.  **Trip Agent** — travel discovery and in-trip help
+
+    *   Merges the former Discovery Agent + Companion Agent.
+    *   Handles destination exploration, travel advice, in-trip assistance.
+    *   Implicit personalization (adjectives, not preference name-dropping).
+
+5.  **Planner Agent** — structured itinerary builder
+
+    *   Produces day-by-day itineraries with morning/afternoon/evening blocks.
+    *   Separate from Trip Agent due to distinct output format + longer token budget.
+
+6.  **Search Agent** — grounding proxy
+
+    *   Isolated Google Search grounding — only invoked by other agents when needed.
+    *   Eliminates the always-on $0.035/prompt grounding fee.
+
+7.  **Profile Agent**
 
     *   Converts raw Tally form responses into a structured "Traveler DNA" profile.
-    *   Generates a personalized, persona-driven greeting upon first interaction.
-    *   Organizes data into dimensions: spontaneity, energy, risk tolerance, etc.
 
-3.  **Discovery Agent** (tool function)
-
-    *   Input: enriched profile + trip constraints from chat.
-    *   Produces 3–5 destination candidates with fit explanation, budget band, and travel effort.
-    *   Temperature: 0.7 (creative).
-
-4.  **Planner Agent** (tool function)
-
-    *   Creates flexible day-by-day itineraries tailored to the user's style.
-    *   Includes morning/afternoon/evening suggestions with low-energy alternatives.
-
-5.  **Companion Agent** (tool function)
-
-    *   In-trip assistance — adapts suggestions to mood, energy, weather, and time of day.
-    *   Uses **Real-time Weather Tool** to synthesize actionable recommendations.
-    *   Returns 2–3 options with practical details (e.g., "Museum for a rainy afternoon").
-
-6.  **Conversation Manager**
+8.  **Conversation Manager**
 
     *   Stores recent messages + compacted summary in Firestore.
-    *   Compacts via LLM when buffer exceeds 10 entries to stay within context limits.
-
-7.  **Preference Learner** (tool function)
-
-    *   Extracts signals from ongoing chat to update the long-term profile.
-    *   Maps known fields into `user_profile` and unknown fields into `learned_extras`.
-
-8.  **Off-topic Guard**
-
-    *   Monitors consecutive off-topic messages.
-    *   Implements a cooling-off restriction if the user repeatedly drifts from travel topics.
-    *   State is persisted in Firestore to survive container restarts.
 
 #### Current Model Stack
 
@@ -191,10 +181,11 @@ The system uses a tiered model approach to balance reasoning quality and cost:
 
 | Agent | Model | Rationale |
 | :--- | :--- | :--- |
-| **Orchestrator** | `gemini-3-flash-preview` | Superior tool-calling and intent detection. |
-| **Planner** | `gemini-3-flash-preview` | Complex reasoning for tailored itineraries. |
-| **Discovery** | `gemini-2.5-flash` | High-speed, creative destination brainstorming. |
-| **Companion** | `gemini-2.5-flash` | Reliable, context-aware chat during trips. |
+| **Router** | `gemini-3.1-flash-lite-preview` | Ultra-fast, low-cost classification. |
+| **Chat** | `gemini-3.1-flash-lite-preview` | Responsive conversational agent. |
+| **Search** | `gemini-3.1-flash-lite-preview` | Lightweight grounding proxy. |
+| **Trip** | `gemini-3-flash-preview` | Richer reasoning for travel advice. |
+| **Planner** | `gemini-3-flash-preview` | Multi-day coherence and structured output. |
 | **Analytics** | `gemini-2.5-flash-lite` | Extremely low-cost summarization of logs. |
 
 The backend is stateless: each request reconstructs context from Firestore and tools, then responds directly to Telegram.
