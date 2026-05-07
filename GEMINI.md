@@ -1,3 +1,9 @@
+# Agentic Traveler Monorepo
+This repository contains two isolated systems:
+1. `/frontend`: Next.js 16 app deployed on Vercel.
+2. `/backend`: Python FastAPI/Agentic core deployed on GCP.
+Rule: Never mix dependencies. Frontend code stays in `/frontend`, backend in `/backend`.
+
 # Development Guidelines
 
 ## How to Think

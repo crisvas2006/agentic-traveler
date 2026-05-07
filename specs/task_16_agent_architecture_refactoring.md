@@ -1,4 +1,4 @@
-# Task 31: Agent Architecture Refactoring — Thin Router + Specialized Agents
+# Task 16: Agent Architecture Refactoring — Thin Router + Specialized Agents
 
 > Replace the monolithic orchestrator with a lightweight intent-classifying router that delegates to focused, specialized agents. Isolate Google Search grounding into an on-demand proxy to eliminate unnecessary costs.
 
