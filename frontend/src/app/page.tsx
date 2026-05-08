@@ -85,12 +85,19 @@ function HeroSection() {
           </h1>
 
           <p className="text-lg md:text-xl text-purple-200/80 mb-12 max-w-3xl mx-auto leading-relaxed">
-            Most platforms solve for the cheapest flight or the trendiest hotel. Agentic Traveler solves for the person. An AI travel companion that understands your energy levels, motivations, and life phases to create meaningful journeys.
+            Most platforms solve for the cheapest flight or the trendiest hotel. Trip Genie solves for the person. An AI travel companion that understands your energy levels, motivations, and life phases to create meaningful journeys.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             <Button
               size="lg"
+              onClick={() => {
+                const emailInput = document.getElementById('email-input');
+                if (emailInput) {
+                  emailInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  setTimeout(() => emailInput.focus(), 500);
+                }
+              }}
               className="bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white px-8 py-6 text-lg rounded-full shadow-lg shadow-purple-500/30 transition-all hover:shadow-purple-500/50 hover:scale-105"
             >
               Request Alpha Access
@@ -99,6 +106,9 @@ function HeroSection() {
             <Button
               size="lg"
               variant="outline"
+              onClick={() => {
+                document.getElementById('proof-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
               className="border-purple-500/30 text-purple-200 hover:bg-purple-500/10 px-8 py-6 text-lg rounded-full backdrop-blur-sm"
             >
               Learn More
@@ -122,15 +132,29 @@ function ProofSection() {
   const sectionRef = useRef<HTMLElement>(null);
   const isInView = useInView(sectionRef);
 
-  const stats = [
-    { value: "1+", label: "Early Adopters" },
-    { value: "150+", label: "Destinations" },
-    { value: "97%", label: "Satisfaction" },
-    { value: "24/7", label: "AI Support" },
+  const roadmap = [
+    {
+      phase: "Current Alpha",
+      title: "Discovery & Planning",
+      description: "Core AI planning and personalized destination discovery with realtime events and weather data.",
+      active: true
+    },
+    {
+      phase: "Upcoming",
+      title: "Interactive Itineraries",
+      description: "Trip structure with multiple layers and map.",
+      active: false
+    },
+    {
+      phase: "Future Vision",
+      title: "Seamless & Social",
+      description: "Group trips, automated bookings, social matching.",
+      active: false
+    },
   ];
 
   return (
-    <section ref={sectionRef} className="py-24 bg-gradient-to-b from-[#0a0118] to-[#1a0a2e] relative overflow-hidden">
+    <section id="proof-section" ref={sectionRef} className="py-24 bg-gradient-to-b from-[#0a0118] to-[#1a0a2e] relative overflow-hidden">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(139,92,246,0.1)_0%,transparent_70%)]" />
 
       <div className="container mx-auto px-4 relative z-10">
@@ -141,71 +165,44 @@ function ProofSection() {
           )}
         >
           <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-purple-200 to-violet-200 bg-clip-text text-transparent">
-            Trusted by Travelers Worldwide
+            The Journey Ahead
           </h2>
           <p className="text-lg text-purple-200/70 max-w-2xl mx-auto">
-            Join thousands who have transformed their travel experience with personalized AI guidance
+            Help us shape the future of travel. Here is what we are building together.
           </p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-5xl mx-auto">
-          {stats.map((stat, index) => (
+        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+          {roadmap.map((item, index) => (
             <div
               key={index}
               className={cn(
-                "text-center p-6 rounded-2xl bg-purple-500/5 border border-purple-500/10 backdrop-blur-sm transition-all duration-1000 hover:bg-purple-500/10 hover:border-purple-500/20",
+                "relative p-8 rounded-2xl border backdrop-blur-sm transition-all duration-1000 hover:scale-105",
+                item.active
+                  ? "bg-purple-500/10 border-purple-500/30 shadow-[0_0_30px_-5px_rgba(168,85,247,0.3)]"
+                  : "bg-purple-500/5 border-purple-500/10 hover:bg-purple-500/10",
                 isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
               )}
-              style={{ transitionDelay: `${index * 100 + 400}ms` }}
+              style={{ transitionDelay: `${index * 150 + 400}ms` }}
             >
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-purple-400 to-violet-400 bg-clip-text text-transparent mb-2">
-                {stat.value}
-              </div>
-              <div className="text-purple-200/60 text-sm">{stat.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Testimonial Cards */}
-        <div className="mt-20 grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-          {[
-            {
-              name: "Sarah Chen",
-              role: "Digital Nomad",
-              content: "Finally, a travel app that understands I need downtime between adventures. The AI actually gets me.",
-              rating: 5,
-            },
-            {
-              name: "Marcus Rodriguez",
-              role: "Adventure Seeker",
-              content: "The app suggested destinations I never would have considered, and they were perfect.",
-              rating: 5,
-            },
-            {
-              name: "Emma Thompson",
-              role: "Solo Traveler",
-              content: "Real-time adaptation saved my trip when weather turned bad. The AI suggested alternatives that made the day even better.",
-              rating: 5,
-            },
-          ].map((testimonial, index) => (
-            <div
-              key={index}
-              className={cn(
-                "p-6 rounded-2xl bg-purple-500/5 border border-purple-500/10 backdrop-blur-sm transition-all duration-1000 hover:bg-purple-500/10",
-                isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
+              {item.active && (
+                <div className="absolute -top-3 -right-3">
+                  <span className="relative flex h-6 w-6">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-6 w-6 bg-purple-500 items-center justify-center">
+                      <Sparkles className="w-3 h-3 text-white" />
+                    </span>
+                  </span>
+                </div>
               )}
-              style={{ transitionDelay: `${index * 150 + 600}ms` }}
-            >
-              <div className="flex gap-1 mb-4">
-                {[...Array(testimonial.rating)].map((_, i) => (
-                  <Star key={i} className="w-4 h-4 fill-purple-400 text-purple-400" />
-                ))}
+              <div className={cn(
+                "text-sm font-semibold mb-2 uppercase tracking-wider",
+                item.active ? "text-purple-300" : "text-purple-200/50"
+              )}>
+                {item.phase}
               </div>
-              <p className="text-purple-200/80 mb-4 italic">"{testimonial.content}"</p>
-              <div>
-                <div className="font-semibold text-purple-200">{testimonial.name}</div>
-                <div className="text-sm text-purple-200/60">{testimonial.role}</div>
-              </div>
+              <h3 className="text-2xl font-bold text-purple-200 mb-4">{item.title}</h3>
+              <p className="text-purple-200/70 leading-relaxed">{item.description}</p>
             </div>
           ))}
         </div>
@@ -343,23 +340,24 @@ function CTASection() {
           </h2>
 
           <p className="text-lg text-purple-200/80 mb-12 leading-relaxed">
-            Agentic Traveler is currently in a closed alpha phase. Access is being granted in small waves to ensure the coordination of specialized agents remains precise and deeply personalized for every traveler.
+            Trip Genie is currently in a closed alpha phase. Access is being granted in small waves to ensure the coordination of specialized agents remains precise and deeply personalized for every traveler.
           </p>
 
           <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-500/10 to-violet-500/10 border border-purple-500/20 backdrop-blur-sm">
-            <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4">
+            <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row items-center gap-4">
               <Input
+                id="email-input"
                 type="email"
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="flex-1 bg-purple-500/5 border-purple-500/20 text-purple-200 placeholder:text-purple-200/40 focus:border-purple-500/40 rounded-full px-6 py-6 text-lg"
+                className="flex-1 w-full bg-purple-500/5 border-purple-500/20 text-purple-200 placeholder:text-purple-200/40 focus:border-purple-500/40 rounded-full px-6 h-16 text-lg"
               />
               <Button
                 type="submit"
                 size="lg"
-                className="bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white px-8 py-6 text-lg rounded-full shadow-lg shadow-purple-500/30 transition-all hover:shadow-purple-500/50 hover:scale-105 whitespace-nowrap"
+                className="w-full sm:w-auto h-16 bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white px-8 text-lg rounded-full shadow-lg shadow-purple-500/30 transition-all hover:shadow-purple-500/50 hover:scale-105 whitespace-nowrap"
               >
                 Yes, I want in!
                 <Mail className="ml-2 w-5 h-5" />
@@ -384,7 +382,7 @@ function Footer() {
         <div className="grid md:grid-cols-4 gap-8 mb-8">
           <div>
             <h3 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-violet-400 bg-clip-text text-transparent mb-4">
-              Agentic Traveler
+              Trip Genie
             </h3>
             <p className="text-purple-200/60 text-sm">
               Travel for the individual, not the average.
@@ -422,18 +420,9 @@ function Footer() {
 
         <div className="pt-8 border-t border-purple-500/10 flex flex-col sm:flex-row justify-between items-center gap-4">
           <p className="text-purple-200/60 text-sm">
-            © 2026 Agentic Traveler. All rights reserved.
+            © 2026 Trip Genie. All rights reserved.
           </p>
           <div className="flex gap-4">
-            <a href="#" className="text-purple-200/60 hover:text-purple-400 transition-colors">
-              <Users className="w-5 h-5" />
-            </a>
-            <a href="#" className="text-purple-200/60 hover:text-purple-400 transition-colors">
-              <MapPin className="w-5 h-5" />
-            </a>
-            <a href="#" className="text-purple-200/60 hover:text-purple-400 transition-colors">
-              <Mail className="w-5 h-5" />
-            </a>
           </div>
         </div>
       </div>
@@ -442,7 +431,7 @@ function Footer() {
 }
 
 // Main Component
-export default function AgenticTravelerLanding() {
+export default function TripGenieLanding() {
   return (
     <div className="min-h-screen bg-[#0a0118] text-white">
       <HeroSection />
