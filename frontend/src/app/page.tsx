@@ -1,11 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { useEffect, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
+import { useRef, useState } from "react";
+import { cn } from "../lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sparkles, Compass, Zap, Shield, Mail, ArrowRight, MapPin, Calendar, Users, Star } from "lucide-react";
+import { Sparkles, Compass, Zap, Shield, ArrowRight, Calendar } from "lucide-react";
 
 import { useInView } from "@/hooks/use-in-view";
 import { PageWrapper } from "@/components/layout/PageWrapper";
