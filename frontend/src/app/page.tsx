@@ -18,7 +18,7 @@ function HeroSection() {
   return (
     <section
       ref={heroRef}
-      className="relative min-h-[calc(100vh-64px)] flex items-center justify-center overflow-hidden"
+      className="relative min-h-[calc(100vh-64px)] flex items-center justify-center overflow-hidden pt-20 md:pt-0"
     >
 
       <div className="container mx-auto px-4 relative z-10">
@@ -28,7 +28,7 @@ function HeroSection() {
             isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           )}
         >
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm mb-8">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm mb-12">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-semibold text-primary uppercase tracking-wider">Alpha Access Available</span>
           </div>
@@ -39,7 +39,7 @@ function HeroSection() {
               For the Individual,
             </span>
             <br />
-            <span className="text-slate-800/90">
+            <span className="text-foreground/60">
               Not the Average.
             </span>
           </h1>
@@ -77,10 +77,10 @@ function HeroSection() {
         </div>
       </div>
 
-      {/* Scroll Indicator */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce">
-        <div className="w-6 h-10 border-2 border-purple-400/50 rounded-full flex justify-center">
-          <div className="w-1 h-3 bg-purple-400 rounded-full mt-2 animate-pulse" />
+      {/* Scroll Indicator - Hidden on mobile as it overlaps content */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce hidden md:block">
+        <div className="w-6 h-10 border-2 border-foreground/30 rounded-full flex justify-center">
+          <div className="w-1 h-3 bg-foreground/50 rounded-full mt-2 animate-pulse" />
         </div>
       </div>
     </section>
