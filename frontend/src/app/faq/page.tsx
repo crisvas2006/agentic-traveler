@@ -17,7 +17,7 @@ const faqs = [
   },
   {
     question: "Does Trip Genie book flights or hotels for me?",
-    answer: "Not directly. We provide a full itinerary and suggest the best options that fit your profile. We provide links and details so you can book on your preferred platforms with full confidence.",
+    answer: "Not directly. We provide a full itinerary and suggest the best options that fit your profile. Actual booking will be done by you on your preferred platforms.",
   },
   {
     question: "Why do I need to use Telegram?",
@@ -58,12 +58,12 @@ export default function FAQPage() {
 
             <div className="space-y-4">
               {faqs.map((faq, index) => (
-                <div 
+                <div
                   key={index}
                   className={cn(
                     "rounded-2xl border transition-all duration-300",
-                    openIndex === index 
-                      ? "bg-muted border-primary/30" 
+                    openIndex === index
+                      ? "bg-muted border-primary/30"
                       : "bg-muted/50 border-border hover:border-primary/20"
                   )}
                 >

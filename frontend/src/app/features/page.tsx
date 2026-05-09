@@ -2,7 +2,7 @@
 
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Compass, Zap, Shield, Sparkles, Map, Brain, MessageSquare, Lock } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { cn } from "@/lib/utils";
 import { useRef } from "react";
 import { useInView } from "@/hooks/use-in-view";
 
