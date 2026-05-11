@@ -50,32 +50,32 @@ export default function FeaturesPage() {
 
   return (
     <PageWrapper>
-      <section ref={headerRef} className="py-24 relative overflow-hidden">
+      <section ref={headerRef} className="py-20 relative overflow-hidden">
         <div className="container mx-auto px-4 relative z-10">
           <div className={cn(
             "max-w-4xl mx-auto text-center transition-all duration-1000",
             isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           )}>
-            <h1 className="text-5xl md:text-6xl font-bold mb-6 tracking-tight">
+            <h1 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
               Built for the Individual
             </h1>
-            <p className="text-xl text-muted-foreground leading-relaxed mb-16">
-              Trip Genie isn't just another travel planner. It's an agentic system designed to understand you deeply and accompany you everywhere.
+            <p className="text-lg text-muted-foreground leading-relaxed mb-12">
+              Aletheia Travel isn't just another travel planner. It's an agentic system designed to understand you deeply and accompany you everywhere.
             </p>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 text-left">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 text-left">
               {features.map((feature, index) => {
                 const Icon = feature.icon;
                 return (
-                  <div 
+                  <div
                     key={index}
-                    className="p-8 rounded-2xl bg-muted border border-border backdrop-blur-sm hover:border-primary/30 transition-all group hover:bg-background"
+                    className="p-6 rounded-2xl bg-muted border border-border backdrop-blur-sm hover:border-primary/30 transition-all group hover:bg-background"
                   >
-                    <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center mb-6 text-white group-hover:scale-110 transition-transform", feature.color || "bg-primary")}>
-                      <Icon className="w-6 h-6" />
+                    <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center mb-5 text-white group-hover:scale-110 transition-transform", feature.color || "bg-primary")}>
+                      <Icon className="w-5 h-5" />
                     </div>
-                    <h3 className="text-xl font-bold text-foreground mb-3">{feature.title}</h3>
-                    <p className="text-muted-foreground leading-relaxed">
+                    <h3 className="text-xl font-bold text-foreground mb-2">{feature.title}</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
                       {feature.description}
                     </p>
                   </div>

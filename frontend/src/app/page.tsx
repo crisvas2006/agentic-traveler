@@ -18,7 +18,7 @@ function HeroSection() {
   return (
     <section
       ref={heroRef}
-      className="relative min-h-[calc(100vh-64px)] flex items-center justify-center overflow-hidden pt-20 md:pt-0"
+      className="relative min-h-[calc(100vh-64px)] flex flex-col items-center justify-center overflow-hidden py-12"
     >
 
       <div className="container mx-auto px-4 relative z-10">
@@ -28,12 +28,17 @@ function HeroSection() {
             isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           )}
         >
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm mb-12">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm mb-8">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-semibold text-primary uppercase tracking-wider">Alpha Access Available</span>
           </div>
 
-          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 leading-tight">
+          {/* Don't book a trip. Architect a journey. */}
+          <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight mb-4 leading-tight">
+            Don't book a trip.<br />Architect a journey.
+          </h1>
+
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-6 leading-tight">
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent animate-gradient-x bg-[length:200%_auto]">
               Travel planning made smart.<br />
               For the Individual,
@@ -42,16 +47,13 @@ function HeroSection() {
             <span className="text-foreground/60">
               Not the Average.
             </span>
-          </h1>
+          </h2>
 
-          <p className="text-lg md:text-xl text-muted-foreground mb-12 max-w-3xl mx-auto leading-relaxed">
-            Most platforms solve for the cheapest flight or the trendiest hotel. Trip Genie solves for the person. An AI travel companion that understands your energy levels, motivations, and life phases to create meaningful journeys.
-          </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             <Button
               size="lg"
-              className="text-lg px-8 h-14 rounded-full shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all hover:scale-105"
+              className="text-base px-6 h-12 rounded-full shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all hover:scale-105"
               onClick={() => {
                 const emailInput = document.getElementById('email-input');
                 if (emailInput) {
@@ -61,14 +63,14 @@ function HeroSection() {
               }}
             >
               Start Planning
-              <ArrowRight className="ml-2 w-5 h-5" />
+              <ArrowRight className="ml-2 w-4 h-4" />
             </Button>
             <Button
               size="lg"
               variant="outline"
-              className="text-lg px-8 h-14 rounded-full border-border hover:bg-muted/50"
+              className="text-base px-6 h-12 rounded-full border-border hover:bg-muted/50"
               onClick={() => {
-                document.getElementById('proof-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                document.getElementById('proof-section-bg')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
               }}
             >
               Learn More
@@ -78,7 +80,7 @@ function HeroSection() {
       </div>
 
       {/* Scroll Indicator - Hidden on mobile as it overlaps content */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce hidden md:block">
+      <div className="relative mt-12 animate-bounce hidden md:block">
         <div className="w-6 h-10 border-2 border-foreground/30 rounded-full flex justify-center">
           <div className="w-1 h-3 bg-foreground/50 rounded-full mt-2 animate-pulse" />
         </div>
@@ -114,8 +116,8 @@ function ProofSection() {
   ];
 
   return (
-    <section id="proof-section" ref={sectionRef} className="py-24 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.05)_0%,transparent_70%)]" />
+    <section id="proof-section" ref={sectionRef} className="min-h-[calc(100vh-64px)] flex flex-col justify-center py-32 relative overflow-hidden scroll-mt-16">
+      <div id="proof-section-bg" className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.05)_0%,transparent_70%)]" />
 
       <div className="container mx-auto px-4 relative z-10">
         <div
@@ -124,22 +126,23 @@ function ProofSection() {
             isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           )}
         >
-          <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-8">
             Everything You Need for the
             <br />
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Perfect Trip</span>
           </h2>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Powered by AI and designed for travelers who want more from their journeys.
+
+          <p className="text-base md:text-lg text-muted-foreground mb-12 max-w-3xl mx-auto leading-relaxed">
+            Most platforms solve for the cheapest flight or the trendiest hotel. Aletheia Travel solves for the person. An AI travel companion that understands your energy levels, motivations, and life phases to create meaningful journeys.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           {roadmap.map((item, index) => (
             <div
               key={index}
               className={cn(
-                "relative p-8 rounded-2xl border backdrop-blur-sm transition-all duration-1000 hover:scale-105",
+                "relative p-6 rounded-2xl border backdrop-blur-sm transition-all duration-1000 hover:scale-105",
                 item.active
                   ? "bg-primary/10 border-primary/30 shadow-lg shadow-primary/5"
                   : "bg-muted border-border hover:bg-background hover:border-primary/20",
@@ -149,22 +152,22 @@ function ProofSection() {
             >
               {item.active && (
                 <div className="absolute -top-3 -right-3">
-                  <span className="relative flex h-6 w-6">
+                  <span className="relative flex h-5 w-5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/40 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-6 w-6 bg-primary items-center justify-center">
-                      <Sparkles className="w-3 h-3 text-white" />
+                    <span className="relative inline-flex rounded-full h-5 w-5 bg-primary items-center justify-center">
+                      <Sparkles className="w-2.5 h-2.5 text-white" />
                     </span>
                   </span>
                 </div>
               )}
               <div className={cn(
-                "text-sm font-semibold mb-2 uppercase tracking-wider",
+                "text-xs font-semibold mb-2 uppercase tracking-wider",
                 item.active ? "text-primary" : "text-muted-foreground"
               )}>
                 {item.phase}
               </div>
-              <h3 className="text-2xl font-bold text-foreground mb-4">{item.title}</h3>
-              <p className="text-muted-foreground leading-relaxed">{item.description}</p>
+              <h3 className="text-xl font-bold text-foreground mb-3">{item.title}</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">{item.description}</p>
             </div>
           ))}
         </div>
@@ -206,44 +209,44 @@ function FeaturesSection() {
   ];
 
   return (
-    <section ref={sectionRef} className="py-24 relative overflow-hidden">
+    <section ref={sectionRef} className="py-20 relative overflow-hidden">
       <div className="absolute inset-0">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-[120px]" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-600/5 rounded-full blur-[120px]" />
+        <div className="absolute top-0 left-1/4 w-80 h-80 bg-primary/5 rounded-full blur-[100px]" />
+        <div className="absolute bottom-0 right-1/4 w-80 h-80 bg-purple-600/5 rounded-full blur-[100px]" />
       </div>
 
       <div className="container mx-auto px-4 relative z-10">
         <div
           className={cn(
-            "text-center mb-16 transition-all duration-1000",
+            "text-center mb-12 transition-all duration-1000",
             isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           )}
         >
-          <h2 className="text-4xl md:text-5xl font-bold mb-6 tracking-tight">
+          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight">
             How the Companion Works
           </h2>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-base text-muted-foreground max-w-2xl mx-auto">
             A different approach to travel planning that adapts to you, not the other way around.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-8 max-w-6xl mx-auto">
+        <div className="grid md:grid-cols-2 gap-6 max-w-6xl mx-auto">
           {features.map((feature, index) => {
             const Icon = feature.icon;
             return (
               <div
                 key={index}
                 className={cn(
-                  "group p-8 rounded-2xl bg-muted/50 border border-border backdrop-blur-sm transition-all duration-1000 hover:bg-background hover:border-primary/30 hover:scale-105 hover:shadow-xl hover:shadow-primary/5",
+                  "group p-6 rounded-2xl bg-muted/50 border border-border backdrop-blur-sm transition-all duration-1000 hover:bg-background hover:border-primary/30 hover:scale-105 hover:shadow-xl hover:shadow-primary/5",
                   isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
                 )}
                 style={{ transitionDelay: `${index * 150}ms` }}
               >
-                <div className={cn("w-14 h-14 rounded-2xl bg-gradient-to-br flex items-center justify-center mb-6 group-hover:scale-110 transition-transform", feature.color)}>
-                  <Icon className="w-7 h-7 text-white" />
+                <div className={cn("w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center mb-5 group-hover:scale-110 transition-transform", feature.color)}>
+                  <Icon className="w-6 h-6 text-white" />
                 </div>
-                <h3 className="text-2xl font-bold text-foreground mb-4">{feature.title}</h3>
-                <p className="text-muted-foreground leading-relaxed">{feature.description}</p>
+                <h3 className="text-xl font-bold text-foreground mb-3">{feature.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{feature.description}</p>
               </div>
             );
           })}
@@ -252,13 +255,13 @@ function FeaturesSection() {
         {/* Problem Statement */}
         <div
           className={cn(
-            "mt-20 max-w-4xl mx-auto p-8 rounded-2xl bg-primary/5 border border-primary/10 backdrop-blur-sm transition-all duration-1000",
+            "mt-16 max-w-4xl mx-auto p-6 rounded-2xl bg-primary/5 border border-primary/10 backdrop-blur-sm transition-all duration-1000",
             isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           )}
           style={{ transitionDelay: "600ms" }}
         >
-          <h3 className="text-2xl font-bold text-foreground mb-4">The Problem with Static Planning</h3>
-          <p className="text-muted-foreground leading-relaxed">
+          <h3 className="text-xl font-bold text-foreground mb-3">The Problem with Static Planning</h3>
+          <p className="text-sm text-muted-foreground leading-relaxed">
             Hours are spent bouncing between blogs and booking sites with fuzzy desires but no clear destination. The result is often a trip chosen for the price rather than the fit, leading to overcrowded itineraries that fail to adapt when the weather turns or energy fades.
           </p>
         </div>
@@ -267,22 +270,71 @@ function FeaturesSection() {
   );
 }
 
+import { signupForAlpha } from "./actions";
+
 // CTA Section Component
 function CTASection() {
   const sectionRef = useRef<HTMLElement>(null);
   const isInView = useInView(sectionRef);
-  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<{ type: 'success' | 'error' | null, message: string }>({ type: null, message: "" });
+  const [isPending, setIsPending] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Check initial cooldown on mount
+  React.useEffect(() => {
+    const lastSubmitStr = localStorage.getItem('tripGenie_lastSignup');
+    if (lastSubmitStr) {
+      const lastSubmitTime = parseInt(lastSubmitStr, 10);
+      const timeSinceLastSubmit = Date.now() - lastSubmitTime;
+      if (timeSinceLastSubmit < 60000) {
+        setCooldown(Math.ceil((60000 - timeSinceLastSubmit) / 1000));
+      }
+    }
+  }, []);
+
+  // Live countdown timer
+  React.useEffect(() => {
+    if (cooldown <= 0) {
+      if (status.type === 'error' && status.message.includes('wait')) {
+        setStatus({ type: null, message: "" }); // Clear rate limit error when done
+      }
+      return;
+    }
+    const timer = setInterval(() => {
+      setCooldown(prev => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown, status]);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    console.log("Email submitted:", email);
-    setEmail("");
+
+    if (cooldown > 0) {
+      setStatus({ type: 'error', message: `Please wait ${cooldown} seconds before trying again.` });
+      return;
+    }
+
+    setIsPending(true);
+    setStatus({ type: null, message: "" });
+
+    const formData = new FormData(e.currentTarget);
+    const result = await signupForAlpha(formData);
+
+    if (result.success) {
+      localStorage.setItem('tripGenie_lastSignup', Date.now().toString());
+      setCooldown(30); // Start 60s cooldown
+      setStatus({ type: 'success', message: result.message });
+      (e.target as HTMLFormElement).reset();
+    } else {
+      setStatus({ type: 'error', message: result.message });
+    }
+    setIsPending(false);
   };
 
   return (
-    <section ref={sectionRef} className="pt-40 pb-32 bg-gradient-to-br from-blue-600 to-purple-600 text-white relative overflow-hidden">
+    <section ref={sectionRef} className="pt-32 pb-24 bg-gradient-to-br from-blue-600 to-purple-600 text-white relative overflow-hidden">
       <div className="absolute inset-0">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-white/10 rounded-full blur-[150px] animate-pulse" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white/10 rounded-full blur-[120px] animate-pulse" />
       </div>
 
       <div className="container mx-auto px-4 relative z-10">
@@ -292,35 +344,46 @@ function CTASection() {
             isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           )}
         >
-          <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
             Ready to Transform Your Travel Experience?
           </h2>
 
-          <p className="text-lg text-white/90 mb-12 leading-relaxed">
+          <p className="text-base text-white/90 mb-10 leading-relaxed">
             Join other travelers who are already planning smarter with our AI-powered platform. Limited alpha access is now open for early adopters.
           </p>
 
-          <div className="p-8 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-md max-w-2xl mx-auto">
-            <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row items-center gap-4">
+          <div className="p-6 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-md max-w-2xl mx-auto">
+            <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row items-center gap-3">
               <Input
                 id="email-input"
+                name="email"
                 type="email"
                 placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
                 required
-                className="flex-1 w-full bg-white/10 border-white/20 text-white placeholder:text-white/60 focus:border-white/40 rounded-full px-6 h-16 text-lg"
+                className="flex-1 w-full bg-white/10 border-white/20 text-white placeholder:text-white/60 focus:border-white/40 rounded-full px-5 h-14 text-base"
               />
               <Button
                 type="submit"
                 size="lg"
                 variant="secondary"
-                className="w-full sm:w-auto h-16 bg-white text-blue-600 hover:bg-white/90 px-8 text-lg rounded-full shadow-xl transition-all hover:scale-105 whitespace-nowrap font-bold"
+                disabled={isPending || cooldown > 0}
+                className="w-full sm:w-auto h-14 bg-white text-blue-600 hover:bg-white/90 px-6 text-base rounded-full shadow-xl transition-all hover:scale-105 whitespace-nowrap font-bold disabled:opacity-50"
               >
-                Get Started
-                <ArrowRight className="ml-2 w-5 h-5" />
+                {isPending ? "Joining..." : cooldown > 0 ? `Wait ${cooldown}s` : "Get Started"}
+                {!isPending && cooldown <= 0 && <ArrowRight className="ml-2 w-4 h-4" />}
               </Button>
             </form>
+
+            {(status.type || cooldown > 0) && (
+              <div className={cn(
+                "mt-4 p-3 rounded-xl text-sm font-medium animate-in fade-in slide-in-from-top-2",
+                status.type === 'success' ? "bg-green-500/20 text-green-200 border border-green-500/30" :
+                  "bg-red-500/20 text-red-200 border border-red-500/30"
+              )}>
+                {status.type === 'success' ? status.message :
+                  cooldown > 0 ? `Please wait ${cooldown} seconds before trying again.` : status.message}
+              </div>
+            )}
           </div>
 
           <p className="mt-6 text-sm text-white/60">

@@ -5,7 +5,7 @@ Implement a robust and automated workflow for collecting early-adopter emails fo
 
 **Success Criteria:**
 - Email is validated on the client and server.
-- Email is stored in a `alpha_signups` table in Supabase with a `pending` status.
+- Email is stored in a `waitlist` table in Supabase with a `pending` status.
 - A "Welcome to Alpha" email is sent via Resend using a `react-email` template.
 - The database record is updated to `delivered` upon successful sending.
 - Errors are handled gracefully (e.g., duplicate emails, delivery failures).
@@ -13,12 +13,12 @@ Implement a robust and automated workflow for collecting early-adopter emails fo
 ---
 
 ## Approach
-We will use Next.js **Server Actions** to bridge the frontend and backend. This keeps sensitive API keys (Resend, Supabase Service Role) off the client.
+We will use Next.js **Server Actions** to bridge the frontend and backend. This keeps sensitive API keys (Resend, Supabase key) off the client.
 
 ### 1. Data Layer (Supabase)
-We will use a dedicated table `alpha_signups` to track interests.
+We will use a dedicated table `waitlist` to track interests.
 ```sql
-CREATE TABLE alpha_signups (
+CREATE TABLE waitlist (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT UNIQUE NOT NULL,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
@@ -65,9 +65,9 @@ Update `CTASection` to use the new server action and show loading/success states
    - Add `RESEND_API_KEY` to `.env.local`.
    - Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (already planned in Supabase migration spec).
 3. **Database Setup**
-   - Create the `alpha_signups` table in the Supabase SQL editor.
+   - Create the `waitlist` table in the Supabase SQL editor.
 4. **Create Email Template**
-   - Design a premium "Agentic Traveler" branded email using `react-email`.
+   - Design a premium "Aletheia Travel" branded email using `react-email`.
 5. **Implement Server Action**
    - Write the `requestAlphaAccess` function with error handling and DB updates.
 6. **Connect UI**
@@ -79,8 +79,8 @@ Update `CTASection` to use the new server action and show loading/success states
 
 ## Risks & Open Questions
 - **Resend Domain Verification**: On the free tier, Resend might only allow sending to the verified domain owner's email unless a custom domain is verified.
-- **Rate Limiting**: We should implement basic rate limiting on the server action to prevent abuse.
-- **Duplicate Emails**: If a user signs up twice, we should probably update their `updated_at` and re-send the email (or show a "Already signed up" message).
+- **Rate Limiting**: We should implement basic rate limiting on the server action to prevent abuse. Same user should not be able to sign up more than once in a minute.
+- **Duplicate Emails**: If a user signs up twice, we should probably update their `updated_at` and re-send the email.
 
 ---
 

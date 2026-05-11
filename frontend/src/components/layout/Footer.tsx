@@ -9,7 +9,7 @@ export function Footer() {
         <div className="grid md:grid-cols-4 gap-8 mb-8">
           <div>
             <h3 className="text-xl font-bold text-foreground mb-4">
-              Trip Genie
+              Aletheia Travel
             </h3>
             <p className="text-muted-foreground text-sm">
               Travel planning made smart.<br />
@@ -46,7 +46,7 @@ export function Footer() {
 
         <div className="pt-8 border-t border-border flex flex-col sm:flex-row justify-between items-center gap-4">
           <p className="text-muted-foreground text-sm">
-            © 2026 Trip Genie. All rights reserved.
+            © 2026 Aletheia Travel. All rights reserved.
           </p>
         </div>
       </div>
