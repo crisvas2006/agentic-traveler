@@ -60,7 +60,7 @@ app = Flask(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 SECRET_TOKEN = os.getenv("TELEGRAM_SECRET_TOKEN", "")
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+APP_ADMIN_API_KEY = os.getenv("APP_ADMIN_API_KEY", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 # Telegram webhook IP ranges (may change — check @BotNews)
@@ -513,10 +513,10 @@ def health():
 @app.route("/admin/add-credits", methods=["POST"])
 def admin_add_credits():
     """Add credits to a user. Requires X-Admin-Key header."""
-    if not ADMIN_API_KEY:
+    if not APP_ADMIN_API_KEY:
         return jsonify({"ok": False, "error": "Admin API not configured"}), 500
 
-    if request.headers.get("X-Admin-Key") != ADMIN_API_KEY:
+    if request.headers.get("X-Admin-Key") != APP_ADMIN_API_KEY:
         return jsonify({"ok": False, "error": "Unauthorized"}), 403
 
     data = request.get_json(silent=True) or {}

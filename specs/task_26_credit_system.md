@@ -24,7 +24,7 @@ and enabling monetisation later.
 | `agent.py` | Credit gate before LLM call; token record accumulation; async deduction after response |
 | `webhook.py` | `/promo` Telegram command; `POST /admin/add-credits` (X-Admin-Key header); `POST /promo/redeem`; credit init on new user signup |
 | `usage_tracker.py` | Return `model_name` in result dict |
-| `.env` | `DEFAULT_USER_CREDITS`, `ADMIN_API_KEY`, `USD_TO_EUR_RATE` |
+| `.env` | `DEFAULT_USER_CREDITS`, `APP_ADMIN_API_KEY`, `USD_TO_EUR_RATE` |
 
 ### Firestore schema (per user doc)
 

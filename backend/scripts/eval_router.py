@@ -7,7 +7,7 @@ NOT a pytest test — runs real LLM calls and costs credits.
 Usage:
     python scripts/eval_router.py
 
-Requires environment variables: GOOGLE_CLOUD_PROJECT, GEMINI_REGION, etc.
+Requires environment variables: GOOGLE_PROJECT_ID, GEMINI_REGION, etc.
 """
 
 import os

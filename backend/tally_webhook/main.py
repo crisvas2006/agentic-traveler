@@ -3,7 +3,7 @@ import functions_framework
 from flask import jsonify
 from google.cloud import firestore
 
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
+PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
 DATABASE_ID = "agentic-traveler-db"
 USERS_COLLECTION = "users"
 
