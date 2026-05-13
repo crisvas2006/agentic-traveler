@@ -2,9 +2,12 @@ import os
 from google.cloud import firestore
 from dotenv import load_dotenv
 
-# 1. Load the environment variables from the .env file in the parent folder
+from pathlib import Path
+
+# 1. Load the environment variables from the .env file in the backend folder
 # This ensures GOOGLE_APPLICATION_CREDENTIALS is set for the script
-load_dotenv(dotenv_path="../.env")
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 # 2. Setup client (uses your project & database IDs)
 # We pull the project ID from env, falling back to the hardcoded ID

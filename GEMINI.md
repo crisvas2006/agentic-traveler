@@ -64,7 +64,7 @@ For multi-step tasks, state a brief plan:
 
 
 ## Documentation
-- When creating or updating significant features, update `README.md` to reflect the changes.
+- **MANDATORY:** Whenever you develop a new feature or change an existing one, you MUST update `README.md` to reflect the changes. There should never be discrepancies between the codebase and the `README.md`.
 - Documentation should be concise and explain the relevant parts in the code.
 - When creating or updating code, add or update comments for methods and classes if the code is not self-explanatory or the cognitive load is high.
 - All software should be documented in a way that is easy to understand and deploy by following the instructions in the repository.
@@ -74,15 +74,12 @@ Create a `task_spec_<feature_name>.md` before writing any code when a task meets
 - **Scope:** touches more than one module, or expected to take more than ~2 hours.
 - **Cognitive complexity:** introduces mechanisms that are non-trivial to reason about (e.g. new async patterns, state machines, external integrations, security boundaries, data migrations).
 
+**MANDATORY:** Whenever you create a task spec, you MUST strictly follow the structure defined in `task_template.md`. Do not invent your own structure.
+
 The spec serves two purposes: guiding implementation, and helping humans understand what the task involves and why decisions were made.
 
-A task spec should include:
-- **Goal** — what problem this solves and why.
-- **Approach** — the chosen solution and key design decisions.
-- **Alternatives considered** — what was ruled out and why.
-- **Steps** — ordered implementation plan with verification checkpoints.
-- **Risks & open questions** — known unknowns, tradeoffs, dependencies.
-- **Out of scope** — explicit boundaries to prevent scope creep.
+## Agentic Architecture Guidelines
+For all architectural decisions, agent routing, memory management, and tool design, you MUST adhere strictly to the rules laid out in `AGENTIC_GUIDELINES.md`. Read that file before proposing new agents, changing prompts, or adding new tools.
 
 ## Code Quality
 - Write tests before or alongside implementation for the current task.

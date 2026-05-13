@@ -26,7 +26,6 @@ from agentic_traveler.economy import credit_manager
 logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-3.1-flash-lite-preview"
-
 _SYSTEM_PROMPT = """\
 You are the intent router for Agentic Traveler, a travel companion chatbot.
 
@@ -64,7 +63,12 @@ INTENTS:
   in the "response" field. Don't be robotic — redirect like a friend would.
 
 Classify the intent. If the user also reveals a preference, gives
-feedback, or asks about credits remaining, call the appropriate tool AND still classify the intent.
+explicit feedback (praise or complaint), or asks about credits remaining,
+call the appropriate tool AND still classify the intent.
+
+CRITICAL: Do NOT record feedback for regular travel questions, greetings,
+or standard chatter. Only call record_feedback if the user EXPLICITLY comments
+on the quality of the service, suggests a feature, or complains about a problem.
 
 Respond ONLY with a JSON object matching this schema:
 {{
@@ -142,12 +146,13 @@ class RouterAgent:
 
         def record_feedback(category: str, text: str) -> str:
             """
-            Record a user feedback signal to the analytics backend.
+            Record an EXPLICIT user feedback signal to the analytics backend.
 
-            Call this whenever the user expresses any signal about their experience
-            — positive, negative, confusion, a retry request, a feature suggestion,
-            or any implicit signal that reveals how well the system is serving them.
-            This runs asynchronously and will NOT delay your reply.
+            ONLY call this when the user explicitly expresses a signal about their 
+            experience: praise (positive), complaints (negative), frustration (confusion), 
+            requesting a different answer (retry), or a feature suggestion.
+
+            Do NOT call this for regular questions, greetings, or standard chatter.
 
             Args:
                 category: One of: positive, negative, confusion, retry,
