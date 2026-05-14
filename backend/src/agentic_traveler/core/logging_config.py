@@ -9,6 +9,36 @@ will inherit the configured level and format automatically.
 import logging
 import sys
 
+try:
+    import colorama
+    colorama.init()
+except ImportError:
+    colorama = None
+
+class ColorFormatter(logging.Formatter):
+    """Custom formatter to add colors to log levels."""
+    
+    if colorama:
+        COLORS = {
+            logging.DEBUG: colorama.Fore.CYAN,
+            logging.INFO: colorama.Fore.GREEN,
+            logging.WARNING: colorama.Fore.YELLOW,
+            logging.ERROR: colorama.Fore.RED,
+            logging.CRITICAL: colorama.Fore.RED + colorama.Style.BRIGHT,
+        }
+        RESET = colorama.Style.RESET_ALL
+    else:
+        COLORS = {}
+        RESET = ""
+
+    def format(self, record):
+        color = self.COLORS.get(record.levelno, "")
+        reset = self.RESET if color else ""
+        
+        # Colorize the level name
+        record.levelname = f"{color}{record.levelname}{reset}"
+        return super().format(record)
+
 
 def setup_logging(verbose: bool = False) -> None:
     """
@@ -25,7 +55,7 @@ def setup_logging(verbose: bool = False) -> None:
         else "[%(asctime)s] %(levelname)-5s — %(message)s"
     )
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter(fmt, datefmt="%H:%M:%S"))
+    handler.setFormatter(ColorFormatter(fmt, datefmt="%H:%M:%S"))
 
     root = logging.getLogger()
     root.setLevel(level)
@@ -36,3 +66,5 @@ def setup_logging(verbose: bool = False) -> None:
     logging.getLogger("google").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("grpc").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)

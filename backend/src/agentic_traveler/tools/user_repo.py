@@ -310,15 +310,8 @@ def _assemble_user_doc(row: Dict[str, Any]) -> Dict[str, Any]:
         # Off-topic state (nested under off_topic to match old shape)
         "off_topic": {
             "count": ot_row.get("count", 0),
-            "last_flagged_ts": (
-                ot_row.get("last_flagged_ts").isoformat()
-                if ot_row.get("last_flagged_ts")
-                else None
-            ),
-            "restricted_until": (
-                ot_row.get("restricted_until").isoformat()
-                if ot_row.get("restricted_until")
-                else None
-            ),
+            # Supabase returns timestamps as ISO strings — use them directly.
+            "last_flagged_ts": ot_row.get("last_flagged_ts"),
+            "restricted_until": ot_row.get("restricted_until"),
         },
     }
