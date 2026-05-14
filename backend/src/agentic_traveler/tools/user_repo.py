@@ -67,7 +67,7 @@ class UserRepository:
             logger.exception("Failed to fetch user by telegram_id=%s", telegram_id)
             return None, None
 
-        if not resp.data:
+        if resp is None or not resp.data:
             return None, None
 
         user_id = resp.data["id"]
@@ -91,7 +91,7 @@ class UserRepository:
             logger.exception("Failed to fetch user by id=%s", user_id)
             return None
 
-        if not resp.data:
+        if resp is None or not resp.data:
             return None
         return _assemble_user_doc(resp.data)
 

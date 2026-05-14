@@ -62,13 +62,14 @@ INTENTS:
   When you classify OFF_TOPIC, generate a short, warm, natural redirection
   in the "response" field. Don't be robotic — redirect like a friend would.
 
-Classify the intent. If the user also reveals a preference, gives
-explicit feedback (praise or complaint), or asks about credits remaining,
+Classify the intent. If the user's message reveals a NEW preference or CHANGES an existing one,
+gives explicit feedback (praise or complaint), or asks about credits remaining,
 call the appropriate tool AND still classify the intent.
 
-CRITICAL: Do NOT record feedback for regular travel questions, greetings,
-or standard chatter. Only call record_feedback if the user EXPLICITLY comments
-on the quality of the service, suggests a feature, or complains about a problem.
+CRITICAL: Do NOT call update_preferences if the preference is already listed below in your prompt!
+
+CRITICAL: The record_feedback tool is ONLY for when the user is explicitly talking ABOUT THE BOT ITSELF (e.g. "you are a great bot", "this app sucks", "add a dark mode").
+Do NOT use it for travel questions, personal statements, frustration with travel, testing, or random gibberish. If you are not 100% sure it is app feedback, DO NOT call it.
 
 Respond ONLY with a JSON object matching this schema:
 {{
@@ -122,15 +123,18 @@ class RouterAgent:
 
         def update_preferences(preference_key: str, preference_value: str) -> str:
             """
-            Persist a newly learned user preference to their profile.
+            Persist a NEWLY learned or CHANGED user preference to their profile.
 
-            Call this when the user reveals or changes a personal preference
-            such as budget, travel style, dietary needs, avoidances, tone, etc.
-
+            Call this when the user's CURRENT message reveals a new personal preference
+            or changes an existing one (e.g. budget, travel style, dietary needs, tone).
+            
+            CRITICAL: DO NOT call this tool for preferences that are already known and 
+            listed in your system prompt (e.g. if the prompt says 'Tone preference: intense', 
+            do not call this to record 'intense' again).
+            
             Args:
                 preference_key: Short identifier for the preference
-                    (e.g. "budget", "avoidances", "diet", "travel_style",
-                     "trip_vibe", "tone_preference").
+                    (e.g. "budget", "avoidances", "diet", "travel_style", "tone_preference").
                 preference_value: The preference value to store.
 
             Returns:
@@ -146,18 +150,17 @@ class RouterAgent:
 
         def record_feedback(category: str, text: str) -> str:
             """
-            Record an EXPLICIT user feedback signal to the analytics backend.
+            Record an EXPLICIT user feedback signal ABOUT THIS APP to the analytics backend.
 
-            ONLY call this when the user explicitly expresses a signal about their 
-            experience: praise (positive), complaints (negative), frustration (confusion), 
-            requesting a different answer (retry), or a feature suggestion.
-
-            Do NOT call this for regular questions, greetings, or standard chatter.
+            WARNING: ONLY call this if the user is explicitly praising the bot, 
+            complaining about the bot's behavior, or suggesting an app feature. 
+            DO NOT call this for general conversation, travel frustration, jokes, 
+            testing, or random questions. If you are not 100% sure it is app feedback, 
+            DO NOT CALL THIS TOOL.
 
             Args:
-                category: One of: positive, negative, confusion, retry,
-                          suggestion, other.
-                text:     The user's message or the feedback as expressed.
+                category: EXACTLY one of: positive, negative, suggestion.
+                text:     The exact feedback text provided by the user.
 
             Returns:
                 Confirmation string.
