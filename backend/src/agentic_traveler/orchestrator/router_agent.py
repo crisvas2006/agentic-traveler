@@ -231,18 +231,53 @@ class RouterAgent:
             )
             latency_ms = (time.time() - t) * 1000
 
-            # Parse the JSON output
+            # When AFC executes a tool, the model's last turn is a function_response
+            # part, not a text part.  In that case raw.text is None, so json.loads("")
+            # raises JSONDecodeError and we lose the entire result.
+            # Detect this situation and build the result dict from the parts directly.
             text = raw.text or ""
-            try:
-                result = json.loads(text)
-            except json.JSONDecodeError:
-                logger.warning("Router JSON parse failed. Raw text: %s", text)
+            preference_updated_from_tool: dict | None = None
+
+            if not text:
+                # AFC tool-call path: try to recover intent from any function call parts
+                try:
+                    for candidate in (getattr(raw, "candidates", None) or []):
+                        for part in (getattr(candidate.content, "parts", None) or []):
+                            fc = getattr(part, "function_call", None)
+                            if fc and getattr(fc, "name", None) == "update_preferences":
+                                args = dict(fc.args or {})
+                                preference_updated_from_tool = {
+                                    "key": args.get("preference_key", ""),
+                                    "value": args.get("preference_value", ""),
+                                }
+                except Exception:
+                    pass
+
+                # Cannot determine intent from empty text — default to CHAT so the
+                # user still gets a response.  The preference update already ran via
+                # AFC side effect.
                 result = {
                     "intent": "CHAT",
                     "request_summary": message,
-                    "preference_updated": None,
+                    "preference_updated": preference_updated_from_tool,
                     "response": None,
                 }
+                logger.info(
+                    "Router returned no text (AFC tool-only turn). "
+                    "Defaulting intent=CHAT, preference_updated=%s",
+                    preference_updated_from_tool,
+                )
+            else:
+                try:
+                    result = json.loads(text)
+                except json.JSONDecodeError:
+                    logger.warning("Router JSON parse failed. Raw text: %s", text)
+                    result = {
+                        "intent": "CHAT",
+                        "request_summary": message,
+                        "preference_updated": None,
+                        "response": None,
+                    }
 
             result["raw_response"] = raw
             result["latency_ms"] = latency_ms

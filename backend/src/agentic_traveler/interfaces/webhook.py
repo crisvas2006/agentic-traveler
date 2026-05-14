@@ -321,10 +321,12 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
         reply = "Sorry, I hit an error processing your message. Please try again."
 
     if placeholder_msg_id:
+        logger.info("Editing placeholder %s for chat %s (reply_len=%d)", placeholder_msg_id, chat_id, len(reply))
         edit_telegram_message(chat_id, placeholder_msg_id, reply)
         if len(reply) > 4000:
             send_telegram_message(chat_id, reply[4000:])
     else:
+        logger.info("No placeholder — sending fresh reply to chat %s", chat_id)
         send_telegram_message(chat_id, reply)
 
 
