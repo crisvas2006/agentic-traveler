@@ -13,7 +13,7 @@ Evolve the ephemeral conversation history into a persistent, group-chat-ready se
 
 ## Database Architecture (Supabase extensions)
 
-To support this task, the database schema (from Task 29) must be extended to support group chats and vector embeddings.
+To support this task, the database schema (from Task 17) must be extended to support group chats and vector embeddings.
 
 ### 1. Enable Extensions
 ```sql

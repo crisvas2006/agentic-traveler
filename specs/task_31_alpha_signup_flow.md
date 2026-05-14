@@ -1,90 +1,87 @@
 # Task Spec: Alpha Access Signup Flow
 
+> **Status: ✅ COMPLETED** (2026-05-14)
+
 ## Goal
-Implement a robust and automated workflow for collecting early-adopter emails for Agentic Traveler. When a user submits their email, it should be securely stored in Supabase, and they should receive a professionally designed welcome email.
+Implement a robust and automated workflow for collecting early-adopter emails for Agentic Traveler. When a user submits their email, it is securely stored in Supabase, and they receive a professionally designed welcome email via Resend.
 
 **Success Criteria:**
-- Email is validated on the client and server.
-- Email is stored in a `waitlist` table in Supabase with a `pending` status.
-- A "Welcome to Alpha" email is sent via Resend using a `react-email` template.
-- The database record is updated to `delivered` upon successful sending.
-- Errors are handled gracefully (e.g., duplicate emails, delivery failures).
+- ✅ Email is validated on the client and server.
+- ✅ Email is stored in a `waitlist` table in Supabase with metadata (User Agent, Referrer).
+- ✅ A "Welcome to Alpha" email is sent via Resend using a `react-email` template.
+- ✅ The database record is updated to `delivered` upon successful sending.
+- ✅ Errors are handled gracefully (e.g., duplicate emails, delivery failures).
+- ✅ Client-side rate limiting (60s cooldown) implemented to prevent spam.
 
 ---
 
-## Approach
-We will use Next.js **Server Actions** to bridge the frontend and backend. This keeps sensitive API keys (Resend, Supabase key) off the client.
+## Implementation Approach
+We use **Next.js Server Actions** to securely bridge the frontend and backend. This keeps sensitive API keys (Resend, Supabase service keys) off the client.
 
 ### 1. Data Layer (Supabase)
-We will use a dedicated table `waitlist` to track interests.
+The `waitlist` table tracks interest and delivery status.
 ```sql
 CREATE TABLE waitlist (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT UNIQUE NOT NULL,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
+    app_step TEXT,
+    user_agent TEXT,
+    referrer TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Enable RLS
+ALTER TABLE waitlist ENABLE ROW LEVEL SECURITY;
+
+-- Server Actions use the Supabase Service Role (via supabase-js on server), 
+-- bypassing RLS for administrative updates. 
+-- Public/Anon access is restricted.
 ```
 
 ### 2. Email Layer (Resend + React Email)
-- **React Email**: Allows us to build beautiful, responsive emails using React components.
-- **Resend**: A modern developer-first email platform that integrates perfectly with React Email.
+- **React Email**: Used to build the `AlphaWelcomeEmail` component.
+- **Resend**: Used via the `resend` SDK to deliver the rendered HTML.
 
 ### 3. Execution Flow
-1. **Frontend**: User enters email and clicks "Yes, I am in!".
-2. **Action**: `requestAlphaAccess` server action is called.
-3. **Database**: Insert row into `alpha_signups` with `status='pending'`.
-4. **Email**: Generate HTML from the React Email template and send via Resend.
-5. **Update**: On success, update status to `delivered`. On failure, update to `failed`.
-6. **Response**: Return success/error message to the UI.
+1. **Frontend**: User enters email in the `CTASection`.
+2. **Action**: `signupForAlpha` server action (in `actions.tsx`) is invoked.
+3. **Validation**: Server verifies the email and extracts metadata (User-Agent, Referer).
+4. **Database (Insert)**: Insert row into `waitlist` with `status='pending'`.
+5. **Email Delivery**: Renders `AlphaWelcomeEmail` and sends via Resend.
+6. **Database (Update)**: On success, status is updated to `delivered`. On failure, it is updated to `failed`.
+7. **UX**: Client-side localStorage tracks the last signup time to enforce a 60s cooldown.
 
 ---
 
-## Proposed Changes
+## Technical Details
 
-### [NEW] `frontend/src/app/actions/signup.ts`
-The core Server Action logic.
+### [COMPLETED] `frontend/src/app/actions.tsx`
+Contains the `signupForAlpha` Server Action. It handles:
+- Supabase insertion using the server-side client.
+- Resend email dispatch with error handling.
+- Status rollbacks (to `failed`) on catch blocks.
 
-### [NEW] `frontend/src/emails/AlphaWelcomeEmail.tsx`
-The email template defined using `@react-email/components`.
+### [COMPLETED] `frontend/src/emails/AlphaWelcomeEmail.tsx`
+A premium, branded email template built with `@react-email/components`.
 
-### [NEW] `frontend/src/lib/supabase.ts`
-Supabase client initialization using service role keys.
-
-### [MODIFY] `frontend/src/app/page.tsx`
-Update `CTASection` to use the new server action and show loading/success states.
+### [COMPLETED] `frontend/src/app/page.tsx`
+The `CTASection` component:
+- Implements `useTransition`-like behavior with manual pending states.
+- Enforces a 60-second cooldown using `localStorage`.
+- Provides visual feedback for success and error states.
 
 ---
 
-## Steps
-
-1. **Setup Dependencies**
-   - Install `resend`, `@react-email/components`, `@supabase/supabase-js`.
-2. **Environment Configuration**
-   - Add `RESEND_API_KEY` to `.env.local`.
-   - Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (already planned in Supabase migration spec).
-3. **Database Setup**
-   - Create the `waitlist` table in the Supabase SQL editor.
-4. **Create Email Template**
-   - Design a premium "Aletheia Travel" branded email using `react-email`.
-5. **Implement Server Action**
-   - Write the `requestAlphaAccess` function with error handling and DB updates.
-6. **Connect UI**
-   - Refactor `CTASection` to use `useTransition` or `useActionState` for a smooth UX.
-7. **Verification**
-   - Test end-to-end flow with a real email address.
+## Verification Results
+- ✅ **Email Delivery**: Verified that Resend successfully sends emails to the provided addresses.
+- ✅ **Database Integrity**: Confirmed that `user_agent` and `referrer` fields are correctly populated.
+- ✅ **Duplicate Handling**: Verified that duplicate signups trigger a resend of the welcome email but do not crash the flow.
+- ✅ **Rate Limiting**: Verified that the 60s cooldown prevents rapid-fire submissions from the same browser.
 
 ---
 
 ## Risks & Open Questions
-- **Resend Domain Verification**: On the free tier, Resend might only allow sending to the verified domain owner's email unless a custom domain is verified.
-- **Rate Limiting**: We should implement basic rate limiting on the server action to prevent abuse. Same user should not be able to sign up more than once in a minute.
-- **Duplicate Emails**: If a user signs up twice, we should probably update their `updated_at` and re-send the email.
-
----
-
-## Out of Scope
-- Building a full admin dashboard to view signups.
-- Implementing complex CRM integrations (e.g., Hubspot, Mailchimp).
-- Handling email unsubscribes (since this is just a one-time alpha invite).
+- **Domain Verification**: Currently using a verified Resend domain (`noreply@contact.XXXXXXXXXX.XXX`).
+- **Bot Protection**: Client-side cooldown is a good first step, but server-side IP-based rate limiting could be added if targeted by bots.
