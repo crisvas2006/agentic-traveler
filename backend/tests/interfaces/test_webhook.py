@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Patch heavy dependencies before importing the webhook module
-with patch("agentic_traveler.interfaces.webhook.FirestoreUserTool"), \
+with patch("agentic_traveler.interfaces.webhook.UserRepository"), \
      patch("agentic_traveler.interfaces.webhook.OrchestratorAgent"):
     from agentic_traveler.interfaces.webhook import (
         app, _is_rate_limited, _user_timestamps, _rate_lock,
@@ -164,9 +164,16 @@ def test_non_message_update_accepted(client):
 @patch("agentic_traveler.interfaces.webhook.edit_telegram_message")
 @patch("agentic_traveler.interfaces.webhook.send_telegram_message")
 @patch("agentic_traveler.interfaces.webhook.get_user_tool")
-def test_start_with_submission_id(mock_tool, mock_send, mock_edit, client, start_update):
+@patch("agentic_traveler.tools.db_client.get_db")
+@patch("agentic_traveler.orchestrator.profile_agent.ProfileAgent")
+def test_start_with_submission_id(mock_profile_agent, mock_get_db, mock_tool, mock_send, mock_edit, client, start_update):
     """/start <submissionId> links the user and sends welcome."""
-    mock_tool.return_value.link_telegram_user.return_value = ({"user_name": "Alice"}, True)
+    # ProfileAgent.build_initial_profile returns a greeting + structured data
+    mock_profile_agent.return_value.build_initial_profile.return_value = {
+        "greeting": "Hi Alice! Welcome aboard.",
+        "summary": "Adventure traveler",
+    }
+    mock_tool.return_value.link_telegram_user.return_value = ({"name": "Alice", "id": "uuid-1", "user_profile": {}}, True)
 
     resp = client.post(
         "/webhook/test-secret",
@@ -175,17 +182,12 @@ def test_start_with_submission_id(mock_tool, mock_send, mock_edit, client, start
     )
     assert resp.status_code == 200
     mock_tool.return_value.link_telegram_user.assert_called_once_with("abc123", "67890")
-    
+
     # Check that we sent a placeholder and a greeting
     assert mock_send.call_count >= 1
-    # Check that Alice is either in the edit or the greeting
-    found_alice = False
-    for call in mock_send.call_args_list:
-        if "Alice" in str(call):
-            found_alice = True
-    for call in mock_edit.call_args_list:
-        if "Alice" in str(call):
-            found_alice = True
+    # Alice should appear in either the edit (welcome back) or in the greeting message
+    found_alice = any("Alice" in str(c) for c in mock_edit.call_args_list)
+    found_alice = found_alice or any("Alice" in str(c) for c in mock_send.call_args_list)
     assert found_alice is True
 
 
@@ -253,3 +255,66 @@ def test_health_check(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.get_json()["status"] == "ok"
+
+
+# ── Tally Webhook Tests ──
+
+
+@patch("agentic_traveler.interfaces.webhook.TALLY_WEBHOOK_TOKEN", "test-tally-token")
+def test_tally_webhook_unauthorized(client):
+    """Tally webhook without correct auth header → 401."""
+    resp = client.post(
+        "/tally-webhook",
+        json={"data": {"responseId": "123"}},
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+    assert resp.status_code == 401
+
+
+@patch("agentic_traveler.interfaces.webhook.TALLY_WEBHOOK_TOKEN", "test-tally-token")
+@patch("agentic_traveler.tools.db_client.get_db")
+def test_tally_webhook_success(mock_get_db, client):
+    """Valid Tally submission upserts to users and user_profiles."""
+    # Mock Supabase responses
+    mock_db = mock_get_db.return_value
+    mock_table = mock_db.table.return_value
+    mock_upsert = mock_table.upsert.return_value
+    mock_execute = mock_upsert.execute
+    
+    # Return a fake ID for the user insert
+    mock_execute.return_value.data = [{"id": "new-user-uuid"}]
+
+    tally_payload = {
+        "data": {
+            "responseId": "sub_123",
+            "fields": [
+                {"key": "question_Ldg8Ep", "type": "SHORT_ANSWER", "value": "Alice"},
+                {"key": "question_1rxjbl", "type": "SHORT_ANSWER", "value": "Paris"},
+                {"key": "question_aByWrb", "type": "SHORT_ANSWER", "value": "Solo"}
+            ]
+        }
+    }
+
+    resp = client.post(
+        "/tally-webhook",
+        json=tally_payload,
+        headers={"Authorization": "Bearer test-tally-token"},
+    )
+    
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "ok"
+
+    # Both upserts use the same mock table return_value, so check call_args_list
+    upsert_calls = mock_table.upsert.call_args_list
+    assert len(upsert_calls) == 2
+    
+    users_upsert_args = upsert_calls[0][0][0]
+    assert users_upsert_args["submission_id"] == "sub_123"
+    assert users_upsert_args["name"] == "Alice"
+    assert users_upsert_args["location"] == "Paris"
+    assert users_upsert_args["source"] == "tally"
+
+    profiles_upsert_args = upsert_calls[1][0][0]
+    assert profiles_upsert_args["user_id"] == "new-user-uuid"
+    assert profiles_upsert_args["form_response"]["travel_bubble"] == "Solo"
+

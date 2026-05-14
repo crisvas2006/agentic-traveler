@@ -1,4 +1,4 @@
-﻿black==25.11.0
+black==25.11.0
 click==8.3.1
 colorama==0.4.6
 iniconfig==2.3.0
@@ -17,7 +17,7 @@ typing_extensions==4.15.0
 google-genai
 python-dotenv
 google-adk
-google-cloud-firestore
+supabase
 functions-framework
 flask
 gunicorn

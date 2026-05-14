@@ -9,8 +9,8 @@ structured schema:
 - summary
 
 This agent does not send messages to the user directly, but provides the
-orchestrator with updated structured data to store in Firestore, and optionally 
-returns a short greeting for new users.
+orchestrator with updated structured data to store in Supabase (user_profiles),
+and optionally returns a short greeting for new users.
 """
 
 import json

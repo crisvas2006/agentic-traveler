@@ -1,14 +1,15 @@
 """
 Off-topic guard — tracks consecutive off-topic messages per user.
 
-Persists the counter in the Firestore user document so it survives
-container restarts.  After THRESHOLD consecutive off-topic messages
-the user is restricted for RESTRICT_SECONDS.
+Persists the counter in the Supabase ``off_topic_state`` table so it
+survives container restarts.  After THRESHOLD consecutive off-topic
+messages the user is restricted for RESTRICT_SECONDS.
 
-Firestore fields (under each user doc):
-    off_topic.count           — consecutive off-topic message count
-    off_topic.last_flagged_ts — ISO timestamp of the last off-topic flag
-    off_topic.restricted_until — ISO timestamp when restriction lifts (or null)
+Supabase layout (``off_topic_state`` table):
+    user_id          : UUID  — FK → users.id (PK)
+    count            : INT
+    last_flagged_ts  : TIMESTAMPTZ
+    restricted_until : TIMESTAMPTZ
 """
 
 import logging
@@ -28,7 +29,7 @@ def is_restricted(user_doc: Dict[str, Any]) -> Optional[str]:
     Check if a user is currently restricted.
 
     Args:
-        user_doc: The Firestore user document dict.
+        user_doc: The assembled user document dict.
 
     Returns:
         A restriction message string, or None if not restricted.
@@ -56,29 +57,27 @@ def is_restricted(user_doc: Dict[str, Any]) -> Optional[str]:
             f"help with travel when the restriction lifts!"
         )
 
-    # Restriction expired
     return None
 
 
 def record_off_topic(
-    user_doc: Dict[str, Any], user_doc_ref: Any
+    user_doc: Dict[str, Any], user_id: str
 ) -> Dict[str, Any]:
     """
-    Record an off-topic message and persist to Firestore.
+    Record an off-topic message and persist to Supabase.
 
     Increments the consecutive counter.  If the counter hits THRESHOLD,
     sets a restriction until now + RESTRICT_SECONDS.
 
-    Also handles the time-based auto-reset: if the last off-topic flag
-    was more than RESET_WINDOW_SECONDS ago, resets the counter first.
-
     Args:
-        user_doc: The Firestore user document dict.
-        user_doc_ref: Firestore DocumentReference for the user.
+        user_doc: The assembled user document dict.
+        user_id:  The user's UUID.
 
     Returns:
         Dict with "count", "restricted", and optionally "restricted_until".
     """
+    from agentic_traveler.tools.db_client import get_db
+
     off_topic = user_doc.get("off_topic", {})
     count = off_topic.get("count", 0)
     last_flagged_str = off_topic.get("last_flagged_ts")
@@ -102,15 +101,16 @@ def record_off_topic(
     count += 1
 
     update: Dict[str, Any] = {
-        "off_topic.count": count,
-        "off_topic.last_flagged_ts": now.isoformat(),
+        "user_id": user_id,
+        "count": count,
+        "last_flagged_ts": now.isoformat(),
     }
 
     result: Dict[str, Any] = {"count": count, "restricted": False}
 
     if count >= THRESHOLD:
         restricted_until = now + timedelta(seconds=RESTRICT_SECONDS)
-        update["off_topic.restricted_until"] = restricted_until.isoformat()
+        update["restricted_until"] = restricted_until.isoformat()
         result["restricted"] = True
         result["restricted_until"] = restricted_until.isoformat()
         logger.warning(
@@ -124,14 +124,16 @@ def record_off_topic(
             count, THRESHOLD, remaining,
         )
 
-    # Persist to Firestore
-    if user_doc_ref:
-        user_doc_ref.update(update)
+    if user_id:
+        try:
+            get_db().table("off_topic_state").upsert(update).execute()
+        except Exception:
+            logger.exception("Failed to persist off_topic_state for user_id=%s", user_id)
 
     return result
 
 
-def reset(user_doc_ref: Any) -> None:
+def reset(user_id: str) -> None:
     """
     Reset the off-topic counter (called when user sends a travel message).
 
@@ -139,12 +141,15 @@ def reset(user_doc_ref: Any) -> None:
     for analytics.
 
     Args:
-        user_doc_ref: Firestore DocumentReference for the user.
+        user_id: The user's UUID.
     """
-    if user_doc_ref:
-        user_doc_ref.update(
-            {
-                "off_topic.count": 0,
-                "off_topic.restricted_until": None,
-            }
-        )
+    from agentic_traveler.tools.db_client import get_db
+
+    if not user_id:
+        return
+    try:
+        get_db().table("off_topic_state").update(
+            {"count": 0, "restricted_until": None}
+        ).eq("user_id", user_id).execute()
+    except Exception:
+        logger.exception("Failed to reset off_topic_state for user_id=%s", user_id)

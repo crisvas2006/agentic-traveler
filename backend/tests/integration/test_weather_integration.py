@@ -1,11 +1,11 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
-from agentic_traveler.tools.firestore_user import FirestoreUserTool
+from agentic_traveler.tools.user_repo import UserRepository
 
 @pytest.fixture
 def mock_user_tool():
-    tool = MagicMock(spec=FirestoreUserTool)
+    tool = MagicMock(spec=UserRepository)
     return tool
 
 @pytest.fixture

@@ -14,20 +14,20 @@ load_dotenv()
 
 from agentic_traveler.core.logging_config import setup_logging
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
-from agentic_traveler.tools.firestore_user import FirestoreUserTool
+# get_db is safe to import here: db_client reads SUPABASE_URL lazily inside
+# get_db(), not at module load time, so load_dotenv() above always runs first.
+from agentic_traveler.tools.db_client import get_db
+from agentic_traveler.tools.user_repo import UserRepository
 
 
-def list_users(tool: FirestoreUserTool, limit: int = 10):
+def list_users(tool: UserRepository, limit: int = 10):
     """Fetch up to `limit` users and display them for selection."""
-    docs = tool.db.collection("users").limit(limit).stream()
-    users = []
-    for doc in docs:
-        data = doc.to_dict()
-        users.append(data)
-        idx = len(users)
-        name = data.get("user_name", "Unknown")
-        tg_id = data.get("telegramUserId", "N/A")
-        print(f"  [{idx}] {name}  (telegramUserId: {tg_id})")
+    resp = get_db().table("users").select("name, telegram_id").limit(limit).execute()
+    users = resp.data or []
+    for idx, row in enumerate(users, 1):
+        name = row.get("name", "Unknown")
+        tg_id = row.get("telegram_id", "N/A")
+        print(f"  [{idx}] {name}  (telegram_id: {tg_id})")
     return users
 
 
@@ -42,36 +42,36 @@ def main():
 
     setup_logging(verbose=args.verbose)
 
-    tool = FirestoreUserTool()
+    tool = UserRepository()
     telegram_id = args.telegram_id
 
     if not telegram_id:
         print("\n🌍  Agentic Traveler — pick a user to impersonate:\n")
         users = list_users(tool)
         if not users:
-            print("  No users found in Firestore.")
+            print("  No users found in Supabase.")
             return
         choice = input("\nEnter number (or telegram ID): ").strip()
         if choice.isdigit() and int(choice) <= len(users):
-            telegram_id = users[int(choice) - 1].get("telegramUserId")
+            telegram_id = users[int(choice) - 1].get("telegram_id")
         else:
             telegram_id = choice
 
     # Show the selected user profile
     profile = tool.get_user_by_telegram_id(telegram_id)
     if profile:
-        print(f"\n✅  Logged in as: {profile.get('user_name', 'Unknown')}")
+        print(f"\n✅  Logged in as: {profile.get('name', 'Unknown')}")
         prefs = profile.get("user_profile", {})
         if prefs:
             vibes = prefs.get("trip_vibe", [])
-            location = prefs.get("location", "")
+            location = profile.get("location", "")
             print(f"   Location: {location}")
             print(f"   Vibes: {', '.join(vibes) if isinstance(vibes, list) else vibes}")
     else:
-        print(f"\n⚠️  No profile found for telegramUserId={telegram_id}")
+        print(f"\n⚠️  No profile found for telegram_id={telegram_id}")
         print("   You'll get the onboarding flow.\n")
 
-    agent = OrchestratorAgent(firestore_user_tool=tool)
+    agent = OrchestratorAgent(user_repo=tool)
 
     print("\n💬  Type your messages below (Ctrl+C or 'quit' to exit)")
     print(f"   {'Verbose logging ON — check stderr for agent details' if args.verbose else 'Tip: use -v for verbose logging'}")

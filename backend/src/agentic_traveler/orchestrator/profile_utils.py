@@ -1,9 +1,9 @@
 """
-Utility to extract a concise text summary from a Firestore user document.
+Utility to extract a concise text summary from a Supabase user document.
 
-The Firestore ``user_profile`` map mirrors the Tally intake form.  This
-module turns it into a short narrative that any LLM agent can consume
-without needing to know the raw field names.
+The ``user_profile`` map mirrors the Tally intake form and the output of
+ProfileAgent.  This module turns it into a short narrative that any LLM
+agent can consume without needing to know the raw field names.
 """
 
 from typing import Dict, Any
@@ -11,8 +11,7 @@ from typing import Dict, Any
 
 def build_profile_summary(user_doc: Dict[str, Any]) -> str:
     """
-    Convert a raw Firestore user document into a concise text block
-    suitable for LLM prompts.
+    Convert a raw user document into a concise text block suitable for LLM prompts.
 
     Now specifically tailored to read the outputs of the ProfileAgent:
     - tags

@@ -39,7 +39,7 @@ from agentic_traveler.orchestrator.router_agent import RouterAgent
 from agentic_traveler.orchestrator.chat_agent import ChatAgent
 from agentic_traveler.orchestrator.trip_agent import TripAgent
 from agentic_traveler.orchestrator.planner_agent import PlannerAgent
-from agentic_traveler.tools.firestore_user import FirestoreUserTool
+from agentic_traveler.tools.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,9 @@ class OrchestratorAgent:
     across requests for efficiency.
     """
 
-    def __init__(self, firestore_user_tool: Optional[FirestoreUserTool] = None):
+    def __init__(self, user_repo: Optional[UserRepository] = None):
         self._client = get_client()
-        self.user_tool = firestore_user_tool or FirestoreUserTool()
+        self.user_tool = user_repo or UserRepository()
         self.conversation_manager = ConversationManager(client=self._client)
 
         # Specialized agents (stateless, shared instances)
@@ -90,7 +90,7 @@ class OrchestratorAgent:
         token_records: list[Dict[str, Any]] = []
 
         # ── 1. Fetch user profile ───────────────────────────────────────────
-        user_doc, user_doc_ref = self.user_tool.get_user_with_ref(telegram_user_id)
+        user_doc, user_id = self.user_tool.get_user_with_ref(telegram_user_id)
         if not user_doc:
             logger.info("New user detected: %s", telegram_user_id)
             return {
@@ -130,8 +130,8 @@ class OrchestratorAgent:
         router_result = self._router_agent.classify(
             message=message_text,
             user_doc=user_doc,
-            user_doc_ref=user_doc_ref,
-            user_id=telegram_user_id,
+            user_id=user_id,
+            telegram_user_id=telegram_user_id,
             user_name=user_name,
             tone_preference=tone_preference,
             current_time=current_time,
@@ -147,7 +147,6 @@ class OrchestratorAgent:
                 user_id=telegram_user_id,
                 response=raw_router,
                 latency_ms=router_result.get("latency_ms", 0),
-                user_doc_ref=user_doc_ref,
             )
             if router_usage.get("total_tokens", 0) > 0:
                 token_records.append(router_usage)
@@ -162,9 +161,8 @@ class OrchestratorAgent:
 
         # ── 5a. OFF_TOPIC or direct router response ─────────────────────────
         if intent == "OFF_TOPIC":
-            guard_result = off_topic_guard.record_off_topic(user_doc, user_doc_ref)
+            guard_result = off_topic_guard.record_off_topic(user_doc, user_id)
             if guard_result.get("restricted"):
-                # Threshold hit — use the hard restriction message
                 restriction_msg = off_topic_guard.is_restricted(
                     {**user_doc, "off_topic": {
                         "restricted_until": guard_result.get("restricted_until")
@@ -172,30 +170,29 @@ class OrchestratorAgent:
                 )
                 response_text = restriction_msg or "You're temporarily restricted due to off-topic messages."
             else:
-                # Use the router's natural, warm redirection response
                 response_text = router_response or (
                     "I'm really only good at travel stuff! 😄 "
                     "Got any trips on your mind?"
                 )
             _save_and_finish(
-                self, user_doc, user_doc_ref, message_text, response_text,
+                self, user_doc, user_id, message_text, response_text,
                 telegram_user_id, token_records, t_total,
             )
             return {"text": response_text, "action": "RESPONSE"}
 
         # If the router provided a direct response (e.g., for get_my_credits)
         elif router_response:
-            if user_doc_ref:
-                off_topic_guard.reset(user_doc_ref)
+            if user_id:
+                off_topic_guard.reset(user_id)
             _save_and_finish(
-                self, user_doc, user_doc_ref, message_text, router_response,
+                self, user_doc, user_id, message_text, router_response,
                 telegram_user_id, token_records, t_total,
             )
             return {"text": router_response, "action": "RESPONSE"}
 
         # ── 5b. Travel intents — reset off-topic counter ────────────────────
-        if user_doc_ref:
-            off_topic_guard.reset(user_doc_ref)
+        if user_id:
+            off_topic_guard.reset(user_id)
 
         # ── 5c. Dispatch to specialized agent ───────────────────────────────
         agent_result = _dispatch(
@@ -205,7 +202,6 @@ class OrchestratorAgent:
 
         response_text = agent_result.get("text", "")
 
-        # Handle empty/error responses
         if not response_text:
             response_text = "I had trouble coming up with a response just now. Please try again."
 
@@ -224,7 +220,6 @@ class OrchestratorAgent:
                 user_id=telegram_user_id,
                 response=raw_agent,
                 latency_ms=agent_result.get("_latency_ms", 0),
-                user_doc_ref=user_doc_ref,
             )
             if agent_usage.get("total_tokens", 0) > 0:
                 token_records.append(agent_usage)
@@ -240,11 +235,10 @@ class OrchestratorAgent:
                     user_id=telegram_user_id,
                     response=raw_search,
                     latency_ms=sr.get("lat", 0),
-                    user_doc_ref=user_doc_ref,
                 )
                 if search_usage.get("total_tokens", 0) > 0:
                     token_records.append(search_usage)
-                
+
                 grounding_credits = search_usage.get("grounding_cost_credits", 0)
                 if grounding_credits > 0:
                     token_records.append({
@@ -257,7 +251,7 @@ class OrchestratorAgent:
 
         # ── 6. Save history + metrics + deduct credits ──────────────────────
         _save_and_finish(
-            self, user_doc, user_doc_ref, message_text, response_text,
+            self, user_doc, user_id, message_text, response_text,
             telegram_user_id, token_records, t_total,
         )
 
@@ -311,7 +305,7 @@ def _dispatch(
 def _save_and_finish(
     coordinator: OrchestratorAgent,
     user_doc: Dict[str, Any],
-    user_doc_ref: Any,
+    user_id: Optional[str],
     message_text: str,
     response_text: str,
     telegram_user_id: str,
@@ -319,22 +313,19 @@ def _save_and_finish(
     t_total: float,
 ) -> None:
     """Save history, record metrics, and deduct credits."""
-    # Save conversation history
-    if user_doc_ref:
+    if user_id:
         coordinator.conversation_manager.append_and_save(
-            user_doc, user_doc_ref, message_text, response_text
+            user_doc, user_id, message_text, response_text
         )
 
-    # Record interaction metric
     metrics_tracker.record_interaction(
         user_id=telegram_user_id,
         is_new_user=False,
     )
 
-    # Deduct credits asynchronously
-    if token_records and user_doc_ref:
+    if token_records and user_id:
         cost = credit_manager.calculate_cost(token_records)
         if cost > 0:
-            credit_manager.deduct_credits_async(user_doc_ref, cost)
+            credit_manager.deduct_credits_async(user_id, cost)
 
     logger.info("⏱ TOTAL: %s", _elapsed(t_total))

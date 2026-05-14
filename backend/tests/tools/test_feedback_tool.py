@@ -1,15 +1,23 @@
-"""Tests for FeedbackTool."""
+"""Tests for FeedbackTool — patches Supabase get_db, no real network calls."""
 
 from unittest.mock import MagicMock, patch
 
 
 def _make_mock_db():
-    """Return a MagicMock Firestore client."""
-    return MagicMock()
+    """Return a MagicMock Supabase client."""
+    mock = MagicMock()
+    # Ensure chained calls return a consistent mock
+    mock.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": "fb-uuid"}])
+    return mock
+
+
+def _captured_payload(mock_db):
+    """Extract the dict passed to .insert() from the mock chain."""
+    return mock_db.table.return_value.insert.call_args[0][0]
 
 
 def test_record_appends_document_with_correct_fields():
-    """FeedbackTool.record should write a document with all required fields."""
+    """FeedbackTool.record should write a row with all required fields."""
     from agentic_traveler.tools.feedback_tool import FeedbackTool
 
     user_doc = {
@@ -26,8 +34,7 @@ def test_record_appends_document_with_correct_fields():
     }
 
     mock_db = _make_mock_db()
-
-    with patch("google.cloud.firestore.Client", return_value=mock_db):
+    with patch("agentic_traveler.tools.db_client.get_db", return_value=mock_db):
         tool = FeedbackTool()
         tool.record(
             user_id="user123",
@@ -37,27 +44,23 @@ def test_record_appends_document_with_correct_fields():
             _sync=True,
         )
 
-    mock_db.collection.assert_called_with("feedback")
-    add_call = mock_db.collection.return_value.add
-    assert add_call.called
-
-    doc = add_call.call_args[0][0]
-    assert doc["user_id"] == "user123"
-    assert doc["text"] == "That's not what I meant"
-    assert doc["category"] == "confusion"
-    assert "timestamp" in doc
-    assert len(doc["conversation_context"]) == 6  # all 6 messages = 3 exchanges
+    mock_db.table.assert_called_with("feedback")
+    payload = _captured_payload(mock_db)
+    assert payload["user_id"] == "user123"
+    assert payload["text"] == "That's not what I meant"
+    assert payload["category"] == "confusion"
+    assert len(payload["conversation_context"]) == 6
 
 
 def test_record_truncates_context_to_last_6():
-    """Should return at most 6 messages regardless of history length."""
+    """Should include at most 6 messages regardless of history length."""
     from agentic_traveler.tools.feedback_tool import FeedbackTool
 
     messages = [{"role": "user", "text": f"msg {i}"} for i in range(20)]
     user_doc = {"conversation_history": {"recent_messages": messages}}
 
     mock_db = _make_mock_db()
-    with patch("google.cloud.firestore.Client", return_value=mock_db):
+    with patch("agentic_traveler.tools.db_client.get_db", return_value=mock_db):
         tool = FeedbackTool()
         tool.record(
             user_id="u1",
@@ -67,8 +70,8 @@ def test_record_truncates_context_to_last_6():
             _sync=True,
         )
 
-    doc = mock_db.collection.return_value.add.call_args[0][0]
-    assert len(doc["conversation_context"]) == 6
+    payload = _captured_payload(mock_db)
+    assert len(payload["conversation_context"]) == 6
 
 
 def test_unknown_category_coerced_to_other():
@@ -76,7 +79,7 @@ def test_unknown_category_coerced_to_other():
     from agentic_traveler.tools.feedback_tool import FeedbackTool
 
     mock_db = _make_mock_db()
-    with patch("google.cloud.firestore.Client", return_value=mock_db):
+    with patch("agentic_traveler.tools.db_client.get_db", return_value=mock_db):
         tool = FeedbackTool()
         tool.record(
             user_id="u1",
@@ -85,8 +88,8 @@ def test_unknown_category_coerced_to_other():
             _sync=True,
         )
 
-    doc = mock_db.collection.return_value.add.call_args[0][0]
-    assert doc["category"] == "other"
+    payload = _captured_payload(mock_db)
+    assert payload["category"] == "other"
 
 
 def test_record_with_no_user_doc():
@@ -94,7 +97,7 @@ def test_record_with_no_user_doc():
     from agentic_traveler.tools.feedback_tool import FeedbackTool
 
     mock_db = _make_mock_db()
-    with patch("google.cloud.firestore.Client", return_value=mock_db):
+    with patch("agentic_traveler.tools.db_client.get_db", return_value=mock_db):
         tool = FeedbackTool()
         tool.record(
             user_id="u1",
@@ -104,5 +107,5 @@ def test_record_with_no_user_doc():
             _sync=True,
         )
 
-    doc = mock_db.collection.return_value.add.call_args[0][0]
-    assert doc["conversation_context"] == []
+    payload = _captured_payload(mock_db)
+    assert payload["conversation_context"] == []

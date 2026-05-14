@@ -1,13 +1,12 @@
 """
-Per-user credit management.
+Per-user credit management — Supabase backend.
 
-Each user has a ``credits`` sub-document in Firestore::
-
-    credits:
-        balance: int           # current credit balance (≥ 0)
-        initial_grant: int     # credits given at signup
-        total_spent: int       # lifetime credits consumed
-        used_promos: [str]     # promo codes already redeemed
+Database layout (``credits`` table, one row per user):
+    user_id       : UUID  — FK → users.id
+    balance       : INT   — current credit balance (≥ 0)
+    initial_grant : INT   — credits given at signup
+    total_spent   : INT   — lifetime credits consumed
+    used_promos   : TEXT[] — promo codes already redeemed
 
 1 credit = 1 eurocent.  New users receive DEFAULT_USER_CREDITS on signup.
 
@@ -28,8 +27,6 @@ import math
 import os
 import threading
 from typing import Any, Dict, List, Optional, Tuple
-
-from google.cloud.firestore_v1 import transforms  # type: ignore
 
 from agentic_traveler.economy.promo_codes import PROMO_CODES
 
@@ -81,108 +78,111 @@ def has_credits(user_doc: Dict[str, Any]) -> bool:
     return get_balance(user_doc) >= 1
 
 
-def initialize_credits(user_doc_ref: Any, amount: Optional[int] = None) -> None:
+def initialize_credits(user_id: str, amount: Optional[int] = None) -> None:
     """
-    Set initial credit balance on a new user document.
+    Insert the initial credits row for a new user.
 
     Args:
-        user_doc_ref: Firestore DocumentReference.
-        amount: Credits to grant (defaults to DEFAULT_USER_CREDITS).
+        user_id: The user's UUID in the ``users`` table.
+        amount:  Credits to grant (defaults to DEFAULT_USER_CREDITS).
     """
+    from agentic_traveler.tools.db_client import get_db
+
     grant = amount if amount is not None else DEFAULT_USER_CREDITS
-    if user_doc_ref:
-        user_doc_ref.set(
+    if not user_id:
+        return
+    try:
+        get_db().table("credits").upsert(
             {
-                "credits": {
-                    "balance": grant,
-                    "initial_grant": grant,
-                    "total_spent": 0,
-                    "used_promos": [],
-                }
-            },
-            merge=True,
-        )
-        logger.info("Initialized credits: %d for user %s", grant, user_doc_ref.id)
+                "user_id": user_id,
+                "balance": grant,
+                "initial_grant": grant,
+                "total_spent": 0,
+                "used_promos": [],
+            }
+        ).execute()
+        logger.info("Initialized %d credits for user_id=%s", grant, user_id)
+    except Exception:
+        logger.exception("Failed to initialize credits for user_id=%s", user_id)
 
 
-def deduct_credits(user_doc_ref: Any, amount: int) -> None:
+def deduct_credits(user_id: str, amount: int) -> None:
     """
-    Atomically deduct credits from a user.  Balance never goes below 0.
-
-    This is designed to be called from a background thread so it never
-    blocks the response flow.
+    Deduct credits from a user atomically via a Supabase stored procedure.
+    Balance never goes below 0. Uses RPC to avoid a read-then-write race
+    condition under concurrent requests.
 
     Args:
-        user_doc_ref: Firestore DocumentReference.
-        amount: Number of credits to deduct.
+        user_id: The user's UUID.
+        amount:  Number of credits to deduct.
     """
-    if not user_doc_ref or amount <= 0:
+    from agentic_traveler.tools.db_client import get_db
+
+    if not user_id or amount <= 0:
         return
 
     try:
-        # Read current balance to ensure we don't go negative
-        doc = user_doc_ref.get()
-        if not doc.exists:
-            return
-
-        current_balance = doc.to_dict().get("credits", {}).get("balance", 0)
-        actual_deduction = min(amount, current_balance)
-
-        if actual_deduction <= 0:
-            return
-
-        user_doc_ref.update(
-            {
-                "credits.balance": transforms.Increment(-actual_deduction),
-                "credits.total_spent": transforms.Increment(actual_deduction),
-            }
-        )
+        # The stored procedure handles atomicity and the balance floor at 0.
+        resp = get_db().rpc(
+            "deduct_credits", {"p_user_id": user_id, "p_amount": amount}
+        ).execute()
+        new_balance = resp.data if resp and resp.data is not None else "unknown"
         logger.info(
-            "💳 Deducted %d credits (requested %d) from user %s. Remaining: ~%d",
-            actual_deduction,
-            amount,
-            user_doc_ref.id,
-            current_balance - actual_deduction,
+            "💳 Deducted %d credits from user_id=%s. Remaining: %s",
+            amount, user_id, new_balance,
         )
     except Exception:
-        logger.exception("Failed to deduct credits from user %s", user_doc_ref.id)
+        logger.exception("Failed to deduct credits from user_id=%s", user_id)
 
 
-def deduct_credits_async(user_doc_ref: Any, amount: int) -> None:
+
+def deduct_credits_async(user_id: str, amount: int) -> None:
     """Fire-and-forget credit deduction in a background thread."""
     threading.Thread(
         target=deduct_credits,
-        args=(user_doc_ref, amount),
+        args=(user_id, amount),
         daemon=True,
     ).start()
 
 
-def add_credits(user_doc_ref: Any, amount: int) -> None:
+def add_credits(user_id: str, amount: int) -> None:
     """
     Add credits to a user's balance.
 
     Args:
-        user_doc_ref: Firestore DocumentReference.
-        amount: Number of credits to add.
+        user_id: The user's UUID.
+        amount:  Number of credits to add.
     """
-    if not user_doc_ref or amount <= 0:
+    from agentic_traveler.tools.db_client import get_db
+
+    if not user_id or amount <= 0:
         return
 
     try:
-        user_doc_ref.update(
-            {"credits.balance": transforms.Increment(amount)}
+        resp = (
+            get_db()
+            .table("credits")
+            .select("balance")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
         )
-        logger.info("💳 Added %d credits to user %s", amount, user_doc_ref.id)
+        if not resp.data:
+            logger.warning("add_credits: no credits row for user_id=%s", user_id)
+            return
+
+        new_balance = resp.data["balance"] + amount
+        get_db().table("credits").update(
+            {"balance": new_balance}
+        ).eq("user_id", user_id).execute()
+        logger.info("💳 Added %d credits to user_id=%s", amount, user_id)
     except Exception:
-        logger.exception("Failed to add credits to user %s", user_doc_ref.id)
+        logger.exception("Failed to add credits to user_id=%s", user_id)
 
 
 def calculate_grounding_cost(grounding_count: int) -> int:
     """
     Calculate the credit cost for a number of grounded sub-agent prompts.
-
-    Grounding is billed per prompt at a flat USD rate, converted to credits
-    using the same EUR conversion and markup as token costs.
 
     Args:
         grounding_count: How many sub-agent LLM calls triggered Google Search.
@@ -195,7 +195,6 @@ def calculate_grounding_cost(grounding_count: int) -> int:
     cost_usd = GROUNDING_COST_PER_PROMPT_USD * grounding_count
     cost_eur = cost_usd * USD_TO_EUR_RATE
     credits = math.ceil(cost_eur * 100 * MARKUP_MULTIPLIER_GROUNDING)
-    # Minimum 1 credit per grounded call
     return max(grounding_count, credits)
 
 
@@ -236,74 +235,84 @@ def calculate_cost(token_records: List[Dict[str, Any]]) -> int:
         )
         total_cost_usd += cost
 
-    # Convert token cost to EUR eurocents with markup
     token_credits = 0
     if any_tokens:
         total_cost_eur = total_cost_usd * USD_TO_EUR_RATE
-        # Use ceil to ensure we charge at least 1 cent if any significant tokens were used
         token_credits = math.ceil(total_cost_eur * 100 * MARKUP_MULTIPLIER)
 
     total_credits = token_credits + grounding_credits
 
-    # If no tokens and no grounding, it's truly free (e.g. error or empty)
     if not any_tokens and grounding_credits == 0:
         return 0
 
-    # Ensure at least 1 credit is deducted for any successful LLM interaction
     return max(1, total_credits)
 
 
 def redeem_promo(
     user_doc: Dict[str, Any],
-    user_doc_ref: Any,
+    user_id: str,
     code: str,
 ) -> Tuple[bool, str, int]:
     """
     Redeem a promo code for a user.
 
     Args:
-        user_doc: The user document dict (for checking used_promos).
-        user_doc_ref: Firestore DocumentReference.
-        code: The promo code string (case-insensitive).
+        user_doc: The assembled user dict (for checking used_promos).
+        user_id:  The user's UUID.
+        code:     The promo code string (case-insensitive).
 
     Returns:
         Tuple of (success: bool, message: str, credits_added: int).
     """
+    from agentic_traveler.tools.db_client import get_db
+
     normalized = code.strip().upper()
 
-    # Check if code exists
     credit_value = PROMO_CODES.get(normalized)
     if credit_value is None:
-        return False, f"❌ Sorry, \"{code}\" is not a valid promo code.", 0
+        return False, f'❌ Sorry, "{code}" is not a valid promo code.', 0
 
-    # Check if already redeemed
     used = user_doc.get("credits", {}).get("used_promos", [])
     if normalized in used:
-        return False, f"❌ You've already used the code \"{normalized}\".", 0
+        return False, f'❌ You\'ve already used the code "{normalized}".', 0
 
-    # Apply credits and record usage
     try:
-        user_doc_ref.update(
+        # Read current balance first
+        resp = (
+            get_db()
+            .table("credits")
+            .select("balance, used_promos")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if not resp.data:
+            return False, "❌ Could not find your credits record.", 0
+
+        current_balance = resp.data["balance"]
+        current_promos = resp.data.get("used_promos") or []
+
+        get_db().table("credits").update(
             {
-                "credits.balance": transforms.Increment(credit_value),
-                "credits.used_promos": transforms.ArrayUnion([normalized]),
+                "balance": current_balance + credit_value,
+                "used_promos": current_promos + [normalized],
             }
-        )
+        ).eq("user_id", user_id).execute()
+
         logger.info(
-            "🎉 Promo %s redeemed: +%d credits for user %s",
-            normalized, credit_value, user_doc_ref.id,
+            "🎉 Promo %s redeemed: +%d credits for user_id=%s",
+            normalized, credit_value, user_id,
         )
-        # Track in weekly metrics (fire-and-forget, in-memory)
         try:
             from agentic_traveler.analytics import metrics_tracker
             metrics_tracker.record_promo_redeemed(normalized)
         except Exception:
             logger.exception("Failed to record promo metric for code %s.", normalized)
+
         return True, (
             f"🎉 Promo code *{normalized}* applied! "
             f"You received *{credit_value} credits* (€{credit_value / 100:.2f})."
         ), credit_value
     except Exception:
-        logger.exception("Failed to redeem promo %s for user %s", normalized, user_doc_ref.id)
+        logger.exception("Failed to redeem promo %s for user_id=%s", normalized, user_id)
         return False, "❌ Something went wrong applying the promo code. Please try again.", 0
-

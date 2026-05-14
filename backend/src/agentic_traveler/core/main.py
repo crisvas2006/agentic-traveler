@@ -3,7 +3,7 @@ from flask import Request, jsonify
 import os
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
 
-# Initialize the agent globally to reuse connections (like Firestore client)
+# Initialize the agent globally to reuse the Supabase connection
 orchestrator_agent = OrchestratorAgent()
 
 @functions_framework.http

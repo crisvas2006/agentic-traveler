@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import signal
-import sys
 import threading
 import time
 from collections import defaultdict
@@ -31,7 +30,7 @@ from agentic_traveler.analytics import metrics_tracker
 from agentic_traveler.core.logging_config import setup_logging
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
 from agentic_traveler.core.sanitize import sanitize_user_input
-from agentic_traveler.tools.firestore_user import FirestoreUserTool
+from agentic_traveler.tools.user_repo import UserRepository
 
 load_dotenv()
 setup_logging(verbose=os.getenv("VERBOSE", "").lower() in ("1", "true"))
@@ -39,18 +38,16 @@ setup_logging(verbose=os.getenv("VERBOSE", "").lower() in ("1", "true"))
 logger = logging.getLogger(__name__)
 
 # Suppress the WinError 10038 ("not a socket") OSError that Werkzeug's
-# serve_forever thread throws during hot-reload on Windows.  It fires because
-# the dev-server socket is closed by the reloader while Thread-2 is still
-# mid-select().  The reload completes successfully; the traceback is purely
-# cosmetic.  threading.excepthook (Python 3.8+) lets us intercept it cleanly
-# without touching Werkzeug's internals.
+# serve_forever thread throws during hot-reload on Windows.
 _orig_thread_excepthook = threading.excepthook
+
 
 def _thread_excepthook(args: threading.ExceptHookArgs) -> None:
     winerror = getattr(args.exc_value, "winerror", None)
     if isinstance(args.exc_value, OSError) and winerror == 10038:
         return  # silently drop — Werkzeug socket closed during hot-reload
     _orig_thread_excepthook(args)
+
 
 threading.excepthook = _thread_excepthook
 
@@ -62,12 +59,65 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 SECRET_TOKEN = os.getenv("TELEGRAM_SECRET_TOKEN", "")
 APP_ADMIN_API_KEY = os.getenv("APP_ADMIN_API_KEY", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+TALLY_WEBHOOK_TOKEN = os.getenv("TALLY_WEBHOOK_TOKEN", "")
 
-# Telegram webhook IP ranges (may change — check @BotNews)
 TELEGRAM_CIDRS = [
     ipaddress.ip_network("149.154.160.0/20"),
     ipaddress.ip_network("91.108.4.0/22"),
 ]
+
+# ── tally webhook helpers ──
+
+QUESTION_KEY_MAP = {
+    "question_WAg4pv": "trip_success_factors",
+    "question_aByWrb": "travel_bubble",
+    "question_GrgWr2": "cultural_spiritual_importance",
+    "question_6d9q1J": "local_immersion",
+    "question_OAgvAp": "solo_freedom",
+    "question_7deQJR": "morning_vibe",
+    "question_blDa2Z": "physical_intensity",
+    "question_Al0k6z": "energy_strategy",
+    "question_rlp70X": "discomfort_tolerance_score",
+    "question_BGgvLK": "unexpected_event_reaction",
+    "question_kYpL0e": "splurge_priority",
+    "question_vNpR0D": "budget_personality",
+    "question_KMgXPV": "deal_breakers",
+    "question_Ldg8Ep": "name",
+    "question_1rxjbl": "location"
+}
+
+def _flatten_tally_fields(fields: list[dict]) -> dict:
+    """Convert Tally 'fields' into a flat dict."""
+    result: dict = {}
+
+    for f in fields:
+        original_key = f.get("key") or f.get("label") or f.get("id")
+        field_key = QUESTION_KEY_MAP.get(original_key, original_key)
+
+        field_type = f.get("type")
+        raw_value = f.get("value")
+        options = f.get("options", [])
+
+        # Skip per-option checkbox fields with value true/false
+        if field_type == "CHECKBOXES" and not isinstance(raw_value, list):
+            continue
+
+        # Map ids -> text for choice-like questions
+        if field_type in ("MULTIPLE_CHOICE", "MULTI_SELECT", "CHECKBOXES") and isinstance(raw_value, list):
+            id_to_text = {opt["id"]: opt["text"] for opt in options}
+            texts = [id_to_text.get(v, v) for v in raw_value]
+
+            if field_type == "MULTIPLE_CHOICE":
+                value = texts[0] if texts else None
+            else:
+                value = texts
+        else:
+            value = raw_value
+
+        if field_key and value is not None:
+            result[field_key] = value
+
+    return result
 
 # ── rate limiting (in-memory, per-user) ──
 
@@ -83,7 +133,6 @@ def _is_rate_limited(user_id: str) -> bool:
     now = time.time()
     with _rate_lock:
         timestamps = _user_timestamps[user_id]
-        # Prune entries older than 1 hour
         timestamps[:] = [t for t in timestamps if now - t < 3600]
 
         last_minute = sum(1 for t in timestamps if now - t < 60)
@@ -103,11 +152,6 @@ def _is_rate_limited(user_id: str) -> bool:
 def handle_sigterm(signum, frame):
     """Graceful shutdown for Cloud Run (SIGTERM)."""
     logger.info("Received SIGTERM. Starting graceful shutdown...")
-    # Flush metrics synchronously before exiting.
-    # os._exit(0) is used instead of sys.exit(0) to terminate immediately
-    # at the OS level without raising SystemExit, which would propagate
-    # through background threads (e.g. Werkzeug's serve_forever) and cause
-    # WinError 10038 / EBADF as those threads try to use now-closed sockets.
     metrics_tracker.flush(sync=True)
     logger.info("Graceful shutdown complete. Exiting.")
     os._exit(0)
@@ -120,7 +164,6 @@ signal.signal(signal.SIGTERM, handle_sigterm)
 
 def _is_telegram_ip(req: Request) -> bool:
     """Check if the request originates from a known Telegram IP range."""
-    # Cloud Run sets X-Forwarded-For; fall back to remote_addr
     forwarded = req.headers.get("X-Forwarded-For", "")
     raw_ip = forwarded.split(",")[0].strip() if forwarded else req.remote_addr
     if not raw_ip:
@@ -140,14 +183,13 @@ def _is_telegram_ip(req: Request) -> bool:
 
 def send_telegram_message(chat_id: int | str, text: str) -> int | None:
     """Send a message via the Telegram API with Markdown formatting.
-    
+
     Returns the message_id of the sent message (or the last message if
     chunked), or None on failure.
     """
     last_message_id = None
-    # Telegram limit is 4096 chars per message
     for i in range(0, len(text), 4096):
-        chunk = text[i : i + 4096]
+        chunk = text[i: i + 4096]
         try:
             resp = http_requests.post(
                 f"{TELEGRAM_API}/sendMessage",
@@ -159,8 +201,6 @@ def send_telegram_message(chat_id: int | str, text: str) -> int | None:
                 timeout=10,
             )
             if not resp.ok:
-                # Markdown parsing can fail on unclosed tags — retry as
-                # plain text so the user always gets a response.
                 logger.warning(
                     "Telegram Markdown send failed (%s), retrying plain text.",
                     resp.status_code,
@@ -176,22 +216,22 @@ def send_telegram_message(chat_id: int | str, text: str) -> int | None:
                         resp.status_code, resp.text,
                     )
                     continue
-            
+
             result = resp.json()
             if result.get("ok"):
                 last_message_id = result["result"].get("message_id")
-                
+
         except Exception:
             logger.exception("Failed to send Telegram message to %s", chat_id)
-            
+
     return last_message_id
+
 
 def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> None:
     """Edit an existing Telegram message with new Markdown text."""
     if not text:
         text = "Sorry, I had trouble coming up with a response."
-        
-    # Note: If text > 4000, we truncate safely below 4096 UTF-16 code units.
+
     if len(str(text)) > 4000:
         text = str(text)[:4000] + "\n\n...(message truncated)"
     else:
@@ -208,7 +248,10 @@ def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> Non
             timeout=10,
         )
         if not resp.ok:
-            logger.warning("Telegram editMessageText failed (%s): %s. Retrying plain text.", resp.status_code, resp.text)
+            logger.warning(
+                "Telegram editMessageText failed (%s): %s. Retrying plain text.",
+                resp.status_code, resp.text,
+            )
             resp2 = http_requests.post(
                 f"{TELEGRAM_API}/editMessageText",
                 json={
@@ -219,25 +262,25 @@ def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> Non
                 timeout=10,
             )
             if not resp2.ok:
-                logger.error("Telegram editMessageText plain text fallback failed (%s): %s", resp2.status_code, resp2.text)
+                logger.error(
+                    "Telegram editMessageText plain text fallback failed (%s): %s",
+                    resp2.status_code, resp2.text,
+                )
     except Exception:
         logger.exception("Failed to edit Telegram message %s", message_id)
 
 
-
-
-
 # ── lazy-loaded globals (initialized on first request) ──
 
-_user_tool_instance = None
-_orchestrator_instance = None
+_user_tool_instance: UserRepository | None = None
+_orchestrator_instance: OrchestratorAgent | None = None
 
 
-def get_user_tool() -> FirestoreUserTool:
+def get_user_tool() -> UserRepository:
     global _user_tool_instance
     if _user_tool_instance is None:
-        logger.info("Initializing lazy FirestoreUserTool...")
-        _user_tool_instance = FirestoreUserTool()
+        logger.info("Initializing lazy UserRepository...")
+        _user_tool_instance = UserRepository()
     return _user_tool_instance
 
 
@@ -245,7 +288,7 @@ def get_orchestrator() -> OrchestratorAgent:
     global _orchestrator_instance
     if _orchestrator_instance is None:
         logger.info("Initializing lazy OrchestratorAgent...")
-        _orchestrator_instance = OrchestratorAgent(firestore_user_tool=get_user_tool())
+        _orchestrator_instance = OrchestratorAgent(user_repo=get_user_tool())
     return _orchestrator_instance
 
 
@@ -253,7 +296,7 @@ def get_orchestrator() -> OrchestratorAgent:
 
 def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
     """Process a regular user message in a background thread."""
-    # Off-topic restriction check (blocks before LLM call to save costs)
+    # Quick restriction pre-check (avoids a full LLM round-trip when restricted)
     user_doc = get_user_tool().get_user_by_telegram_id(user_id)
     if user_doc:
         restriction_msg = off_topic_guard.is_restricted(user_doc)
@@ -261,7 +304,6 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
             send_telegram_message(chat_id, restriction_msg)
             return
 
-    # Show inline placeholder while LLM processes
     placeholder_msg_id = send_telegram_message(chat_id, "⏳ Thinking...")
 
     def update_status(msg: str):
@@ -269,7 +311,9 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
             edit_telegram_message(chat_id, placeholder_msg_id, msg)
 
     try:
-        response = get_orchestrator().process_request(user_id, text, status_callback=update_status)
+        response = get_orchestrator().process_request(
+            user_id, text, status_callback=update_status
+        )
         logger.info("webhook received from orchestrator: %s", response)
         reply = response.get("text", "Something went wrong.")
     except Exception:
@@ -278,15 +322,13 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
 
     if placeholder_msg_id:
         edit_telegram_message(chat_id, placeholder_msg_id, reply)
-        # Send remaining chunks if response was too large to edit
         if len(reply) > 4000:
             send_telegram_message(chat_id, reply[4000:])
     else:
-        # Fallback if placeholder failed to send (this already chunks internally)
         send_telegram_message(chat_id, reply)
 
 
-def _dispatch(target, *args) -> None:
+def _dispatch_bg(target, *args) -> None:
     """Spawn a daemon thread for background processing."""
     t = threading.Thread(target=target, args=args, daemon=True)
     t.start()
@@ -304,35 +346,28 @@ def telegram_webhook(secret: str):
     that Telegram receives a 200 immediately, preventing retries.
 
     URL: POST /webhook/<TELEGRAM_SECRET_TOKEN>
-    The <secret> path segment acts as Layer 2 (secret URL path).
     """
-    # Layer 2: Secret URL path
     if secret != SECRET_TOKEN:
         logger.warning("Rejected: wrong URL path secret")
         return jsonify({"ok": False}), 403
 
-    # Layer 1: Secret token header
     header_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
     if header_token != SECRET_TOKEN:
         logger.warning("Rejected: wrong secret token header")
         return jsonify({"ok": False}), 403
 
-    # Layer 3: IP whitelist (skip in local dev / ngrok)
     skip_ip_check = os.getenv("SKIP_IP_CHECK", "").lower() in ("1", "true")
     if not skip_ip_check and not _is_telegram_ip(request):
         return jsonify({"ok": False}), 403
 
-    # Parse update payload
     update = request.get_json(silent=True)
     if not update:
         return jsonify({"ok": False}), 400
 
     logger.debug("Webhook received update: %s", update)
 
-    # Layer 5: Payload validation — only handle text messages
     message = update.get("message")
     if not message:
-        # Silently ignore non-message updates (edited, channel, inline, etc.)
         return jsonify({"ok": True}), 200
 
     chat_id = message.get("chat", {}).get("id")
@@ -343,7 +378,6 @@ def telegram_webhook(secret: str):
     if not chat_id or not user_id or not text:
         return jsonify({"ok": True}), 200
 
-    # Layer 4: Rate limiting
     if _is_rate_limited(user_id):
         send_telegram_message(
             chat_id,
@@ -351,24 +385,88 @@ def telegram_webhook(secret: str):
         )
         return jsonify({"ok": True}), 200
 
-    # ── Dispatch to background thread & return 200 immediately ──
     if text.startswith("/start"):
         logger.info("Dispatching /start for user %s", user_id)
-        _dispatch(_handle_start, chat_id, user_id, from_user, text)
+        _dispatch_bg(_handle_start, chat_id, user_id, from_user, text)
     elif text.startswith("/promo"):
         logger.info("Dispatching /promo for user %s", user_id)
-        _dispatch(_handle_promo, chat_id, user_id, text)
+        _dispatch_bg(_handle_promo, chat_id, user_id, text)
     else:
         logger.info("Dispatching message for user %s: %s", user_id, text[:80])
-        _dispatch(_process_message_bg, chat_id, user_id, text)
+        _dispatch_bg(_process_message_bg, chat_id, user_id, text)
 
     return jsonify({"ok": True}), 200
+
+
+@app.route("/tally-webhook", methods=["POST"])
+def tally_webhook():
+    """
+    Handle incoming Tally form submissions.
+    Creates a new user and user_profile in Supabase.
+    """
+    if TALLY_WEBHOOK_TOKEN:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header != f"Bearer {TALLY_WEBHOOK_TOKEN}":
+            logger.warning("Tally webhook rejected: unauthorized")
+            return jsonify({"error": "Unauthorized"}), 401
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    submission = body.get("data") or body
+    response_id = (
+        submission.get("responseId")
+        or submission.get("submissionId")
+        or submission.get("id")
+    )
+    if not response_id:
+        return jsonify({"error": "Missing responseId"}), 400
+
+    fields = submission.get("fields", [])
+    user_fields = _flatten_tally_fields(fields)
+    
+    name = user_fields.pop("name", None)
+    location = user_fields.pop("location", None)
+    
+    try:
+        from agentic_traveler.tools.db_client import get_db
+        db = get_db()
+        
+        # 1. Upsert into users table
+        resp = db.table("users").upsert(
+            {
+                "submission_id": response_id,
+                "name": name,
+                "location": location,
+                "source": "tally",
+            },
+            on_conflict="submission_id"
+        ).execute()
+        
+        if not resp.data:
+            logger.error("Failed to insert user into Supabase for tally submission %s", response_id)
+            return jsonify({"error": "Database error"}), 500
+            
+        user_id = resp.data[0]["id"]
+        
+        # 2. Upsert into user_profiles table
+        db.table("user_profiles").upsert({
+            "user_id": user_id,
+            "form_response": user_fields,
+        }).execute()
+        
+        logger.info("Successfully processed Tally webhook for submission %s", response_id)
+        return jsonify({"status": "ok"}), 200
+    except Exception:
+        logger.exception("Error processing Tally webhook")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 def _handle_start(
     chat_id: int, user_id: str, from_user: dict, text: str
 ) -> None:
-    """Handle /start command — link Telegram user to Tally profile."""
+    """Handle /start command — link Telegram user to Supabase profile."""
     parts = text.split(maxsplit=1)
     submission_id = parts[1].strip() if len(parts) > 1 else ""
 
@@ -381,20 +479,16 @@ def _handle_start(
         return
 
     logger.debug("Submission ID: %s, User ID: %s", submission_id, user_id)
-    # Try to link Telegram user to Firestore profile
     user_doc, is_update = get_user_tool().link_telegram_user(submission_id, user_id)
     if user_doc:
         name = user_doc.get("name", user_doc.get("user_name", "Traveler"))
-        
-        # Send a placeholder
+
         placeholder_msg_id = send_telegram_message(chat_id, "⏳ Mapping your travel DNA...")
-        
+
         try:
             from agentic_traveler.orchestrator.profile_agent import ProfileAgent
             profile_agent = ProfileAgent()
-            
-            # The Tally webhook stores all form answers under user_profile.form_response.
-            # Safe-serialize it to handle any Firestore DatetimeWithNanoseconds values.
+
             def _safe_serialize(obj):
                 if isinstance(obj, dict):
                     return {k: _safe_serialize(v) for k, v in obj.items()}
@@ -408,53 +502,51 @@ def _handle_start(
 
             form_response = user_doc.get("user_profile", {}).get("form_response", {})
             if not form_response:
-                logger.warning("user_profile.form_response is empty for user %s — profile may be incomplete.", user_id)
+                logger.warning(
+                    "user_profile.form_response is empty for user %s — profile may be incomplete.",
+                    user_id,
+                )
 
             safe_form_data = _safe_serialize(form_response)
             logger.info("Building profile from form_response with %d keys.", len(safe_form_data))
 
-            structured_data = profile_agent.build_initial_profile({"form_response": safe_form_data})
-            
+            structured_data = profile_agent.build_initial_profile(
+                {"form_response": safe_form_data}
+            )
             greeting = structured_data.pop("greeting", None)
-            
-            # Save each computed field into user_profile using dot-notation keys.
-            # This preserves the raw Tally form answers already stored under
-            # user_profile.* — a plain {"user_profile": structured_data} set would
-            # overwrite and erase those 26 form fields.
-            dot_fields = {
-                f"user_profile.{k}": v
-                for k, v in structured_data.items()
-            }
-            get_user_tool().update_user_fields(user_id, dot_fields)
 
-            
+            user_uuid = user_doc.get("id")
+            if user_uuid:
+                get_user_tool().upsert_structured_profile(user_uuid, structured_data)
+
             if not greeting:
                 greeting = f"Great to meet you, {name}! Your profile is mapped out and ready to go."
-                
+
             examples = (
                 "You can now ask me anything — try:\n"
                 "• \"Suggest me a 5-day trip in May\"\n"
                 "• \"I want a nature getaway under 800 EUR\"\n"
                 "• \"What do you know about me?\""
             )
-            
-            # 1. Edit the placeholder to show success
-            if is_update:
-                edit_telegram_message(chat_id, placeholder_msg_id, f"✅ Welcome back, {name}! Your profile was updated.")
-            else:
-                edit_telegram_message(chat_id, placeholder_msg_id, f"✅ Welcome, {name}! Your travel profile is linked.")
 
-            # 2. Send the personalized greeting as a brand new separate message
+            if is_update:
+                edit_telegram_message(
+                    chat_id, placeholder_msg_id,
+                    f"✅ Welcome back, {name}! Your profile was updated.",
+                )
+            else:
+                edit_telegram_message(
+                    chat_id, placeholder_msg_id,
+                    f"✅ Welcome, {name}! Your travel profile is linked.",
+                )
+
             send_telegram_message(chat_id, f"_{greeting}_\n\n{examples}")
 
-            # Record new-user metric (app-level, fire-and-forget)
             metrics_tracker.record_interaction(user_id=user_id, is_new_user=not is_update)
 
-            # Initialize credits for new users
-            if not is_update:
-                user_ref = get_user_tool().get_user_ref_by_telegram_id(user_id)
-                if user_ref:
-                    credit_manager.initialize_credits(user_ref)
+            # Initialize credits for new users (user_uuid is the credits FK)
+            if not is_update and user_uuid:
+                credit_manager.initialize_credits(user_uuid)
 
         except Exception:
             logger.exception("Failed to build initial profile.")
@@ -487,15 +579,15 @@ def _handle_promo(chat_id: int, user_id: str, text: str) -> int:
         )
         return 0
 
-    user_doc, user_ref = get_user_tool().get_user_with_ref(user_id)
-    if not user_doc or not user_ref:
+    user_doc, user_uuid = get_user_tool().get_user_with_ref(user_id)
+    if not user_doc or not user_uuid:
         send_telegram_message(
             chat_id,
             "❌ You need to complete your travel profile first before using a promo code.",
         )
         return 0
 
-    success, message, credits_added = credit_manager.redeem_promo(user_doc, user_ref, code)
+    success, message, credits_added = credit_manager.redeem_promo(user_doc, user_uuid, code)
     send_telegram_message(chat_id, message)
     return credits_added
 
@@ -520,37 +612,20 @@ def admin_add_credits():
         return jsonify({"ok": False, "error": "Unauthorized"}), 403
 
     data = request.get_json(silent=True) or {}
-    user_id = str(data.get("user_id", ""))
+    telegram_user_id = str(data.get("user_id", ""))
     amount = int(data.get("amount", 0))
 
-    if not user_id or amount <= 0:
+    if not telegram_user_id or amount <= 0:
         return jsonify({"ok": False, "error": "user_id and positive amount required"}), 400
 
-    user_ref = get_user_tool().get_user_ref_by_telegram_id(user_id)
-    if not user_ref:
-        return jsonify({"ok": False, "error": f"User {user_id} not found"}), 404
+    user_uuid = get_user_tool().get_user_ref_by_telegram_id(telegram_user_id)
+    if not user_uuid:
+        return jsonify({"ok": False, "error": f"User {telegram_user_id} not found"}), 404
 
-    credit_manager.add_credits(user_ref, amount)
-    return jsonify({"ok": True, "added": amount, "user_id": user_id}), 200
+    credit_manager.add_credits(user_uuid, amount)
+    return jsonify({"ok": True, "added": amount, "user_id": telegram_user_id}), 200
 
 
-@app.route("/promo/redeem", methods=["POST"])
-def promo_redeem():
-    """Redeem a promo code via HTTP. No special auth required."""
-    data = request.get_json(silent=True) or {}
-    user_id = str(data.get("user_id", ""))
-    code = str(data.get("code", "")).strip()
-
-    if not user_id or not code:
-        return jsonify({"ok": False, "error": "user_id and code required"}), 400
-
-    user_doc, user_ref = get_user_tool().get_user_with_ref(user_id)
-    if not user_doc or not user_ref:
-        return jsonify({"ok": False, "error": f"User {user_id} not found"}), 404
-
-    success, message, credits_added = credit_manager.redeem_promo(user_doc, user_ref, code)
-    status = 200 if success else 400
-    return jsonify({"ok": success, "message": message, "credits_added": credits_added}), status
 
 
 # ── local dev server ──

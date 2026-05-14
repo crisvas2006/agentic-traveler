@@ -100,8 +100,8 @@ class RouterAgent:
         self,
         message: str,
         user_doc: Dict[str, Any],
-        user_doc_ref: Any,
         user_id: str,
+        telegram_user_id: str,
         user_name: str,
         tone_preference: str,
         current_time: str,
@@ -137,10 +137,10 @@ class RouterAgent:
                 Confirmation string.
             """
             logger.info("🔧 Router tool: update_preferences(%s=%s)", preference_key, preference_value)
-            if user_doc_ref:
+            if user_id:
                 self._preference_learner.save_preference(
                     preference_key, preference_value,
-                    user_doc, user_doc_ref,
+                    user_doc, user_id,
                 )
             return f"Noted: {preference_key} = {preference_value}"
 
@@ -191,6 +191,8 @@ class RouterAgent:
                 f"Each interaction costs 1 or more credits depending on complexity. "
                 f"You can top up with a promo code via /promo YOUR_CODE."
             )
+
+        _ = telegram_user_id  # referenced by outer scope, avoids lint warning
 
         # ── execution ────────────────────────────────────────────────────────
 

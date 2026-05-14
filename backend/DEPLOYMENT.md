@@ -8,7 +8,7 @@ This guide explains how to deploy the Agentic Traveler to Google Cloud Run.
 2. **[gcloud CLI](https://cloud.google.com/sdk/docs/install)** installed and initialized
 3. **APIs enabled**:
    ```bash
-   gcloud services enable run.googleapis.com cloudbuild.googleapis.com firestore.googleapis.com
+   gcloud services enable run.googleapis.com cloudbuild.googleapis.com
    ```
 4. **Telegram Bot Token** from [@BotFather](https://t.me/BotFather)
 5. **Gemini API Key** from [AI Studio](https://aistudio.google.com/)
@@ -262,21 +262,27 @@ https://console.cloud.google.com/monitoring/alerting?project=YOUR_PROJECT_ID
 .\.venv\Scripts\python scripts/register_webhook.py --url dummy --delete
 ```
 
-## Deploying Tally Webhook v2
+## Tally Webhook
 
-The Tally Webhook has been separated into its own Cloud Run Function under the `tally_webhook_v2` directory.
+The Tally webhook is fully integrated into the main application as the
+`/tally-webhook` endpoint. No separate Cloud Function deployment is needed.
 
-To deploy it:
+### Required environment variable
 
-```bash
-cd tally_webhook_v2
-gcloud run deploy tally-webhook-v2 \
-  --source . \
-  --function tally_webhook \
-  --region europe-west1 \
-  --allow-unauthenticated \
-  --set-env-vars="TALLY_WEBHOOK_TOKEN=your-secret-token"
+Add `TALLY_WEBHOOK_TOKEN` to your Cloud Run env vars (same deploy command):
+
+```
+TALLY_WEBHOOK_TOKEN=your-tally-secret-token
 ```
 
-Replace `your-secret-token` with the actual token configured in your Tally form.
+This token must match the **Authorization** header Tally sends with every
+submission (`Bearer <token>`).
 
+### Endpoint
+
+```
+POST https://your-cloud-run-url/tally-webhook
+Authorization: Bearer <TALLY_WEBHOOK_TOKEN>
+```
+
+Configure this URL in your Tally form's Webhook integration settings.

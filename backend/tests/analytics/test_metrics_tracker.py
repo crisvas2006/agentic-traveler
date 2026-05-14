@@ -64,8 +64,8 @@ def test_record_token_usage_accumulates():
     assert mt._agent_calls["discovery"] == 1
 
 
-def test_flush_writes_correct_firestore_paths():
-    """Flush should write atomic increments to the correct collection/document."""
+def test_flush_writes_correct_supabase_payload():
+    """Flush should write a correctly shaped snapshot to Supabase."""
     import agentic_traveler.analytics.metrics_tracker as mt
     mt._reset_locked()
 
@@ -77,14 +77,12 @@ def test_flush_writes_correct_firestore_paths():
         output_tokens=20,
     )
 
-    with patch("agentic_traveler.analytics.metrics_tracker._write_to_firestore") as mock_write:
+    with patch("agentic_traveler.analytics.metrics_tracker._write_to_supabase") as mock_write:
         # manually trigger flush
         with mt._lock:
             mt._flush_locked()
 
-    # The snapshot passed to _write_to_firestore should have the right shape
-    # (_write_to_firestore is called in a thread, but since we patched it, it
-    # runs synchronously here)
+    # The snapshot passed to _write_to_supabase should have the right shape
     assert mock_write.called
     snap = mock_write.call_args[0][0]
     assert snap["total_interactions"] == 1
@@ -99,7 +97,7 @@ def test_threshold_flush_triggers():
     mt._reset_locked()
 
     with patch.object(mt, "FLUSH_THRESHOLD", 3):
-        with patch("agentic_traveler.analytics.metrics_tracker._write_to_firestore") as mock_write:
+        with patch("agentic_traveler.analytics.metrics_tracker._write_to_supabase") as mock_write:
             mt.record_interaction(user_id="u1")
             mt.record_interaction(user_id="u2")
             # Third event should trigger flush

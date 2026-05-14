@@ -1,12 +1,12 @@
 """
-Persists user preference updates to Firestore.
+Persists user preference updates to Supabase.
 
 Called by the orchestrator's ``update_preferences`` tool function
 when the LLM detects a new preference in the user's message.
 
 No LLM call here — the orchestrator already extracted the key/value
 pair through function calling.  This module just handles the
-Firestore merge logic.
+Supabase upsert logic for the ``user_profiles`` table.
 """
 
 import logging
@@ -47,55 +47,64 @@ LIST_FIELDS = {
 
 
 class PreferenceLearner:
-    """Merge and persist a single preference key/value to Firestore."""
+    """Merge and persist a single preference key/value to Supabase."""
 
     def save_preference(
         self,
         key: str,
         value: str,
         user_doc: Dict[str, Any],
-        user_doc_ref,
+        user_id: str,
         _sync: bool = False,
     ) -> None:
         """
         Persist a preference extracted by the orchestrator by asynchronously
         asking the ProfileAgent to update the structured profile schema.
-        
-        Set _sync=True for testing.
+
+        Args:
+            key:      Preference key (e.g. "budget", "tone_preference").
+            value:    Preference value to store.
+            user_doc: Current assembled user doc (for reading current profile).
+            user_id:  The user's UUID.
+            _sync:    If True, update synchronously (useful for tests).
         """
         import threading
-        
+
         def _async_update():
             try:
                 from agentic_traveler.orchestrator.profile_agent import ProfileAgent
+                from agentic_traveler.tools.db_client import get_db
+
                 agent = ProfileAgent()
-                
-                # Combine key/value into a single natural language fact for the agent
                 new_fact = f"The user indicated their '{key}' preference is: {value}"
-                
-                # We only need to pass the user_profile object to the updater
                 current_profile = user_doc.get("user_profile", {})
-                
+
                 updated_structured_data = agent.update_profile(new_fact, current_profile)
-                
-                # Merge the updated scores, tags, additional_info, and summary back
-                user_doc_ref.set({"user_profile": updated_structured_data}, merge=True)
-                
-                # Use a try-except to avoid "I/O operation on closed file" when exiting
+
+                # Upsert the updated profile_data and summary into user_profiles
+                get_db().table("user_profiles").upsert(
+                    {
+                        "user_id": user_id,
+                        "profile_data": updated_structured_data,
+                        "summary": updated_structured_data.pop("summary", ""),
+                    }
+                ).execute()
+
                 try:
-                    logger.info("Asynchronously updated profile structure with: %s = %s", key, value)
+                    logger.info(
+                        "Asynchronously updated profile structure with: %s = %s", key, value
+                    )
                 except (ValueError, TypeError):
                     pass
-                
+
             except Exception:
                 try:
                     logger.exception("Failed to asynchronously update user profile structure.")
                 except (ValueError, TypeError):
                     pass
-        
+
         if _sync:
             _async_update()
         else:
-            # Fire and forget; doesn't block the LLM response to the user
             thread = threading.Thread(target=_async_update)
             thread.start()

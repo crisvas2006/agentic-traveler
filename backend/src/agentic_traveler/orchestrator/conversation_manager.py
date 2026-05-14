@@ -1,14 +1,15 @@
 """
-Manages conversation history stored in a Firestore user document.
+Manages conversation history stored in the Supabase ``conversations`` table.
 
 Stores the last N raw message exchanges and a compacted summary of
 older history.  Compaction uses a lightweight LLM call to summarise
 when the raw buffer exceeds a threshold.
 
-Firestore layout (under each user doc):
-    conversation_history:
-        recent_messages: [{ role, text, ts }, ...]
-        summary: "..."
+Supabase layout (``conversations`` table, one row per user):
+    user_id         : UUID  — FK → users.id
+    recent_messages : JSONB — [{ role, text, ts }, ...]
+    summary         : TEXT
+    updated_at      : TIMESTAMPTZ
 """
 
 import logging
@@ -51,7 +52,7 @@ class ConversationManager:
     @staticmethod
     def load(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Extract conversation history from a user document.
+        Extract conversation history from the assembled user doc.
 
         Returns:
             Dict with ``recent_messages`` (list) and ``summary`` (str).
@@ -87,14 +88,22 @@ class ConversationManager:
     def append_and_save(
         self,
         user_doc: Dict[str, Any],
-        user_doc_ref,
+        user_id: str,
         user_msg: str,
         agent_reply: str,
     ) -> None:
         """
         Append an exchange to history.  Compacts if the buffer overflows,
-        then persists to Firestore.
+        then persists to the ``conversations`` table.
+
+        Args:
+            user_doc:   The assembled user doc dict.
+            user_id:    The user's UUID.
+            user_msg:   The user's message text.
+            agent_reply: The agent's reply text.
         """
+        from agentic_traveler.tools.db_client import get_db
+
         history = self.load(user_doc)
         now = datetime.now(timezone.utc).isoformat()
 
@@ -105,19 +114,23 @@ class ConversationManager:
             {"role": "agent", "text": agent_reply, "ts": now}
         )
 
-        # Compact if we exceeded the buffer
         if len(history["recent_messages"]) > MAX_RECENT:
             history = self._compact(history)
 
-        # Persist
-        user_doc_ref.set(
-            {"conversation_history": history},
-            merge=True,
-        )
-        logger.debug(
-            "Saved conversation history (%d recent msgs).",
-            len(history["recent_messages"]),
-        )
+        try:
+            get_db().table("conversations").upsert(
+                {
+                    "user_id": user_id,
+                    "recent_messages": history["recent_messages"],
+                    "summary": history["summary"],
+                }
+            ).execute()
+            logger.debug(
+                "Saved conversation history (%d recent msgs).",
+                len(history["recent_messages"]),
+            )
+        except Exception:
+            logger.exception("Failed to save conversation history for user_id=%s", user_id)
 
     # ------------------------------------------------------------------
     # Compaction
@@ -151,7 +164,6 @@ class ConversationManager:
     ) -> str:
         """Call the LLM to produce a combined summary."""
         if not self.client:
-            # Fallback: just concatenate texts
             lines = [f"{m.get('role','')}: {m.get('text','')}" for m in messages]
             return (existing_summary + "\n" + "\n".join(lines)).strip()
 

@@ -1,26 +1,21 @@
 """
-Feedback logging tool — persists user feedback signals to Firestore.
+Feedback logging tool — persists user feedback signals to Supabase.
 
 Called by the orchestrator agent when it detects any feedback signal
 (positive, negative, confusion, retry request, feature suggestion, etc.).
 All writes are fire-and-forget (background thread) so they never block
 the response to the user.
 
-Firestore schema
-----------------
-Collection: feedback
-Document  : <auto-id>
-Fields:
-    user_id              : str
-    text                 : str      ← the feedback text as expressed by the user
-    category             : str      ← see CATEGORIES below
-    timestamp            : datetime (server timestamp)
-    conversation_context : list     ← last ≤6 messages (3 exchanges) for context
-        [{role: "user"|"agent", text: str, ts: str}, ...]
+Supabase schema (``feedback`` table):
+    id                   : BIGINT (auto)
+    user_id              : TEXT   — Telegram user ID
+    text                 : TEXT   — the feedback text as expressed by the user
+    category             : TEXT   — see CATEGORIES below
+    conversation_context : JSONB  — last ≤6 messages (3 exchanges) for context
+    created_at           : TIMESTAMPTZ
 """
 
 import logging
-import os
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -36,14 +31,8 @@ CONTEXT_MESSAGES = 6
 
 class FeedbackTool:
     def __init__(self):
-        try:
-            from google.cloud import firestore  # type: ignore
-
-            project = os.getenv("GOOGLE_PROJECT_ID")
-            self.db = firestore.Client(project=project, database="agentic-traveler-db")
-        except Exception:
-            logger.exception("Failed to initialize Firestore Client in FeedbackTool.")
-            self.db = None
+        # No client initialization needed — get_db() is called lazily per write.
+        pass
 
     def record(
         self,
@@ -67,19 +56,18 @@ class FeedbackTool:
             _sync:     If True, write synchronously (useful for tests).
         """
         safe_category = category if category in CATEGORIES else "other"
-        
+
         logger.debug(
             "FeedbackTool.record called: user=%s, category=%s, text_len=%d",
             user_id, safe_category, len(text)
         )
-        
+
         conversation_context = self._extract_context(user_doc)
 
         payload = {
             "user_id": user_id,
             "text": text,
             "category": safe_category,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
             "conversation_context": conversation_context,
         }
 
@@ -102,17 +90,15 @@ class FeedbackTool:
         return recent[-CONTEXT_MESSAGES:]
 
     def _write(self, payload: Dict[str, Any]) -> None:
-        """Write the payload to Firestore feedback collection."""
-        if not self.db:
-            logger.error("Skipping feedback write: Firestore client not initialized.")
-            return
+        """Write the payload to the Supabase feedback table."""
+        from agentic_traveler.tools.db_client import get_db
 
         try:
-            self.db.collection("feedback").add(payload)
+            get_db().table("feedback").insert(payload).execute()
             logger.info(
                 "💬 Feedback recorded | user=%s category=%s",
                 payload["user_id"],
                 payload["category"],
             )
         except Exception:
-            logger.exception("Failed to record feedback to Firestore.")
+            logger.exception("Failed to record feedback to Supabase.")

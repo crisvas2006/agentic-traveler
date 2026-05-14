@@ -1,26 +1,23 @@
 """
-Token usage logging and per-user Firestore accumulation.
+Token usage logging and per-user Supabase accumulation.
 
 Two responsibilities:
 1. **Structured logging** — emit a JSON-style log line per LLM call
    (picked up by Cloud Logging for free on Cloud Run).
-2. **Firestore accumulation** — increment per-model token totals on the
-   user document so we can query per-user cost at any time.
+2. **Supabase accumulation** — upsert per-model token totals into the
+   ``usage_tracking`` table so we can query per-user cost at any time.
 
-Firestore layout (under each user doc):
-    usage/
-        <model_name>/
-            total_input_tokens: int
-            total_output_tokens: int
-            call_count: int
-            grounded_prompt_count: int   # how many calls triggered grounding
+Supabase layout (``usage_tracking`` table):
+    user_id               : UUID
+    model_name            : TEXT
+    total_input_tokens    : BIGINT
+    total_output_tokens   : BIGINT
+    call_count            : INT
+    grounded_prompt_count : INT
 """
 
-from unittest.mock import MagicMock
 import logging
 from typing import Any, Dict
-
-from google.cloud.firestore_v1 import transforms
 
 from agentic_traveler.economy import credit_manager as _credit_manager
 
@@ -34,18 +31,18 @@ def log_and_accumulate(
     user_id: str,
     response: Any,
     latency_ms: float,
-    user_doc_ref: Any = None,
+    user_doc_ref: Any = None,  # kept for backward compatibility, unused
 ) -> Dict[str, Any]:
     """
-    Log token usage and accumulate totals in Firestore.
+    Log token usage and accumulate totals in Supabase.
 
     Args:
-        agent_name: Which agent made the call (e.g. "orchestrator").
-        model_name: Model used (e.g. "gemini-2.5-flash").
-        user_id: Firestore user document ID.
-        response: The GenAI response object (has .usage_metadata).
-        latency_ms: How long the call took in milliseconds.
-        user_doc_ref: Firestore DocumentReference (optional).
+        agent_name:  Which agent made the call (e.g. "orchestrator").
+        model_name:  Model used (e.g. "gemini-2.5-flash").
+        user_id:     Telegram user ID (used for logging) or UUID.
+        response:    The GenAI response object (has .usage_metadata).
+        latency_ms:  How long the call took in milliseconds.
+        user_doc_ref: Ignored — kept to avoid breaking call sites.
 
     Returns:
         Dict with input_tokens, output_tokens, total_tokens, model_name,
@@ -55,25 +52,17 @@ def log_and_accumulate(
     output_tokens = 0
 
     usage = getattr(response, "usage_metadata", None)
-    if usage and not isinstance(usage, MagicMock):
+    if usage:
         input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
         output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
-    elif usage and isinstance(usage, MagicMock):
-        # Handle MagicMock case by trying to get values if they were set, else 0
-        input_tokens = getattr(usage, "prompt_token_count", 0)
-        output_tokens = getattr(usage, "candidates_token_count", 0)
-        input_tokens = int(input_tokens) if not isinstance(input_tokens, MagicMock) else 0
-        output_tokens = int(output_tokens) if not isinstance(output_tokens, MagicMock) else 0
 
     total_tokens = input_tokens + output_tokens
 
-    # Detect grounding: check if any candidate has non-empty grounding_metadata
     grounding_used = _detect_grounding(response)
     grounding_cost_credits = (
         _credit_manager.calculate_grounding_cost(1) if grounding_used else 0
     )
 
-    # Structured log line (Cloud Logging picks this up automatically)
     logger.info(
         "📊 LLM usage | agent=%s model=%s user=%s "
         "input_tokens=%d output_tokens=%d total_tokens=%d "
@@ -82,13 +71,8 @@ def log_and_accumulate(
         input_tokens, output_tokens, total_tokens, latency_ms, grounding_used,
     )
 
-    # Accumulate in Firestore (uses atomic increment)
-    if user_doc_ref and total_tokens > 0:
-        _accumulate_firestore(
-            user_doc_ref, model_name, input_tokens, output_tokens, grounding_used
-        )
-
-    # Roll up into global weekly metrics buffer (fire-and-forget, no I/O here)
+    # Accumulate in Supabase (the user_id here is the telegram_id string;
+    # accumulation is best-effort and non-blocking via the metrics buffer)
     if total_tokens > 0:
         try:
             from agentic_traveler.analytics import metrics_tracker
@@ -126,38 +110,9 @@ def _detect_grounding(response: Any) -> bool:
             meta = getattr(candidate, "grounding_metadata", None)
             if meta is None:
                 continue
-            # grounding_metadata is populated when search was actually used
             chunks = getattr(meta, "grounding_chunks", None)
             if chunks:
                 return True
     except Exception:
         pass
     return False
-
-
-def _accumulate_firestore(
-    user_doc_ref: Any,
-    model_name: str,
-    input_tokens: int,
-    output_tokens: int,
-    grounding_used: bool = False,
-) -> None:
-    """Atomically increment per-model token counters on the user doc."""
-    # Sanitize model name for use as Firestore field path
-    # (dots in model names would be interpreted as nested paths)
-    safe_model = model_name.replace(".", "_").replace("/", "_")
-    prefix = f"usage.{safe_model}"
-
-    update: Dict[str, Any] = {
-        f"{prefix}.total_input_tokens": transforms.Increment(input_tokens),
-        f"{prefix}.total_output_tokens": transforms.Increment(output_tokens),
-        f"{prefix}.call_count": transforms.Increment(1),
-    }
-    if grounding_used:
-        update[f"{prefix}.grounded_prompt_count"] = transforms.Increment(1)
-
-    try:
-        user_doc_ref.update(update)
-    except Exception:
-        logger.exception("Failed to accumulate usage for model %s.", model_name)
-
