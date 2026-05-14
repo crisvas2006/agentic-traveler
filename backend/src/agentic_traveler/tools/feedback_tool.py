@@ -8,7 +8,7 @@ the response to the user.
 
 Supabase schema (``feedback`` table):
     id                   : BIGINT (auto)
-    user_id              : TEXT   — Telegram user ID
+    user_id              : UUID   — Supabase user ID
     text                 : TEXT   — the feedback text as expressed by the user
     category             : TEXT   — see CATEGORIES below
     conversation_context : JSONB  — last ≤6 messages (3 exchanges) for context
@@ -47,7 +47,7 @@ class FeedbackTool:
         Persist a feedback entry asynchronously.
 
         Args:
-            user_id:   Telegram user ID (string).
+            user_id:   Supabase user ID (UUID string).
             text:      The feedback as expressed by the user.
             category:  One of: positive, negative, confusion, retry,
                        suggestion, other.
