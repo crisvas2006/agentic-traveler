@@ -64,6 +64,10 @@ This builds the image in the cloud (no local Docker required) and pushes it to C
 
 ### Step 3: Deploy
 
+Once your secrets are created in Secret Manager (see Step 2.5), run the deployment command. 
+
+**IMPORTANT:** Cloud Run persists your configuration. You only need to specify `--set-secrets` or `--set-env-vars` when you want to **change** the configuration. Subsequent deployments of new images only need the `--image` flag.
+
 ```bash
 gcloud run deploy agentic-traveler \
   --image gcr.io/YOUR_PROJECT_ID/agentic-traveler \
@@ -73,17 +77,18 @@ gcloud run deploy agentic-traveler \
   --max-instances 1 \
   --concurrency 10 \
   --no-cpu-throttling \
-  --set-env-vars "TELEGRAM_BOT_TOKEN=your-bot-token,TELEGRAM_SECRET_TOKEN=your-secret,GOOGLE_API_KEY=your-api-key,GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=europe-west1" \
   --memory 512Mi \
-  --timeout 120
+  --timeout 120 \
+  --set-env-vars "GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=global" \
+  --set-secrets="TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_SECRET_TOKEN=TELEGRAM_SECRET_TOKEN:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,TALLY_WEBHOOK_TOKEN=TALLY_WEBHOOK_TOKEN:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest,APP_ADMIN_API_KEY=APP_ADMIN_API_KEY:latest"
 ```
 
 > **Note on `--no-cpu-throttling`:** Required for background thread processing. Without it, Cloud Run throttles CPU to near-zero after the HTTP `200` is returned, stalling the background thread before it completes the LLM call and Telegram reply.
-> This does **not** mean "always-on" billing — the instance still scales to zero when idle. CPU is simply kept active until all background threads finish.
 
+> **Note on Configuration Persistence:** If you are just updating the code, you can simply run:
+> `gcloud run deploy agentic-traveler --image gcr.io/YOUR_PROJECT_ID/agentic-traveler`
+> Cloud Run will reuse all existing secret and environment variable mappings.
 
-> **Note:** `--allow-unauthenticated` is required because Telegram can't use Google IAM.
-> All authentication happens at the application level (secret token + IP whitelist).
 
 The command outputs a URL like `https://agentic-traveler-xxxxx.run.app`.
 

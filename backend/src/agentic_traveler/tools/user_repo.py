@@ -219,17 +219,42 @@ class UserRepository:
         existing_row = existing_resp.data if existing_resp else None
 
         if existing_row and existing_row["id"] != new_user_id:
-            # Merge: copy submission_id onto the existing row, delete orphan
+            # Merge: copy submission_id and profile onto the existing row, delete orphan.
+            # Behavior: New details (name, location, form_response) override old ones.
             try:
-                db.table("users").update(
-                    {"submission_id": submission_id}
-                ).eq("id", existing_row["id"]).execute()
+                # 1. Fetch the new profile data before deleting the row
+                new_profile_resp = (
+                    db.table("user_profiles")
+                    .select("form_response")
+                    .eq("user_id", new_user_id)
+                    .maybe_single()
+                    .execute()
+                )
+                new_form_response = (
+                    new_profile_resp.data.get("form_response")
+                    if new_profile_resp and new_profile_resp.data
+                    else {}
+                )
 
+                # 2. Delete the new orphan row first to free up submission_id constraint
                 db.table("users").delete().eq("id", new_user_id).execute()
 
+                # 3. Update existing row with new metadata
+                db.table("users").update(
+                    {
+                        "submission_id": submission_id,
+                        "name": new_row.get("name"),
+                        "location": new_row.get("location"),
+                    }
+                ).eq("id", existing_row["id"]).execute()
+
+                # 4. Update the profile with new form response
+                self.upsert_form_response(existing_row["id"], new_form_response)
+
                 logger.info(
-                    "Merged submission_id=%s into existing user telegram_id=%s",
-                    submission_id, telegram_id,
+                    "Merged submission_id=%s into existing user telegram_id=%s (overrode profile)",
+                    submission_id,
+                    telegram_id,
                 )
                 merged, uid = self.get_user_with_ref(telegram_id)
                 return merged, True
