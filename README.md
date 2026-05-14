@@ -62,7 +62,7 @@ Agents fit well because they allow:
     
 *   A planning-before-acting pattern with explicit tool calls and checks
     
-*   Clear separation between runtime (stateless Cloud Run) and state (Firestore + logs)
+*   Clear separation between runtime (stateless Cloud Run) and state (Supabase + logs)
     
 
 The user does not need “one big model answer” but a persistent, evolving travel companion. Agentic design matches that need.
@@ -90,19 +90,22 @@ A Tally form, “The Odyssey Onboarding” collects a deep but structured profil
 *   Goals & dreams: what they want from their next trip, dream trip style, open notes
     
 
-This form sends data to a GCP HTTP Cloud Function, which writes into Firestore:
+This form sends data directly to the backend's `/tally-webhook` endpoint, which persists it into Supabase:
 
-*   Project: agentic-traveler-db
+*   Table: `users`
     
-*   Collection: users
+*   Each row includes:
     
-*   Each document includes:
-    
-    *   user\_profile with nested sections reflecting the questionnaire
+    *   `user_profile`: A JSONB column with nested sections reflecting the questionnaire
         
-    *   Identification fields: name, email, createdDate
+    *   `credits`: A linked table managing the user's interaction budget
         
-    *   Later fields: telegramUserId, preferenceSignals, links to trips
+    *   `off_topic_state`: Tracks usage patterns to enforce service boundaries
+        
+    *   `conversations`: Persists recent chat history and LLM-generated summaries
+        
+
+The `user_profile` field is the main personalization source for the agents.
         
 
 The user\_profile field is the main personalization source for the agents.
@@ -122,23 +125,25 @@ This keeps the backend focused on agent logic and state, with Telegram handling 
 
 *   Service: agentic-traveler-orchestrator (Python + Google GenAI SDK)
     
-*   Data: Firestore as source of truth
+*   Data: Supabase (PostgreSQL) as source of truth
     
-    *   users: long term profile and preferenceSignals
+    *   `users`: long-term profile, `preference_signals` (JSONB), and `credits`
         
-    *   trips: constraints, candidates, chosen destination, itinerary summary, status
+    *   `trips`: constraints, candidates, chosen destination, itinerary summary, and status
         
-    *   events: suggestion and feedback logs for lightweight learning
+    *   `feedback`: user sentiment logs for lightweight learning
+        
+    *   `analytics_weekly`: aggregated usage metrics and token accounting
         
 Core agents (tool-calling architecture):
 
 1.  **Coordinator** (entry point — no LLM call)
 
     *   Receives every Telegram message.
-    *   Loads user context from Firestore.
+    *   Loads user context from Supabase via `UserRepository`.
     *   Calls the **Router Agent** for intent classification.
     *   Dispatches to the appropriate specialized agent.
-    *   Handles off-topic restriction and credit deduction.
+    *   Handles off-topic restriction and atomic credit deduction via Supabase RPC.
 
 2.  **Router Agent** — intent classifier
 
@@ -173,7 +178,7 @@ Core agents (tool-calling architecture):
 
 8.  **Conversation Manager**
 
-    *   Stores recent messages + compacted summary in Firestore.
+    *   Stores recent messages + compacted summary in Supabase `conversations` table.
 
 #### Current Model Stack
 
@@ -188,7 +193,7 @@ The system uses a tiered model approach to balance reasoning quality and cost:
 | **Planner** | `gemini-3-flash-preview` | Multi-day coherence and structured output. |
 | **Analytics** | `gemini-2.5-flash-lite` | Extremely low-cost summarization of logs. |
 
-The backend is stateless: each request reconstructs context from Firestore and tools, then responds directly to Telegram.
+The backend is stateless: each request reconstructs context from Supabase and tools, then responds directly to Telegram.
 
 ### Security & Safety
 
@@ -196,7 +201,7 @@ The system implements defense-in-depth for the Telegram webhook:
 1.  **Secret URL Path**: Webhook receives updates at `/webhook/<secret_token>`.
 2.  **Secret Token Validation**: Verifies the `X-Telegram-Bot-Api-Secret-Token` header.
 3.  **IP Whitelisting**: Only accepts requests from official Telegram CIDR ranges.
-4.  **Rate Limiting**: Per-user in-memory limits (10 messages/min, 60/hour).
+4.  **Rate Limiting**: Per-user distributed limits backed by Supabase.
 5.  **Payload Validation**: Ensures only valid text messages are processed.
 6.  **Infrastructure Limits**: Cloud Run configured with max-instances and concurrency limits to prevent cost spikes or DDoS.
 
@@ -204,7 +209,7 @@ The system implements defense-in-depth for the Telegram webhook:
 
 The orchestrator includes a custom metrics system designed for Cloud Run:
 *   **In-Memory Buffering**: Captures interactions and token usage without blocking requests.
-*   **Threshold-based Flush**: Weekly metrics are written to Firestore (analytics collection) every 50 events or on process shutdown.
+*   **Threshold-based Flush**: Weekly metrics are written to Supabase (`analytics_weekly` table) every 50 events or on process shutdown.
 *   **Deduplicated Tracking**: Monitors active users per ISO week.
 *   **Token Accounting**: Tracks input/output tokens per model and per agent call.
 
@@ -212,13 +217,19 @@ The orchestrator includes a custom metrics system designed for Cloud Run:
 
 Tools and technologies:
 
+*   **Supabase (PostgreSQL)**
+    
+    *   Relational storage for users, trips, and feedback
+        
+    *   JSONB columns for flexible agentic state (profiles, preferences)
+        
+    *   RPC functions for atomic credit deduction and concurrent safety
+        
 *   **GCP**
     
-    *   Firestore for long term state (users, trips, events)
+    *   Cloud Run for the stateless agent service (Flask + Python)
         
-    *   Cloud Functions for Tally profile ingestion
-        
-    *   Cloud Run for the stateless agent service
+    *   Secret Manager for API keys and webhook tokens
         
 *   **Backend & agents**
     
@@ -226,25 +237,25 @@ Tools and technologies:
         
     *   Small, specialized agents:
         
-        *   Orchestrator, Profile & Memory, Discovery, Planner/Companion, Safety Filter
+        *   Orchestrator, Router, Chat, Trip, Planner, Search, Profile, Conversation Manager
             
     *   Planning before acting:
         
-        *   For complex tasks (discovery, itinerary), agents first sketch a plan (steps + tools) then execute tool calls
+        *   For complex tasks (itinerary building), agents first sketch a plan then execute tool calls
             
     *   Lightweight learning:
         
-        *   Events are aggregated into preferenceSignals instead of loading full histories into the LLM
+        *   Preferences are learned incrementally from chat feedback and updated in Supabase
             
 *   **Automation and chat**
     
     *   Tally form for user personalization
         
-    *   Cloud Function mapping Tally data into user\_profile in Firestore
+    *   Integrated `/tally-webhook` mapping raw form data into structured profiles
         
-    *   Telegram bot as interface
+    *   Telegram bot as primary interface
         
-    *   Direct Telegram webhook to Cloud Run (no Make)
+    *   Direct Telegram webhook to Cloud Run (with IP whitelisting and secret validation)
         
 *   **Safety and monitoring**
     
