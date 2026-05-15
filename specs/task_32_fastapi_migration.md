@@ -20,16 +20,16 @@ The following endpoints currently exist across the backend and require migration
 *   `POST /admin/add-credits`: Needs a Pydantic model for the request body (`user_id`, `amount`) and dependency injection for the `X-Admin-Key` header.
 *   `POST /promo/redeem`: Needs a Pydantic model for the request body (`user_id`, `code`).
 
-### 2. Tally Webhook (`backend/tally_webhook/main.py`)
-*   Currently deployed as an isolated Google Cloud Function. 
-*   **Recommendation**: Move this into the main FastAPI application as `POST /tally/webhook`. This unifies our deployment, reduces cold starts for a separate service, and allows us to use FastAPI's validation for incoming Tally payloads.
+### 2. Tally Webhook (`POST /tally-webhook`)
+*   Currently integrated into the main Flask application (`webhook.py`).
+*   **Recommendation**: Migrate this existing route to FastAPI. This allows us to use FastAPI's Pydantic validation for incoming Tally payloads, replacing manual dictionary parsing.
 
 ## Approach
 1.  **Dependency Updates**: Replace `Flask` and `Werkzeug` with `fastapi` and `uvicorn` in `backend/requirements.txt` and `pyproject.toml`.
 2.  **Pydantic Models**: Create a new file `backend/src/agentic_traveler/interfaces/schemas.py` to define the data structures for incoming requests.
 3.  **Refactor Main App**: Rewrite `webhook.py` (or rename to `main.py`) to use FastAPI decorators.
 4.  **Background Tasks**: Update the Telegram webhook dispatcher to utilize `fastapi.BackgroundTasks` for non-blocking agent execution.
-5.  **Tally Consolidation**: Port the logic from `tally_webhook/main.py` into a new FastAPI router and decommission the Cloud Function (optional but recommended).
+5.  **Tally Migration**: Migrate the existing `/tally-webhook` logic to use a FastAPI router and Pydantic models for request validation.
 
 ## Alternatives Considered
 *   **Flask 2.0 Async**: We could adopt Flask's newer async capabilities. *Why rejected:* Flask's async is bolted onto a synchronous WSGI core. It still doesn't provide Pydantic validation or Swagger docs, missing out on major developer experience improvements.
@@ -45,14 +45,24 @@ The following endpoints currently exist across the backend and require migration
     *   Replace `threading.Thread` with `BackgroundTasks`.
     *   Preserve all 5 layers of defense (Secret, IP whitelist, Rate limiting, etc.).
     *   *Verify*: Send test messages via Telegram to local ngrok environment.
-5.  [ ] **Tally Integration (Optional but recommended)**: Port `tally_webhook` into the main FastAPI app.
-    *   *Verify*: Send a mock Tally payload locally and ensure Firestore updates correctly.
+5.  [ ] **Tally Integration**: Migrate the existing `tally_webhook` route to FastAPI.
+    *   *Verify*: Send a mock Tally payload locally and ensure Supabase updates correctly.
 6.  [ ] **Docker & Deployment Config**: Update `Dockerfile` to use `uvicorn` instead of Flask/Gunicorn. Update `DEPLOYMENT.md` instructions.
     *   *Verify*: Build docker container locally and run it.
 
+## Proposed Improvements for Migration
+Before starting, we should incorporate these modern FastAPI best practices to maximize the value of the rewrite:
+
+1. **Modular Routing (`APIRouter`)**: Instead of keeping all endpoints in a single `webhook.py` file, we should split them logically:
+   - `routers/telegram.py` (for `/webhook/<secret>`)
+   - `routers/tally.py` (for `/tally-webhook`)
+   - `routers/admin.py` (for `/admin/*` and `/promo/*`)
+2. **Dependency Injection (`Depends`)**: Use FastAPI's dependency system for authentication. Create reusable dependencies like `verify_admin_key` or `verify_tally_token` instead of inline `if/else` checks.
+3. **Lifespan Events**: Use FastAPI's modern `@asynccontextmanager` for lifespan events (startup/shutdown) instead of the deprecated `@app.on_event`. This is useful for initializing the Supabase client or pre-loading the Gemini models.
+4. **Global Exception Handling**: Implement custom exception handlers (`@app.exception_handler`) to catch internal errors (like Supabase constraint violations) and map them to clean HTTP 400/500 JSON responses automatically.
+
 ## Risks & Open Questions
 *   **WinError 10038**: In Flask, we had to suppress a specific Werkzeug socket error during local hot-reloads on Windows. We need to verify if Uvicorn exhibits similar behavior on Windows during local development.
-*   **Tally Webhook Consolidation**: Does the Tally webhook *need* to be an isolated Cloud Function, or is it acceptable to merge it into the main Cloud Run service to save costs and centralize logic? (Pending user approval).
 *   **Rate Limiting**: The current rate limiter is an in-memory dictionary with a `threading.Lock`. Since FastAPI uses an event loop, this is technically thread-safe in async, but we need to ensure it behaves correctly across async context switches.
 
 ## Out of Scope

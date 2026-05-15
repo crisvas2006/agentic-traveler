@@ -133,8 +133,8 @@ class OrchestratorAgent:
             user_id=user_id,
             telegram_user_id=telegram_user_id,
             user_name=user_name,
-            tone_preference=tone_preference,
             current_time=current_time,
+            conversation_context=conv_context,
         )
         logger.info("⏱ Router: %s", _elapsed(t))
 

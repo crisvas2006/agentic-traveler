@@ -13,4 +13,4 @@ RUN pip install --no-cache-dir -e .
 # Cloud Run uses PORT env var (default 8080)
 ENV PORT=8080
 
-CMD ["python", "-m", "gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "60", "agentic_traveler.interfaces.webhook:app"]
+CMD ["sh", "-c", "uvicorn agentic_traveler.interfaces.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

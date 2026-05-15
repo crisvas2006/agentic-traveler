@@ -81,7 +81,8 @@ Respond ONLY with a JSON object matching this schema:
 
 Current time: {current_time}
 User: {user_name}
-Tone preference: {tone_preference}
+Known Preferences: {known_preferences}
+Conversation Context: {conversation_context}
 """
 
 
@@ -104,8 +105,8 @@ class RouterAgent:
         user_id: str,
         telegram_user_id: str,
         user_name: str,
-        tone_preference: str,
         current_time: str,
+        conversation_context: str = "",
     ) -> Dict[str, Any]:
         """
         Classify user intent and handle lightweight tool calls.
@@ -199,10 +200,19 @@ class RouterAgent:
 
         # ── execution ────────────────────────────────────────────────────────
 
+        profile_data = user_doc.get("user_profile", {})
+        known_prefs_dict = {k: v for k, v in profile_data.items() if isinstance(v, (str, int, bool))}
+        if user_doc.get("language"):
+            known_prefs_dict["language"] = user_doc.get("language")
+        known_prefs = ", ".join(f"{k}: {v}" for k, v in known_prefs_dict.items())
+        if not known_prefs:
+            known_prefs = "None"
+
         system = _SYSTEM_PROMPT.format(
             current_time=current_time,
             user_name=user_name,
-            tone_preference=tone_preference or "casual and friendly",
+            known_preferences=known_prefs,
+            conversation_context=conversation_context,
         )
 
         t = time.time()
@@ -216,7 +226,7 @@ class RouterAgent:
                     max_output_tokens=256,
                     response_mime_type="application/json",
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=2,
+                        maximum_remote_calls=4,
                     ),
                     safety_settings=[
                         types.SafetySetting(

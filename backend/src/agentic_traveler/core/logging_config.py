@@ -54,7 +54,9 @@ def setup_logging(verbose: bool = False) -> None:
         if verbose
         else "[%(asctime)s] %(levelname)-5s — %(message)s"
     )
-    handler = logging.StreamHandler(sys.stderr)
+    # Use utf-8 encoding for the stream to avoid UnicodeEncodeError on Windows
+    stream = open(sys.stderr.fileno(), mode='w', encoding='utf-8', buffering=1) if sys.platform == 'win32' else sys.stderr
+    handler = logging.StreamHandler(stream)
     handler.setFormatter(ColorFormatter(fmt, datefmt="%H:%M:%S"))
 
     root = logging.getLogger()

@@ -41,7 +41,7 @@ Before deploying any major changes, you **must** run the regression test suite t
    .\.venv\Scripts\pytest
    ```
 2. **Run Manual Staging Tests:**
-   Start the local webhook (`python -m agentic_traveler.interfaces.webhook`) and route Telegram to it using ngrok. 
+   Start the local FastAPI server (`uvicorn agentic_traveler.interfaces.main:app --reload --port 8080`) and route Telegram to it using ngrok. 
    Then, follow the step-by-step instructions in `tests/manual_test_flow.md` to validate core agent capabilities (Profile linking, Routing, Memory, Tools) via Telegram.
 
 Once both automated and manual tests pass, proceed with deployment.
@@ -83,7 +83,7 @@ gcloud run deploy agentic-traveler \
   --set-secrets="TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_SECRET_TOKEN=TELEGRAM_SECRET_TOKEN:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,TALLY_WEBHOOK_TOKEN=TALLY_WEBHOOK_TOKEN:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest,APP_ADMIN_API_KEY=APP_ADMIN_API_KEY:latest"
 ```
 
-> **Note on `--no-cpu-throttling`:** Required for background thread processing. Without it, Cloud Run throttles CPU to near-zero after the HTTP `200` is returned, stalling the background thread before it completes the LLM call and Telegram reply.
+> **Note on `--no-cpu-throttling`:** Required for FastAPI BackgroundTasks processing. Without it, Cloud Run throttles CPU to near-zero after the HTTP `200` is returned, stalling the background task before it completes the LLM call and Telegram reply.
 
 > **Note on Configuration Persistence:** If you are just updating the code, you can simply run:
 > `gcloud run deploy agentic-traveler --image gcr.io/YOUR_PROJECT_ID/agentic-traveler`
@@ -110,11 +110,11 @@ This registers `https://your-url/webhook/<SECRET_TOKEN>` with Telegram.
 
 For testing the webhook locally without deploying:
 
-### 1. Start the Flask app
+### 1. Start the FastAPI app
 
 ```powershell
 $env:SKIP_IP_CHECK="1"
-.\.venv\Scripts\python -m agentic_traveler.interfaces.webhook
+.\.venv\Scripts\uvicorn agentic_traveler.interfaces.main:app --reload --port 8080
 ```
 
 > `SKIP_IP_CHECK=1` disables the Telegram IP whitelist for local testing.
@@ -135,7 +135,7 @@ Copy the `https://xxx.ngrok-free.dev` URL.
 
 ### 4. Chat in Telegram
 
-Messages flow: **Telegram → ngrok → local Flask → response**.
+Messages flow: **Telegram → ngrok → local FastAPI → response**.
 
 When done, re-register the webhook with your Cloud Run URL.
 

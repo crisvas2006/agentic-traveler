@@ -19,6 +19,6 @@ python-dotenv
 google-adk
 supabase
 functions-framework
-flask
-gunicorn
+fastapi
+uvicorn[standard]
 requests
