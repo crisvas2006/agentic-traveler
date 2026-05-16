@@ -1,5 +1,7 @@
 # Task Spec: FastAPI Migration
 
+> **Status: ✅ COMPLETED** (2026-05-15)
+
 ## Goal
 Migrate the existing Aletheia Travel backend web layer from Flask to **FastAPI**. 
 This migration aims to modernize the API layer to natively support asynchronous execution (critical for I/O-bound LLM tasks), leverage automatic data validation via Pydantic, and generate interactive API documentation out of the box.
