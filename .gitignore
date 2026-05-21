@@ -202,6 +202,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Claude Code — local user permissions (machine-specific, not project-wide)
+.claude/settings.local.json
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
