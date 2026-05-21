@@ -225,9 +225,15 @@ Tools and technologies:
         
     *   RPC functions for atomic credit deduction and concurrent safety
         
+*   **Web frontend**
+
+    *   Next.js 16 / React 19 / TypeScript / Tailwind CSS v4 on Vercel
+    *   Supabase Auth with Google OAuth and email/password (PKCE flow, Cloudflare Turnstile CAPTCHA)
+    *   Dashboard: phase-aware trip view, map canvas, AI chat panel (in design/build)
+
 *   **GCP**
     
-    *   Cloud Run for the stateless agent service (Flask + Python)
+    *   Cloud Run for the stateless agent service (FastAPI + Python)
         
     *   Secret Manager for API keys and webhook tokens
         
@@ -338,7 +344,7 @@ This project is an AI agentic travel companion that:
 *   Acts as a live companion during trips: answering questions, adapting plans to weather and energy, and learning from behavior over time.
     
 
-The main interaction channel is Telegram chat. There is no custom web frontend in the MVP.
+The primary interaction channel is Telegram chat. A web frontend is under active development (see §1.7).
 
 ### 1.2 Personalization and data intake
 
@@ -471,6 +477,35 @@ Must have features for the first version:
     
 *   Direct integration with specific travel APIs such as Skyscanner or Amadeus in the first version. Use general web search and basic tools instead.
     
+
+### 1.7 Web Frontend
+
+A Next.js web application complements the Telegram interface with a visual, spatial layer.
+
+**Stack:** Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4, Supabase Auth (`@supabase/ssr`), Vercel.
+
+**Auth flows implemented:**
+- Email/password sign-up and login (with Cloudflare Turnstile CAPTCHA)
+- Google OAuth (PKCE flow via Supabase)
+- Password reset via branded email links routed through `/auth/confirm`
+- Consent recording (`consents` table) on sign-up for GDPR accountability - [TO BE IMPLEMENTED - GDPR COMPLIANCE]
+
+**Dashboard vision (in design/build):**
+
+The dashboard is the *cockpit* to the AI agent — it makes trips spatial and tangible. It is phase-aware: a new user sees an onboarding canvas guiding them to plan a first trip; a user with an upcoming trip sees it in planning focus; a user currently on a trip sees live companion mode with today's itinerary highlighted.
+
+Core layout paradigm: **map as canvas, panels as overlays.**
+
+- **Left sidebar / swipe-right (mobile):** Trip library — all trips (Exploring → Planning → Active → Complete), Traveler DNA teaser at the bottom.
+- **Center / default pane (mobile):** Trip detail — day-by-day itinerary accordion, destination candidate cards, budget overview, key bookings checklist. Selecting a day updates the map in real time.
+- **Map canvas (always present):** World map with candidate destination pins during discovery; zoomed destination map with POI pins and day route during planning; live location dot during active trip. Map tile style tracks the light/dark theme.
+- **Chat (floating bubble on mobile, right sidebar on desktop):** The AI agent is always one tap away. Chat is the primary way to trigger changes; the panels reflect the results.
+
+Visual identity: extends the auth pages (blue → purple gradient, glassmorphic panels, Geist font, dark/light theming) in a bolder, more spatial direction. Map tile style adapts to the active theme.
+
+Full design specification: [`specs/frontend_dashboard_design.md`](specs/frontend_dashboard_design.md).
+
+---
 
 ### 1.5 Key user stories
 
