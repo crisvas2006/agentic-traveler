@@ -15,7 +15,7 @@ export function AuthShell({ children, marketingContent }: AuthShellProps) {
   const { theme, setTheme } = useTheme();
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-[100dvh] bg-background text-foreground overflow-x-hidden">
       {/* Background */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <div className="absolute inset-0 opacity-0 dark:opacity-100 transition-opacity duration-700">
@@ -45,7 +45,7 @@ export function AuthShell({ children, marketingContent }: AuthShellProps) {
       </div>
 
       {/* Split layout */}
-      <div className="relative z-10 min-h-screen grid lg:grid-cols-[1.05fr_1fr]">
+      <div className="relative z-10 min-h-[100dvh] grid lg:grid-cols-[1.05fr_1fr]">
         {/* Marketing rail — hidden on mobile */}
         <div className="hidden lg:block p-6">
           <div className="h-full bg-background/70 backdrop-blur-xl border border-border rounded-[1.75rem] overflow-hidden shadow-[0_30px_60px_-30px_rgba(0,0,0,0.25)]">
@@ -67,7 +67,7 @@ export function AuthShell({ children, marketingContent }: AuthShellProps) {
         </div>
 
         {/* Form column */}
-        <div className="grid place-items-center px-5 py-10 sm:px-10">
+        <div className="grid place-items-center px-4 py-10 sm:px-10">
           <div className="w-full max-w-[420px] animate-fade-up">
             {/* Mobile-only logo */}
             <div className="lg:hidden mb-8 flex justify-center">

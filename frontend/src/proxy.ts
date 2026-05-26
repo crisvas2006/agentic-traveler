@@ -37,8 +37,13 @@ export default async function proxy(request: NextRequest) {
       return NextResponse.redirect(url)
     }
 
-    // Skip /login — redirect already-authenticated visitors to /dashboard
-    if (request.nextUrl.pathname === '/login' && user) {
+    // Skip auth pages — redirect already-authenticated visitors to /dashboard.
+    // This is what makes the back button feel sane: if a logged-in user lands
+    // on /login, /sign-up, or the landing page (e.g. by pressing back from
+    // /dashboard), they bounce straight to /dashboard instead of seeing a
+    // login form they don't need.
+    const AUTHED_BOUNCE_PATHS = ['/login', '/sign-up', '/']
+    if (user && AUTHED_BOUNCE_PATHS.includes(request.nextUrl.pathname)) {
       const url = request.nextUrl.clone()
       url.pathname = '/dashboard'
       return NextResponse.redirect(url)

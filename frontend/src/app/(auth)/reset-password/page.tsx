@@ -134,7 +134,7 @@ function ResetPasswordForm() {
       {errors.confirmPw && <p className="text-xs text-rose-500 dark:text-rose-400 px-2 mt-1 animate-fade-up">{errors.confirmPw}</p>}
 
       {SITE_KEY && (
-        <div className="mt-5 flex flex-col items-center gap-1.5">
+        <div className="mt-5 flex flex-col items-center gap-1.5 w-full overflow-x-auto">
           <Turnstile
             ref={turnstileRef}
             siteKey={SITE_KEY}

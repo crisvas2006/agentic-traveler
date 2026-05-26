@@ -531,16 +531,16 @@ function CreditsSection({
           />
           <div className="relative">
             <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground mb-1">Available balance</div>
-            <div className="flex items-baseline gap-2">
+            <div>
               <span
                 className="text-6xl font-black tracking-tight leading-none tabular-nums"
                 style={{ color: balance === 0 ? "#fb7185" : "var(--foreground)" }}
               >
                 {balance}
               </span>
-              <span className="text-sm text-muted-foreground font-mono uppercase tracking-wider">
+              <div className="text-[11px] text-muted-foreground font-mono uppercase tracking-wider mt-1">
                 credit{balance === 1 ? "" : "s"} remaining
-              </span>
+              </div>
             </div>
 
             {/* Remaining / Used strip */}

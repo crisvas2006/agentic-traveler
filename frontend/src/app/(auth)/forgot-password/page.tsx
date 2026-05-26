@@ -123,7 +123,7 @@ function ForgotPasswordForm() {
       )}
 
       {SITE_KEY && (
-        <div className="mt-5 flex flex-col items-center gap-1.5">
+        <div className="mt-5 flex flex-col items-center gap-1.5 w-full overflow-x-auto">
           <Turnstile
             ref={turnstileRef}
             siteKey={SITE_KEY}
