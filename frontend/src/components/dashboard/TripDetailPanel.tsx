@@ -420,9 +420,10 @@ function PanelHeader({ trip, day }: { trip: Trip; day: TripDay }) {
               {trip.dateRange.split(" – ")[0]} → {trip.dateRange.split(" – ")[1]}
             </span>
           </div>
-          <h2 className="text-2xl font-extrabold tracking-tight leading-tight">
-            {trip.destination},{" "}
-            <span className="text-foreground/50">Day {day.n} of 7</span>
+          <h2 className="font-extrabold tracking-tight leading-tight">
+            <span className="text-2xl">{trip.destination}</span>
+            <br />
+            <span className="text-lg font-bold text-foreground/50">Day {day.n} of 7</span>
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">{day.title}</p>
         </div>

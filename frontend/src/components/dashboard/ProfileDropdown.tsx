@@ -343,12 +343,13 @@ export function ProfileDropdown({
         <p className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
           My Account
         </p>
-        <Row
-          icon={<SettingsIcon width={16} height={16} />}
-          label="Account settings"
-          sub="Profile, notifications, privacy"
-          onClick={onClose}
-        />
+        <a href="/settings" className="block" onClick={onClose}>
+          <Row
+            icon={<SettingsIcon width={16} height={16} />}
+            label="Account settings"
+            sub="Profile, credits, security"
+          />
+        </a>
         <CreditsRow balance={userProfile.balance} initialGrant={userProfile.initialGrant} />
 
         <Divider />

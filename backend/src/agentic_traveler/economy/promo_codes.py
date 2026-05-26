@@ -6,6 +6,10 @@ of credits awarded when redeemed.  1 credit = 1 eurocent.
 
 Add new codes here — they are available immediately at runtime.
 """
+# IF YOU SEARCHED FOR THIS IN ORDER TO HACK THE SYSTEM, 
+# CONGRATS, I LEFT IT HERE FOR YOU. ENJOY.
+# PS: IF YOU SHARE THESE CODES PUBLICLY, I'LL KNOW AND I WILL REMOVE THEM. 
+# #PLAYNICE
 
 PROMO_CODES: dict[str, int] = {
     # Referral / social
@@ -18,7 +22,7 @@ PROMO_CODES: dict[str, int] = {
     # Engagement
     "FIRSTTRIP": 200,        # €2 — first itinerary reward
     "EXPLORER": 400,         # €4 — power user reward
-    "FEEDBACK": 150,         # €1.50 — thank-you for feedback
+    "FEEDBACK2026": 100,         # €1 — thank-you for feedback
     # Partnerships
     "HOSTELWORLD": 300,      # €3 — partner promo
     "TRAVELHACK": 500,       # €5 — travel hackathon / event
