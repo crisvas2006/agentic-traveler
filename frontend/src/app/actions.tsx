@@ -7,8 +7,7 @@ import { renderAlphaWelcomeEmail } from "@/lib/emails";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM_ADDRESS =
-  process.env.RESEND_FROM_ADDRESS;
+const FROM_ADDRESS = process.env.RESEND_FROM_ADDRESS!;
 
 /** Masks an email address for safe logging: "user@example.com" → "use***@example.com" */
 function maskEmail(email: string): string {
