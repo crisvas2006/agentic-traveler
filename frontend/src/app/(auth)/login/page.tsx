@@ -116,7 +116,7 @@ function LoginForm() {
       setStatus({ kind: "error", message: error.message });
     } else {
       setStatus({ kind: "success", message: "Signed in — redirecting to your journeys…" });
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     }
   };

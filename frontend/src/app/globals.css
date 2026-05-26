@@ -42,19 +42,19 @@
 }
 
 .dark {
-  --background: #020617;
-  --foreground: #f8fafc;
-  --primary: #3b82f6;
+  --background: #0a1224;
+  --foreground: #f1f5fb;
+  --primary: #60a5fa;
   --primary-foreground: #ffffff;
-  --secondary: #1e293b;
-  --secondary-foreground: #f8fafc;
-  --muted: #0f172a;
-  --muted-foreground: #94a3b8;
-  --accent: #1e293b;
-  --accent-foreground: #f8fafc;
-  --border: #1e293b;
-  --input: #1e293b;
-  --ring: #1d4ed8;
+  --secondary: #1c2742;
+  --secondary-foreground: #f1f5fb;
+  --muted: #131c33;
+  --muted-foreground: #aebed5;
+  --accent: #1c2742;
+  --accent-foreground: #f1f5fb;
+  --border: #2a3754;
+  --input: #2a3754;
+  --ring: #3b82f6;
 }
 
 body {
@@ -103,4 +103,27 @@ body {
   .animate-float-reverse {
     animation: float 25s ease-in-out infinite reverse;
   }
+}
+
+/* Shared glass card — used by dashboard panels, auth cards */
+.aletheia-card {
+  background: color-mix(in oklab, var(--background) 70%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 1.75rem;
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent) inset,
+    0 30px 60px -30px color-mix(in oklab, var(--foreground) 25%, transparent);
+}
+
+/* Subtle grid texture used as background element */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px);
+  background-size: 40px 40px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 100%);
+  mask-image: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 100%);
+  opacity: 0.2;
 }

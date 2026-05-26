@@ -1,4 +1,4 @@
-# Task 18: Micro-Preference Detection and Proactive Hints
+# Task 35: Micro-Preference Detection and Proactive Hints
 
 > Detect recurring user micro-questions and proactively surface related info when relevant.
 
