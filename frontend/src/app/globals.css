@@ -117,6 +117,27 @@ body {
     0 30px 60px -30px color-mix(in oklab, var(--foreground) 25%, transparent);
 }
 
+/* Themed slim scrollbar — use on horizontally-scrollable containers */
+.scrollbar-primary {
+  /* Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary) transparent;
+}
+.scrollbar-primary::-webkit-scrollbar {
+  height: 4px;
+  width: 4px;
+}
+.scrollbar-primary::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-primary::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, var(--primary), #9333ea);
+  border-radius: 9999px;
+}
+.scrollbar-primary::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(90deg, var(--primary), #7e22ce);
+}
+
 /* Subtle grid texture used as background element */
 .grid-bg {
   background-image:

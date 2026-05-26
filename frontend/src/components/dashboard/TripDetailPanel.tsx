@@ -159,12 +159,28 @@ function AccordionLayout({
   days: TripDay[]; todayN: number; activeDayN: number;
   setActiveDayN: (n: number | null) => void; density: Density;
 }) {
+  // Block IDs are unique across all days — one flat Set covers everything.
+  const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
+  const toggleDone = (id: string) => {
+    setDoneIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-1.5">
       {days.map((d) => {
         const open = d.n === activeDayN;
         const isToday = d.n === todayN;
         const isPast = d.status === "past";
+
+        // Highlight the block immediately after the highest-indexed done block
+        // for this day. If none done → highlight first; if all done → no highlight.
+        const maxDoneIdx = d.blocks.reduce((acc, b, i) => (doneIds.has(b.id) ? i : acc), -1);
+        const currentIdx = maxDoneIdx + 1 < d.blocks.length ? maxDoneIdx + 1 : -1;
+
         return (
           <div
             key={d.n}
@@ -215,7 +231,15 @@ function AccordionLayout({
             {open && (
               <div className="px-2.5 pb-3 space-y-1.5 animate-fade-up">
                 {d.blocks.map((b, i) => (
-                  <BlockRow key={b.id} b={b} idx={i} density={density} current={b.current} />
+                  <BlockRow
+                    key={b.id}
+                    b={b}
+                    idx={i}
+                    density={density}
+                    current={i === currentIdx}
+                    isDone={doneIds.has(b.id)}
+                    onToggleDone={() => toggleDone(b.id)}
+                  />
                 ))}
               </div>
             )}
@@ -272,7 +296,7 @@ function TimelineLayout({
       {/* Day-picker strip — fixed-width buttons, "Today" badge inline on line 2 */}
       <div
         ref={stripRef}
-        className="flex gap-1.5 overflow-x-auto pb-3 mb-4 -mx-2 px-2"
+        className="flex gap-1.5 overflow-x-auto pb-3 mb-4 -mx-2 px-2 scrollbar-primary"
       >
         {days.map((day) => {
           const isActive = day.n === activeDayN;

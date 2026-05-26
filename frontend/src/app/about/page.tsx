@@ -1,26 +1,14 @@
-"use client";
-// Force refresh for icons
-
-
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Globe, Code, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useRef } from "react";
-import { useInView } from "@/hooks/use-in-view";
 import Image from "next/image";
+import { Reveal } from "@/components/ui/Reveal";
 
 export default function AboutPage() {
-  const headerRef = useRef<HTMLElement>(null);
-  const isInView = useInView(headerRef);
-
   return (
     <PageWrapper>
-      <section ref={headerRef} className="py-20 relative overflow-hidden">
+      <section className="py-20 relative overflow-hidden">
         <div className="container mx-auto px-4 relative z-10">
-          <div className={cn(
-            "max-w-4xl mx-auto transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}>
+          <Reveal className="max-w-4xl mx-auto">
             <div className="text-center mb-16">
               <h1 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
                 About the Project
@@ -75,7 +63,7 @@ export default function AboutPage() {
                 </div>
               </div>
             </div>
-          </div>
+          </Reveal>
         </div>
       </section>
     </PageWrapper>

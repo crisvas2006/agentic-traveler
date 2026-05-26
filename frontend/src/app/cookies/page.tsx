@@ -1,23 +1,13 @@
-"use client";
-
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Cookie } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useRef } from "react";
-import { useInView } from "@/hooks/use-in-view";
+import { Reveal } from "@/components/ui/Reveal";
 
 export default function CookiesPage() {
-  const headerRef = useRef<HTMLElement>(null);
-  const isInView = useInView(headerRef);
-
   return (
     <PageWrapper>
-      <section ref={headerRef} className="py-20 relative overflow-hidden">
+      <section className="py-20 relative overflow-hidden">
         <div className="container mx-auto px-4 relative z-10">
-          <div className={cn(
-            "max-w-3xl mx-auto transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}>
+          <Reveal className="max-w-3xl mx-auto">
             <div className="flex items-center gap-4 mb-6">
               <Cookie className="w-8 h-8 text-primary" />
               <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
@@ -66,7 +56,7 @@ export default function CookiesPage() {
                 <p className="text-xs">Last updated: May 2026</p>
               </section>
             </div>
-          </div>
+          </Reveal>
         </div>
       </section>
     </PageWrapper>

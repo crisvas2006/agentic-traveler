@@ -14,9 +14,10 @@ CREATE POLICY "Allow anonymous inserts" ON public.waitlist
   FOR INSERT TO anon
   WITH CHECK (true);
 
-CREATE POLICY "Allow anonymous updates" ON public.waitlist
-  FOR UPDATE TO anon
-  USING (true);
+-- NOTE: The "Allow anonymous updates" policy that previously existed here has been
+-- intentionally dropped. Anonymous UPDATE on waitlist is unnecessary and was a
+-- security risk (unauthenticated actors could overwrite any waitlist row).
+-- Dropped in DB: 2026-05-25. Do NOT re-add.
 
 
 -- ---------------------------------------------------------------------------
@@ -25,7 +26,11 @@ CREATE POLICY "Allow anonymous updates" ON public.waitlist
 -- ---------------------------------------------------------------------------
 CREATE POLICY "users_self" ON public.users
   FOR ALL
-  USING (auth_id = auth.uid());
+  USING      (auth_id = auth.uid())
+  WITH CHECK (auth_id = auth.uid());
+-- USING:      filters which rows the user can touch (checked against the OLD row).
+-- WITH CHECK: validates the resulting row after INSERT/UPDATE so a user cannot
+--             change their own auth_id to steal another user's row.
 
 
 -- ---------------------------------------------------------------------------

@@ -3,8 +3,8 @@
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { HelpCircle, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { useRef, useState } from "react";
-import { useInView } from "@/hooks/use-in-view";
+import { useState } from "react";
+import { Reveal } from "@/components/ui/Reveal";
 
 const faqs = [
   {
@@ -34,18 +34,13 @@ const faqs = [
 ];
 
 export default function FAQPage() {
-  const headerRef = useRef<HTMLElement>(null);
-  const isInView = useInView(headerRef);
   const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   return (
     <PageWrapper>
-      <section ref={headerRef} className="py-20 relative overflow-hidden">
+      <section className="py-20 relative overflow-hidden">
         <div className="container mx-auto px-4 relative z-10">
-          <div className={cn(
-            "max-w-3xl mx-auto transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}>
+          <Reveal className="max-w-3xl mx-auto">
             <div className="text-center mb-16">
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm mb-4">
                 <HelpCircle className="w-3.5 h-3.5 text-primary" />
@@ -85,7 +80,7 @@ export default function FAQPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </Reveal>
         </div>
       </section>
     </PageWrapper>

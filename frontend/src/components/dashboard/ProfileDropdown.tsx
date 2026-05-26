@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type RefObject } from "react";
-import { createClient } from "@/utils/supabase/client";
 import type { UserProfile } from "@/hooks/useUserProfile";
 import {
   SettingsIcon,
@@ -273,8 +272,9 @@ export function ProfileDropdown({
   }, [onClose, containerRef, excludeRef]);
 
   const handleSignOut = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    // POST to the route handler so the sign-out is server-side and cannot be
+    // triggered via CSRF (a GET-based logout can be fired by any <img> tag).
+    await fetch("/logout", { method: "POST" });
     window.location.href = "/login";
   };
 

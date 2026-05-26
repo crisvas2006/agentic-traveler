@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Sparkles, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, Compass, Check } from "lucide-react";
 import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
-import { createClient } from "@/utils/supabase/client";
+import { createBrowserClient } from "@supabase/ssr";
 import { AuthShell } from "@/components/auth/AuthShell";
+import { MIN_PASSWORD_LENGTH } from "@/lib/auth";
 
 /* ── Google logo ── */
 function GoogleMark({ size = 18 }: { size?: number }) {
@@ -91,7 +92,7 @@ function LoginForm() {
     if (!email) e.email = "Email is required.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "That doesn't look like a valid email.";
     if (!password) e.password = "Password is required.";
-    else if (password.length < 6) e.password = "Must be at least 6 characters.";
+    else if (password.length < MIN_PASSWORD_LENGTH) e.password = `Must be at least ${MIN_PASSWORD_LENGTH} characters.`;
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -101,7 +102,23 @@ function LoginForm() {
     if (!validate()) return;
     setStatus({ kind: "loading", message: "" });
 
-    const supabase = createClient();
+    // "Remember me" controls session persistence:
+    //   checked  → localStorage (survives browser restart) — default Supabase behaviour
+    //   unchecked → sessionStorage (cleared when the tab/window closes)
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
+    const supabase = remember
+      ? createBrowserClient(url, key)
+      : createBrowserClient(url, key, {
+          auth: {
+            storage: {
+              getItem: (k: string) => sessionStorage.getItem(k),
+              setItem: (k: string, v: string) => sessionStorage.setItem(k, v),
+              removeItem: (k: string) => sessionStorage.removeItem(k),
+            },
+          },
+        });
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -123,7 +140,10 @@ function LoginForm() {
 
   const handleGoogle = async () => {
     setGoogleLoading(true);
-    const supabase = createClient();
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    );
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: `${window.location.origin}/auth/callback` },

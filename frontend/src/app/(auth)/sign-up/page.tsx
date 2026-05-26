@@ -7,6 +7,7 @@ import { Sparkles, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User, Compass, 
 import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
 import { createClient } from "@/utils/supabase/client";
 import { AuthShell } from "@/components/auth/AuthShell";
+import { MIN_PASSWORD_LENGTH } from "@/lib/auth";
 
 /* ── Google logo ── */
 function GoogleMark({ size = 18 }: { size?: number }) {
@@ -104,7 +105,7 @@ function SignUpForm() {
     if (!email) e.email = "Email is required.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "That doesn't look like a valid email.";
     if (!password) e.password = "Password is required.";
-    else if (password.length < 8) e.password = "Must be at least 8 characters.";
+    else if (password.length < MIN_PASSWORD_LENGTH) e.password = `Must be at least ${MIN_PASSWORD_LENGTH} characters.`;
     if (!confirmPw) e.confirmPw = "Please confirm your password.";
     else if (confirmPw !== password) e.confirmPw = "Passwords don't match.";
     if (!agreed) e.agreed = "You must agree to continue.";

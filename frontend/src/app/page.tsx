@@ -1,39 +1,26 @@
 "use client";
 
 import * as React from "react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sparkles, Compass, Zap, Shield, ArrowRight, Calendar } from "lucide-react";
 
-import { useInView } from "@/hooks/use-in-view";
 import { PageWrapper } from "@/components/layout/PageWrapper";
+import { Reveal } from "@/components/ui/Reveal";
 
 // Hero Section Component
 function HeroSection() {
-  const heroRef = useRef<HTMLElement>(null);
-  const isInView = useInView(heroRef);
-
   return (
-    <section
-      ref={heroRef}
-      className="relative min-h-[calc(100vh-64px)] flex flex-col items-center justify-center overflow-hidden py-12"
-    >
-
+    <section className="relative min-h-[calc(100vh-64px)] flex flex-col items-center justify-center overflow-hidden py-12">
       <div className="container mx-auto px-4 relative z-10">
-        <div
-          className={cn(
-            "max-w-4xl mx-auto text-center transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}
-        >
+        <Reveal className="max-w-4xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm mb-8">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-semibold text-primary uppercase tracking-wider">Alpha Access Available</span>
           </div>
 
-          {/* Don't book a trip. Architect a journey. */}
           <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight mb-4 leading-tight">
             Don't book a trip.<br />Architect a journey.
           </h1>
@@ -48,7 +35,6 @@ function HeroSection() {
               Not the Average.
             </span>
           </h2>
-
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             <Button
@@ -76,7 +62,7 @@ function HeroSection() {
               Learn More
             </Button>
           </div>
-        </div>
+        </Reveal>
       </div>
 
       {/* Scroll Indicator - Hidden on mobile as it overlaps content */}
@@ -91,9 +77,6 @@ function HeroSection() {
 
 // Proof Section Component
 function ProofSection() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const isInView = useInView(sectionRef);
-
   const roadmap = [
     {
       phase: "Current Alpha",
@@ -116,16 +99,11 @@ function ProofSection() {
   ];
 
   return (
-    <section id="proof-section" ref={sectionRef} className="min-h-[calc(100vh-64px)] flex flex-col justify-center py-32 relative overflow-hidden scroll-mt-16">
+    <section id="proof-section" className="min-h-[calc(100vh-64px)] flex flex-col justify-center py-32 relative overflow-hidden scroll-mt-16">
       <div id="proof-section-bg" className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.05)_0%,transparent_70%)]" />
 
       <div className="container mx-auto px-4 relative z-10">
-        <div
-          className={cn(
-            "text-center mb-16 transition-all duration-1000 delay-200",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}
-        >
+        <Reveal className="text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-8">
             Everything You Need for the
             <br />
@@ -135,20 +113,18 @@ function ProofSection() {
           <p className="text-base md:text-lg text-muted-foreground mb-12 max-w-3xl mx-auto leading-relaxed">
             Most platforms solve for the cheapest flight or the trendiest hotel. Aletheia Travel solves for the person. An AI travel companion that understands your energy levels, motivations, and life phases to create meaningful journeys.
           </p>
-        </div>
+        </Reveal>
 
         <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           {roadmap.map((item, index) => (
             <div
               key={index}
               className={cn(
-                "relative p-6 rounded-2xl border backdrop-blur-sm transition-all duration-1000 hover:scale-105",
+                "relative p-6 rounded-2xl border backdrop-blur-sm transition-all hover:scale-105",
                 item.active
                   ? "bg-primary/10 border-primary/30 shadow-lg shadow-primary/5"
-                  : "bg-muted border-border hover:bg-background hover:border-primary/20",
-                isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
+                  : "bg-muted border-border hover:bg-background hover:border-primary/20"
               )}
-              style={{ transitionDelay: `${index * 150 + 400}ms` }}
             >
               {item.active && (
                 <div className="absolute -top-3 -right-3">
@@ -178,9 +154,6 @@ function ProofSection() {
 
 // Features Section Component
 function FeaturesSection() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const isInView = useInView(sectionRef);
-
   const features = [
     {
       icon: Compass,
@@ -209,26 +182,21 @@ function FeaturesSection() {
   ];
 
   return (
-    <section ref={sectionRef} className="py-20 relative overflow-hidden">
+    <section className="py-20 relative overflow-hidden">
       <div className="absolute inset-0">
         <div className="absolute top-0 left-1/4 w-80 h-80 bg-primary/5 rounded-full blur-[100px]" />
         <div className="absolute bottom-0 right-1/4 w-80 h-80 bg-purple-600/5 rounded-full blur-[100px]" />
       </div>
 
       <div className="container mx-auto px-4 relative z-10">
-        <div
-          className={cn(
-            "text-center mb-12 transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}
-        >
+        <Reveal className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight">
             How the Companion Works
           </h2>
           <p className="text-base text-muted-foreground max-w-2xl mx-auto">
             A different approach to travel planning that adapts to you, not the other way around.
           </p>
-        </div>
+        </Reveal>
 
         <div className="grid md:grid-cols-2 gap-6 max-w-6xl mx-auto">
           {features.map((feature, index) => {
@@ -236,11 +204,7 @@ function FeaturesSection() {
             return (
               <div
                 key={index}
-                className={cn(
-                  "group p-6 rounded-2xl bg-muted/50 border border-border backdrop-blur-sm transition-all duration-1000 hover:bg-background hover:border-primary/30 hover:scale-105 hover:shadow-xl hover:shadow-primary/5",
-                  isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-                )}
-                style={{ transitionDelay: `${index * 150}ms` }}
+                className="group p-6 rounded-2xl bg-muted/50 border border-border backdrop-blur-sm transition-all hover:bg-background hover:border-primary/30 hover:scale-105 hover:shadow-xl hover:shadow-primary/5"
               >
                 <div className={cn("w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center mb-5 group-hover:scale-110 transition-transform", feature.color)}>
                   <Icon className="w-6 h-6 text-white" />
@@ -253,13 +217,7 @@ function FeaturesSection() {
         </div>
 
         {/* Problem Statement */}
-        <div
-          className={cn(
-            "mt-16 max-w-4xl mx-auto p-6 rounded-2xl bg-primary/5 border border-primary/10 backdrop-blur-sm transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}
-          style={{ transitionDelay: "600ms" }}
-        >
+        <div className="mt-16 max-w-4xl mx-auto p-6 rounded-2xl bg-primary/5 border border-primary/10 backdrop-blur-sm">
           <h3 className="text-xl font-bold text-foreground mb-3">The Problem with Static Planning</h3>
           <p className="text-sm text-muted-foreground leading-relaxed">
             Hours are spent bouncing between blogs and booking sites with fuzzy desires but no clear destination. The result is often a trip chosen for the price rather than the fit, leading to overcrowded itineraries that fail to adapt when the weather turns or energy fades.
@@ -274,8 +232,6 @@ import { signupForAlpha } from "./actions";
 
 // CTA Section Component
 function CTASection() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const isInView = useInView(sectionRef);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | null, message: string }>({ type: null, message: "" });
   const [isPending, setIsPending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -332,18 +288,13 @@ function CTASection() {
   };
 
   return (
-    <section ref={sectionRef} className="pt-32 pb-24 bg-gradient-to-br from-blue-600 to-purple-600 text-white relative overflow-hidden">
+    <section className="pt-32 pb-24 bg-gradient-to-br from-blue-600 to-purple-600 text-white relative overflow-hidden">
       <div className="absolute inset-0">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white/10 rounded-full blur-[120px] animate-pulse" />
       </div>
 
       <div className="container mx-auto px-4 relative z-10">
-        <div
-          className={cn(
-            "max-w-3xl mx-auto text-center transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}
-        >
+        <div className="max-w-3xl mx-auto text-center">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
             Ready to Transform Your Travel Experience?
           </h2>
@@ -394,7 +345,6 @@ function CTASection() {
     </section>
   );
 }
-
 
 
 // Main Component

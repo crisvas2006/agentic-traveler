@@ -17,8 +17,18 @@ import { createServiceClient } from "@/utils/supabase/service";
  *   401 { error: "Unauthorized" }
  *   500 { error: string }
  */
-export async function POST() {
+export async function POST(request: Request) {
   try {
+    // ── 0. Origin check — defence-in-depth against same-origin CSRF ──────
+    // SameSite cookies are the primary protection; this is a secondary guard.
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    if (siteUrl) {
+      const origin = request.headers.get("origin");
+      if (origin && origin !== siteUrl) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+
     // ── 1. Validate session ────────────────────────────────────────────────
     const supabase = await createClient();
     const {

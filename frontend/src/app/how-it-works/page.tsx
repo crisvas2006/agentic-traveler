@@ -1,10 +1,6 @@
-"use client";
-
 import { PageWrapper } from "@/components/layout/PageWrapper";
-import { ListChecks, Brain, MessageSquare, ArrowRight, Smartphone, Globe } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useRef } from "react";
-import { useInView } from "@/hooks/use-in-view";
+import { ListChecks, Brain, MessageSquare, Globe } from "lucide-react";
+import { Reveal } from "@/components/ui/Reveal";
 
 const steps = [
   {
@@ -25,17 +21,11 @@ const steps = [
 ];
 
 export default function HowItWorksPage() {
-  const headerRef = useRef<HTMLElement>(null);
-  const isInView = useInView(headerRef);
-
   return (
     <PageWrapper>
-      <section ref={headerRef} className="py-20 relative overflow-hidden">
+      <section className="py-20 relative overflow-hidden">
         <div className="container mx-auto px-4 relative z-10">
-          <div className={cn(
-            "max-w-4xl mx-auto transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}>
+          <Reveal className="max-w-4xl mx-auto">
             <div className="text-center mb-16">
               <h1 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
                 How it Works
@@ -76,7 +66,7 @@ export default function HowItWorksPage() {
                 While our Telegram bot is the heart of the alpha experience, we are currently building a full web interface. Soon, you'll be able to manage your Traveler DNA, explore itineraries, and chat with your companion directly from our site.
               </p>
             </div>
-          </div>
+          </Reveal>
         </div>
       </section>
     </PageWrapper>

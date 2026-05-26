@@ -1,13 +1,21 @@
 "use server";
 
-import * as React from "react";
 import { headers } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
 import { Resend } from "resend";
-import { render } from "@react-email/components";
-import { AlphaWelcomeEmail } from "@/emails/AlphaWelcomeEmail";
+import { renderAlphaWelcomeEmail } from "@/lib/emails";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+const FROM_ADDRESS =
+  process.env.RESEND_FROM_ADDRESS;
+
+/** Masks an email address for safe logging: "user@example.com" → "use***@example.com" */
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!domain) return "***";
+  return `${local.slice(0, 3)}***@${domain}`;
+}
 
 export async function signupForAlpha(formData: FormData) {
   const email = formData.get("email") as string;
@@ -23,48 +31,54 @@ export async function signupForAlpha(formData: FormData) {
     .from("waitlist")
     .insert([{
       email,
-      status: 'pending',
-      app_step: 'alpha_version',
+      status: "pending",
+      app_step: "alpha_version",
       user_agent: userAgent,
-      referrer: referer
+      referrer: referer,
     }]);
 
   if (error) {
-    if (error.code === '23505') {
-      // User is already in the database.
-      // We skip the error and proceed to send the email and update their row.
-      console.log(`Duplicate signup for ${email}, proceeding to resend email.`);
+    if (error.code === "23505") {
+      // Duplicate — proceed to resend the confirmation email.
+      // Never log the raw email; masked form is safe for diagnostics.
+      console.log("[signupForAlpha] duplicate signup for", maskEmail(email));
     } else {
-      console.error("Error signing up:", error);
+      console.error("[signupForAlpha] insert error:", error);
       return { success: false, message: "Something went wrong. Please try again." };
     }
   }
 
   // Send the welcome email
   try {
-    const htmlContent = await render(<AlphaWelcomeEmail email={email} />);
+    const htmlContent = await renderAlphaWelcomeEmail(email);
 
-    const { data: emailData, error: emailError } = await resend.emails.send({
-      from: "Aletheia Travel <noreply@contact.aletheiatravel.eu>", // Resend testing email since no custom domain is verified yet
+    const { error: emailError } = await resend.emails.send({
+      from: FROM_ADDRESS,
       to: email,
       subject: "Welcome to the Aletheia Travel Alpha! 🧞‍♂️",
       html: htmlContent,
     });
 
     if (emailError) {
-      console.error("Resend error:", emailError);
-      // Try to update status to failed
-      await supabase.from("waitlist").update({ status: 'failed', updated_at: new Date().toISOString() }).eq("email", email);
+      console.error("[signupForAlpha] Resend error:", emailError);
+      await supabase
+        .from("waitlist")
+        .update({ status: "failed", updated_at: new Date().toISOString() })
+        .eq("email", email);
       return { success: false, message: "Signed up, but we couldn't send the confirmation email." };
     }
 
-    // Update status to delivered upon successful email send
-    await supabase.from("waitlist").update({ status: 'delivered', updated_at: new Date().toISOString() }).eq("email", email);
+    await supabase
+      .from("waitlist")
+      .update({ status: "delivered", updated_at: new Date().toISOString() })
+      .eq("email", email);
 
   } catch (err) {
-    console.error("Failed to send email:", err);
-    // Try to update status to failed
-    await supabase.from("waitlist").update({ status: 'failed', updated_at: new Date().toISOString() }).eq("email", email);
+    console.error("[signupForAlpha] email send failed:", err);
+    await supabase
+      .from("waitlist")
+      .update({ status: "failed", updated_at: new Date().toISOString() })
+      .eq("email", email);
     return { success: false, message: "Signed up, but we couldn't send the confirmation email." };
   }
 

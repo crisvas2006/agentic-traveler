@@ -1,25 +1,15 @@
-"use client";
-
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Zap, Check, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useRef } from "react";
-import { useInView } from "@/hooks/use-in-view";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { Reveal } from "@/components/ui/Reveal";
 
 export default function PricingPage() {
-  const headerRef = useRef<HTMLElement>(null);
-  const isInView = useInView(headerRef);
-
   return (
     <PageWrapper>
-      <section ref={headerRef} className="py-20 relative overflow-hidden">
+      <section className="py-20 relative overflow-hidden">
         <div className="container mx-auto px-4 relative z-10">
-          <div className={cn(
-            "max-w-4xl mx-auto text-center transition-all duration-1000",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          )}>
+          <Reveal className="max-w-4xl mx-auto text-center">
             <h1 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
               Simple, Credit-Based Access
             </h1>
@@ -32,7 +22,7 @@ export default function PricingPage() {
                 <div className="absolute top-0 right-0 p-6 opacity-5">
                   <Sparkles className="w-20 h-20 text-primary" />
                 </div>
-                
+
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 mb-6">
                   <Zap className="w-3.5 h-3.5 text-primary" />
                   <span className="text-xs font-bold text-primary uppercase tracking-wider">Alpha Special</span>
@@ -63,7 +53,7 @@ export default function PricingPage() {
                 <Button className="w-full h-12 rounded-full text-base font-bold shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all hover:scale-[1.02]" asChild>
                   <Link href="/#email-input">Get Started for Free</Link>
                 </Button>
-                
+
                 <p className="text-center mt-5 text-xs text-muted-foreground">
                   No credit card required for alpha entry.
                 </p>
@@ -76,7 +66,7 @@ export default function PricingPage() {
                 Credits are deducted for each major interaction with the agents (Discovery, Planning, and active Companion mode). This helps us manage API costs while providing you with high-quality, personalized reasoning. New alpha users receive enough credits to fully plan their first major journey.
               </p>
             </div>
-          </div>
+          </Reveal>
         </div>
       </section>
     </PageWrapper>
