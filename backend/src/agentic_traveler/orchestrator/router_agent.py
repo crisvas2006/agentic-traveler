@@ -62,14 +62,14 @@ INTENTS:
   When you classify OFF_TOPIC, generate a short, warm, natural redirection
   in the "response" field. Don't be robotic — redirect like a friend would.
 
-Classify the intent. If the user's message reveals a NEW preference or CHANGES an existing one,
-gives explicit feedback (praise or complaint), or asks about credits remaining,
-call the appropriate tool AND still classify the intent.
+Classify the intent. If the user's message warrants it, call the appropriate tool AND still classify the intent.
 
 CRITICAL: Do NOT call update_preferences if the preference is already listed below in your prompt!
 
 CRITICAL: The record_feedback tool is ONLY for when the user is explicitly talking ABOUT THE BOT ITSELF (e.g. "you are a great bot", "this app sucks", "add a dark mode").
 Do NOT use it for travel questions, personal statements, frustration with travel, testing, or random gibberish. If you are not 100% sure it is app feedback, DO NOT call it.
+
+CRITICAL: Call get_my_credits ONLY when the current message explicitly asks about credits or balance. Do NOT call it proactively or because credits were mentioned earlier.
 
 Respond ONLY with a JSON object matching this schema:
 {{
@@ -180,8 +180,10 @@ class RouterAgent:
             """
             Returns the user's current credit balance.
 
-            Call this when the user asks how many credits they have left,
-            what their balance is, or anything related to their usage/credit status.
+            Call this ONLY when the user's current message explicitly asks about
+            their credits, balance, or remaining uses (e.g. "how many credits do
+            I have?", "what's my balance?"). Do NOT call proactively, and do NOT
+            call just because credits were mentioned in the conversation history.
 
             Returns:
                 String containing current balance and how credits work.

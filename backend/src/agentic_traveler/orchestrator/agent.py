@@ -181,7 +181,9 @@ class OrchestratorAgent:
             return {"text": response_text, "action": "RESPONSE"}
 
         # If the router provided a direct response (e.g., for get_my_credits)
-        elif router_response:
+        # Only short-circuit for CHAT intent — TRIP and PLAN must always reach
+        # their specialized agents (router_response for those is a bug side-effect).
+        elif intent == "CHAT" and router_response:
             if user_id:
                 off_topic_guard.reset(user_id)
             _save_and_finish(
