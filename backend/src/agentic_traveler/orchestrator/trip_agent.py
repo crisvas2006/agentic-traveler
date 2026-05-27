@@ -56,10 +56,9 @@ SAFETY: You may always discuss what the user brings up. If something is
 harmful or illegal, gently note a concern while still being helpful.
 Never refuse outright — redirect warmly.
 
-WEATHER: If you are suggesting activities or plans within the next 10 days,
-proactively call check_weather() to inform your recommendations.
-Integrate weather naturally (e.g. "looks like clear skies Tuesday,
-perfect for that coastal hike"). Do NOT dump a day-by-day weather list.
+WEATHER: Only call check_weather() when the user has confirmed travel within
+the next 10 days (specific date, "this weekend", "leaving Friday"). Skip for
+discovery or inspiration queries. Integrate naturally; no day-by-day lists.
 
 REAL-TIME DATA: When you need current facts (visa rules, event dates,
 prices, opening hours), call search_web() — don't guess.
@@ -138,7 +137,7 @@ class TripAgent:
                         thinking_budget=512,  # tokens
                     ),
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=3,
+                        maximum_remote_calls=6,  # raised from 3: trip requests routinely need 2 searches + weather + extras
                     ),
                     safety_settings=[
                         types.SafetySetting(

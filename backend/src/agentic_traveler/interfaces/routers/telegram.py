@@ -9,7 +9,7 @@ import requests as http_requests
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from agentic_traveler.analytics import metrics_tracker
-from agentic_traveler.core.sanitize import sanitize_user_input
+from agentic_traveler.core.sanitize import sanitize_user_input, sanitize_telegram_markdown
 from agentic_traveler.economy import credit_manager
 from agentic_traveler.guards import off_topic_guard
 from agentic_traveler.interfaces.dependencies import (
@@ -32,12 +32,15 @@ TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 RATE_LIMIT_PER_MIN = 10
 RATE_LIMIT_PER_HOUR = 60
+DISABLE_RATE_LIMIT = os.getenv("DISABLE_RATE_LIMIT", "").lower() in ("1", "true")
 
 _rate_lock = Lock()
 _user_timestamps: dict[str, list[float]] = defaultdict(list)
 
 def _is_rate_limited(user_id: str) -> bool:
-    """Check if user has exceeded message rate limits."""
+    """Check if user has exceeded message rate limits. Returns False immediately if rate limiting is disabled."""
+    if DISABLE_RATE_LIMIT:
+        return False
     now = time.time()
     with _rate_lock:
         timestamps = _user_timestamps[user_id]
@@ -73,90 +76,108 @@ def get_orchestrator() -> OrchestratorAgent:
         _orchestrator_instance = OrchestratorAgent(user_repo=get_user_tool())
     return _orchestrator_instance
 
-# ── Telegram helpers ──
+# ── Telegram helpers (zero-overhead performance testing mocks) ──
 
-def send_telegram_message(chat_id: int | str, text: str) -> int | None:
-    """Send a message via the Telegram API with Markdown formatting."""
-    last_message_id = None
-    for i in range(0, len(text), 4096):
-        chunk = text[i: i + 4096]
+MOCK_TELEGRAM = os.getenv("MOCK_TELEGRAM", "").lower() in ("1", "true")
+
+if MOCK_TELEGRAM:
+    logger.info("⚡ MOCK_TELEGRAM mode active: Outgoing Telegram API calls will be bypassed")
+
+    def send_telegram_message(chat_id: int | str, text: str) -> int | None:
+        """Mock message sender that bypasses external HTTP requests."""
+        logger.debug("MOCK_TELEGRAM: sent message to %s: %s", chat_id, text[:60])
+        return 888888  # Synthetic message ID
+
+    def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> None:
+        """Mock message editor that bypasses external HTTP requests."""
+        logger.debug("MOCK_TELEGRAM: edited message %s to %s", message_id, text[:60])
+        return
+else:
+    def send_telegram_message(chat_id: int | str, text: str) -> int | None:
+        """Send a message via the Telegram API with Markdown formatting."""
+        text = sanitize_telegram_markdown(text)
+        last_message_id = None
+        for i in range(0, len(text), 4096):
+            chunk = text[i: i + 4096]
+            try:
+                resp = http_requests.post(
+                    f"{TELEGRAM_API}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": chunk,
+                        "parse_mode": "Markdown",
+                    },
+                    timeout=10,
+                )
+                if not resp.ok:
+                    logger.warning(
+                        "Telegram Markdown send failed (%s), retrying plain text.",
+                        resp.status_code,
+                    )
+                    resp = http_requests.post(
+                        f"{TELEGRAM_API}/sendMessage",
+                        json={"chat_id": chat_id, "text": chunk},
+                        timeout=10,
+                    )
+                    if not resp.ok:
+                        logger.error(
+                            "Telegram sendMessage failed: %s %s",
+                            resp.status_code, resp.text,
+                        )
+                        continue
+
+                result = resp.json()
+                if result.get("ok"):
+                    last_message_id = result["result"].get("message_id")
+
+            except Exception:
+                logger.exception("Failed to send Telegram message to %s", chat_id)
+
+        return last_message_id
+
+    def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> None:
+        """Edit an existing Telegram message with new Markdown text."""
+        if not text:
+            text = "Sorry, I had trouble coming up with a response."
+
+        if len(str(text)) > 4000:
+            text = str(text)[:4000] + "\n\n...(message truncated)"
+        else:
+            text = str(text)
+
+        text = sanitize_telegram_markdown(text)
         try:
             resp = http_requests.post(
-                f"{TELEGRAM_API}/sendMessage",
+                f"{TELEGRAM_API}/editMessageText",
                 json={
                     "chat_id": chat_id,
-                    "text": chunk,
+                    "message_id": message_id,
+                    "text": text,
                     "parse_mode": "Markdown",
                 },
                 timeout=10,
             )
             if not resp.ok:
                 logger.warning(
-                    "Telegram Markdown send failed (%s), retrying plain text.",
-                    resp.status_code,
+                    "Telegram editMessageText failed (%s): %s. Retrying plain text.",
+                    resp.status_code, resp.text,
                 )
-                resp = http_requests.post(
-                    f"{TELEGRAM_API}/sendMessage",
-                    json={"chat_id": chat_id, "text": chunk},
+                resp2 = http_requests.post(
+                    f"{TELEGRAM_API}/editMessageText",
+                    json={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "text": text,
+                    },
                     timeout=10,
                 )
-                if not resp.ok:
+                if not resp2.ok:
                     logger.error(
-                        "Telegram sendMessage failed: %s %s",
-                        resp.status_code, resp.text,
+                        "Telegram editMessageText plain text fallback failed (%s): %s",
+                        resp2.status_code, resp2.text,
                     )
-                    continue
-
-            result = resp.json()
-            if result.get("ok"):
-                last_message_id = result["result"].get("message_id")
-
         except Exception:
-            logger.exception("Failed to send Telegram message to %s", chat_id)
-
-    return last_message_id
-
-def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> None:
-    """Edit an existing Telegram message with new Markdown text."""
-    if not text:
-        text = "Sorry, I had trouble coming up with a response."
-
-    if len(str(text)) > 4000:
-        text = str(text)[:4000] + "\n\n...(message truncated)"
-    else:
-        text = str(text)
-    try:
-        resp = http_requests.post(
-            f"{TELEGRAM_API}/editMessageText",
-            json={
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "text": text,
-                "parse_mode": "Markdown",
-            },
-            timeout=10,
-        )
-        if not resp.ok:
-            logger.warning(
-                "Telegram editMessageText failed (%s): %s. Retrying plain text.",
-                resp.status_code, resp.text,
-            )
-            resp2 = http_requests.post(
-                f"{TELEGRAM_API}/editMessageText",
-                json={
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": text,
-                },
-                timeout=10,
-            )
-            if not resp2.ok:
-                logger.error(
-                    "Telegram editMessageText plain text fallback failed (%s): %s",
-                    resp2.status_code, resp2.text,
-                )
-    except Exception:
-        logger.exception("Failed to edit Telegram message %s", message_id)
+            logger.exception("Failed to edit Telegram message %s", message_id)
 
 # ── background processing functions ──
 

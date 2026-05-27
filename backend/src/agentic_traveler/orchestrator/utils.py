@@ -24,8 +24,10 @@ def check_weather(location: str, days: int = 7) -> str:
     """
     Retrieves the weather forecast for a given location.
 
-    Call this proactively when suggesting activities within the next 10 days.
-    If the user mentions only a region or island, infer a representative city.
+    Use only when the user has confirmed travel within the next 10 days
+    (e.g. specific dates, "this weekend", "leaving Friday"). Do not call
+    for discovery or destination questions with no confirmed near-future date.
+    If only a region is given, infer a representative city.
 
     Args:
         location: Specific location string (e.g. "Kuta, Bali, Indonesia").

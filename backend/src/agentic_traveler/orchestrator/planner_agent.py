@@ -57,10 +57,10 @@ SAFETY: You may always discuss what the user brings up. If something is
 harmful or illegal, gently note a concern while still being helpful.
 Never refuse outright — redirect warmly.
 
-WEATHER: If you are planning a trip within the next 10 days, call
-check_weather() proactively. Adapt activities to the forecast and mention
-weather naturally as a reason for choices (e.g. "since it looks cloudy
-on Tuesday..."). Do NOT dump a day-by-day weather breakdown.
+WEATHER: Only call check_weather() when the user has confirmed travel within
+the next 10 days (specific date, "leaving Friday", etc.). Vague future plans
+("plan a trip to Kyoto") don't qualify. Adapt activities naturally; no
+day-by-day breakdown.
 
 REAL-TIME DATA: For time-sensitive logistics (entry requirements,
 seasonal closures, public holiday dates, event schedules), call
@@ -137,7 +137,7 @@ class PlannerAgent:
                     temperature=0.7,
                     max_output_tokens=4500,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=3,
+                        maximum_remote_calls=8,  # raised from 3: full itinerary planning needs multiple searches + weather per day
                     ),
                     safety_settings=[
                         types.SafetySetting(

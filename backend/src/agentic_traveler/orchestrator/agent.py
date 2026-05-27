@@ -202,8 +202,17 @@ class OrchestratorAgent:
 
         response_text = agent_result.get("text", "")
 
+        # Detect AFC-limit failures: the model returns this specific message when
+        # it hits maximum_remote_calls and can't synthesise a proper response.
+        _ERROR_FALLBACK = "I had trouble coming up with a response just now. Please try again."
+        is_error_response = (
+            not response_text
+            or agent_result.get("action") == "ERROR"
+            or response_text.strip() == _ERROR_FALLBACK
+        )
+
         if not response_text:
-            response_text = "I had trouble coming up with a response just now. Please try again."
+            response_text = _ERROR_FALLBACK
 
         # Log specialized agent usage
         raw_agent = agent_result.get("_raw_response")
@@ -250,11 +259,20 @@ class OrchestratorAgent:
                     })
 
         # ── 6. Save history + metrics + deduct credits ──────────────────────
+        # Skip credit deduction when the agent failed to produce a useful response
+        # (AFC limit hit, empty response, or explicit ERROR action). The LLM calls
+        # still happened, but charging the user for a broken response is wrong.
         _save_and_finish(
             self, user_doc, user_id, message_text, response_text,
-            telegram_user_id, token_records, t_total,
+            telegram_user_id, token_records if not is_error_response else [],
+            t_total,
         )
 
+        if is_error_response:
+            logger.error(
+                "Agent failed to produce a response (action=%s, text=%r). Credits NOT deducted.",
+                agent_result.get("action"), response_text[:120],
+            )
         logger.info("\n=== FINAL OUTPUT ===\n%s\n===================", response_text)
         return {"text": response_text, "action": "RESPONSE"}
 
