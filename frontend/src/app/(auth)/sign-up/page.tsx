@@ -51,7 +51,7 @@ function SignUpMarketing() {
     <div className="max-w-md">
       <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 mb-6">
         <Sparkles className="w-3.5 h-3.5 text-primary" />
-        <span className="text-xs font-semibold text-primary uppercase tracking-wider">Alpha Access · Free</span>
+        <span className="text-xs font-semibold text-primary uppercase tracking-wider">Early access · free</span>
       </div>
 
       <h1 className="text-4xl xl:text-5xl font-extrabold tracking-tight mb-3 leading-[1.05]">
@@ -136,7 +136,7 @@ function SignUpForm() {
     } else {
       setStatus({
         kind: "success",
-        message: "Account created! Check your inbox to confirm your email, then sign in.",
+        message: "Account created. Check your inbox to confirm your email, then sign in.",
       });
     }
   };

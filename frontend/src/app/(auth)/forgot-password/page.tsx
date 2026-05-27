@@ -18,10 +18,10 @@ function ForgotPasswordMarketing() {
       </div>
 
       <h1 className="text-4xl xl:text-5xl font-extrabold tracking-tight mb-3 leading-[1.05]">
-        We&apos;ll get you<br />back on the road.
+        We&rsquo;ll get you<br />back on the road.
       </h1>
       <p className="text-base text-muted-foreground mb-10 leading-relaxed">
-        Enter your email and we&apos;ll send a secure link to reset your password — no waiting, no friction.
+        Enter your email and we&rsquo;ll send a secure link to reset your password — usually in under a minute.
       </p>
 
       <ul className="space-y-4">

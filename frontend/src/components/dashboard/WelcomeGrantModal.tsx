@@ -51,8 +51,8 @@ export function WelcomeGrantModal({ onGranted, onDismiss }: WelcomeGrantModalPro
       const msg = err instanceof Error ? err.message : "";
       setErrorMsg(
         msg === "grant_failed" || msg === "Server returned an unexpected response."
-          ? "Something went wrong on our end. Please try again."
-          : "Something went wrong. Please try again."
+          ? "Something went sideways on our end. Try again — your credits are safe."
+          : "Something went sideways. Try again."
       );
     }
   };
@@ -101,11 +101,10 @@ export function WelcomeGrantModal({ onGranted, onDismiss }: WelcomeGrantModalPro
           </div>
 
           <h2 className="text-2xl font-extrabold tracking-tight leading-tight mb-2">
-            Welcome to Aletheia!
+            Welcome to Aletheia
           </h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Thanks for joining. We&apos;re giving you a starter pack of credits
-            to explore AI-powered trip planning — on us.
+            Thanks for joining. Here&rsquo;s a starter pack of credits so you can plan your first trip — on us.
           </p>
         </div>
 
@@ -114,9 +113,9 @@ export function WelcomeGrantModal({ onGranted, onDismiss }: WelcomeGrantModalPro
           {/* Feature bullets */}
           <ul className="space-y-2.5 mb-7">
             {[
-              "Chat with your AI travel companion",
-              "Generate personalised itineraries",
-              "Adapt your trips in real time",
+              "Chat with your travel companion",
+              "Build itineraries shaped by your Traveler DNA",
+              "Adapt your plans in real time",
             ].map((item) => (
               <li key={item} className="flex items-center gap-2.5 text-sm text-foreground/80">
                 <span

@@ -11,10 +11,10 @@ export default function AboutPage() {
           <Reveal className="max-w-4xl mx-auto">
             <div className="text-center mb-16">
               <h1 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
-                About the Project
+                About the project
               </h1>
               <p className="text-lg text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-                Aletheia Travel is a vision for a more intentional, personalized way to explore our world.
+                Aletheia Travel is built around a simple bet — travel software should know who you are.
               </p>
             </div>
 
@@ -32,7 +32,7 @@ export default function AboutPage() {
                 </div>
                 <div className="relative z-10 mt-6 text-center">
                   <h2 className="text-2xl font-bold text-foreground mb-1">Cristian Dumitrascu</h2>
-                  <p className="text-primary font-medium mb-4 uppercase tracking-wider text-xs">Founder & Solo Developer</p>
+                  <p className="text-primary font-medium mb-4 uppercase tracking-wider text-xs">Founder &amp; solo developer</p>
 
                   <div className="flex justify-center gap-3">
                     <a href="https://www.linkedin.com/in/vasile-cristian-dumitrascu/" target="_blank" rel="noopener noreferrer" className="p-2.5 rounded-full bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-all">
@@ -47,18 +47,18 @@ export default function AboutPage() {
 
               <div className="space-y-5 text-base text-muted-foreground leading-relaxed">
                 <p>
-                  Aletheia Travel started from a simple frustration: planning for a trip takes hours or even days and getting off the standard tourist path in order to follow my individual pursuits takes even more energy and research, and many times there are things I cannot even think about that would make my trip more enjoyable.
+                  Aletheia Travel started from a simple frustration. Planning a trip takes days, getting off the tourist trail takes even more research, and the things that would actually make your trip great are often the ones you&rsquo;d never think to search for.
                 </p>
                 <p>
-                  As a solo developer, I wanted to build something that felt like a true companion: an intelligent system that actually knows who you are, what you value, and how you feel in the moment.
+                  As a solo developer, I wanted to build the kind of companion I&rsquo;d want for myself — one that knows who you are, what you value, and how you feel in the moment.
                 </p>
                 <p>
-                  This project combines state-of-the-art agentic AI with a deep commitment to personalization. Every line of code is written with the goal of helping you plan next trip your way, seamlessly.
+                  Every line of code is written toward one goal: helping you plan your next trip your way.
                 </p>
                 <div className="pt-5 border-t border-border">
                   <div className="flex items-center gap-3 text-primary font-bold italic text-sm">
                     <Sparkles className="w-4 h-4" />
-                    "The journey is the reward, but the companion makes the difference."
+                    &ldquo;The journey is the reward, but the companion makes the difference.&rdquo;
                   </div>
                 </div>
               </div>

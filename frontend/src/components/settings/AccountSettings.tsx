@@ -260,7 +260,7 @@ function TopUpModal({ onClose }: { onClose: () => void }) {
             <CoinIcon width={20} height={20} className="text-white" />
           </div>
           <div className="min-w-0 mt-1">
-            <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground mb-1">Alpha phase</div>
+            <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground mb-1">Early access</div>
             <h2 className="text-xl font-black tracking-tight leading-tight">Need more credits?</h2>
           </div>
         </div>
@@ -268,12 +268,10 @@ function TopUpModal({ onClose }: { onClose: () => void }) {
         {/* Body */}
         <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
           <p>
-            Aletheia Travel is in <span className="text-foreground font-semibold">alpha</span> — automated billing
-            isn&apos;t live yet, so paid top-ups aren&apos;t available through the app.
+            Aletheia is in <span className="text-foreground font-semibold">early access</span> — automated billing isn&rsquo;t wired up yet, so paid top-ups aren&rsquo;t available through the app.
           </p>
           <p>
-            For now, additional credits are granted via <span className="text-foreground font-semibold">promo codes</span>.
-            Reach out directly and we&apos;ll share a code tailored to your use case.
+            For now, extra credits go out as <span className="text-foreground font-semibold">promo codes</span>. Get in touch and we&rsquo;ll send you one tailored to your use case.
           </p>
         </div>
 
@@ -842,7 +840,7 @@ function MiscSection() {
             })}
           </div>
           <p className="text-[11px] text-muted-foreground italic mt-3">
-            Other languages will be available in a future release.
+            Other languages are on the way. English for now.
           </p>
         </div>
       </div>

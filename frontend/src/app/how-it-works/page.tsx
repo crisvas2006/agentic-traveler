@@ -5,18 +5,18 @@ import { Reveal } from "@/components/ui/Reveal";
 const steps = [
   {
     icon: ListChecks,
-    title: "The Odyssey Onboarding",
-    description: "Start with our deep-dive questionnaire. We ask about your energy levels, risk tolerance, and past travel experiences to build a foundation.",
+    title: "Odyssey Onboarding",
+    description: "A deep-dive intake on how you actually travel — energy levels, risk tolerance, what makes a trip feel right. About four minutes.",
   },
   {
     icon: Brain,
-    title: "Traveler DNA Mapping",
-    description: "Our agents process your responses to create a 'Traveler DNA'—a structured profile that guides every suggestion we ever make for you.",
+    title: "Traveler DNA mapping",
+    description: "Your answers become your Traveler DNA — a structured profile across 15 dimensions that filters every suggestion we ever make for you.",
   },
   {
     icon: MessageSquare,
-    title: "Chat via Telegram",
-    description: "Currently, you interact with Aletheia Travel via our Telegram bot. It's fast, mobile-first, and always ready to help.",
+    title: "Chat with your companion",
+    description: "On Telegram for now — fast, mobile-first, always with you. A native web chat is in development.",
   },
 ];
 
@@ -28,10 +28,10 @@ export default function HowItWorksPage() {
           <Reveal className="max-w-4xl mx-auto">
             <div className="text-center mb-16">
               <h1 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
-                How it Works
+                How it works
               </h1>
               <p className="text-lg text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-                From deep personalization to real-time companionship, here is how we transform your travel experience.
+                From the Odyssey Onboarding to live trip adaptation — here&rsquo;s how Aletheia plans with you, not for you.
               </p>
             </div>
 
@@ -60,10 +60,10 @@ export default function HowItWorksPage() {
             <div className="mt-16 p-6 rounded-3xl bg-primary/5 border border-primary/20 text-center">
               <h2 className="text-2xl font-bold text-foreground mb-3 flex items-center justify-center gap-3">
                 <Globe className="w-7 h-7 text-primary" />
-                Coming Soon: Web Interface
+                In active development: a full web home
               </h2>
               <p className="text-muted-foreground text-base mb-0 leading-relaxed">
-                While our Telegram bot is the heart of the alpha experience, we are currently building a full web interface. Soon, you'll be able to manage your Traveler DNA, explore itineraries, and chat with your companion directly from our site.
+                Telegram is the heart of the early-access experience today. We&rsquo;re also building a web dashboard where you can review your Traveler DNA, browse itineraries, and chat with your companion alongside the map.
               </p>
             </div>
           </Reveal>

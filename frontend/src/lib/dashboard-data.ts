@@ -287,7 +287,7 @@ export const KYOTO_DAYS: TripDay[] = [
   },
 ];
 
-export const DNA_TAGS = ["Slow traveller", "Culture-curious", "Energy-aware"];
+export const DNA_TAGS = ["Slow traveler", "Culture-curious", "Energy-aware"];
 
 export const CHAT_HISTORY: ChatMessage[] = [
   { from: "ai", t: "07:12", text: "Morning. Forecast says light rain until noon. Want me to dial today down?" },

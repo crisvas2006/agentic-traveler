@@ -18,6 +18,24 @@ CREATE POLICY "Allow anonymous inserts" ON public.waitlist
 -- intentionally dropped. Anonymous UPDATE on waitlist is unnecessary and was a
 -- security risk (unauthenticated actors could overwrite any waitlist row).
 -- Dropped in DB: 2026-05-25. Do NOT re-add.
+-- Server-side status updates (delivered/failed/waitlisted) now run via the
+-- service-role client in `frontend/src/app/actions.tsx`, which bypasses RLS.
+
+-- Anon SELECT for COUNT only — the landing page CTA shows "{N} of 100 seats
+-- taken" using a live count from the waitlist table. Anon must be able to
+-- count rows but MUST NOT be able to read email addresses or other PII.
+--
+-- Implementation: the policy allows SELECT on the table, but the column-level
+-- GRANT below restricts which columns anon may actually read. PostgREST issues
+-- `SELECT id FROM waitlist` with `count=exact, head=true` for count queries,
+-- which works against the column grant. `SELECT email FROM waitlist` returns
+-- "permission denied for column email".
+--
+-- Added in DB: 2026-05-27.
+CREATE POLICY "waitlist_count_anon" ON public.waitlist
+  FOR SELECT
+  TO anon
+  USING (true);
 
 
 -- ---------------------------------------------------------------------------
@@ -77,3 +95,7 @@ GRANT SELECT, UPDATE ON public.user_profiles TO authenticated;
 
 -- credits: read-only for authenticated users; writes go through service-role only
 GRANT SELECT         ON public.credits       TO authenticated;
+
+-- waitlist: anon may read only id + created_at (enough for COUNT, never email).
+-- The matching SELECT policy is "waitlist_count_anon" above.
+GRANT SELECT (id, created_at) ON public.waitlist TO anon;

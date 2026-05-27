@@ -135,12 +135,12 @@ function CreditsRow({ balance, initialGrant }: { balance: number; initialGrant: 
           </div>
           {critical && (
             <p className="text-[11px] text-rose-500 dark:text-rose-400 ml-7 mt-1.5">
-              Almost out — upgrade your plan to continue.
+              Almost out — top up in account settings.
             </p>
           )}
           {low && (
             <p className="text-[11px] text-amber-500 dark:text-amber-400 ml-7 mt-1.5">
-              Running low — consider upgrading your plan.
+              Running low — top up when you can.
             </p>
           )}
         </>
@@ -339,9 +339,9 @@ export function ProfileDropdown({
 
         <Divider />
 
-        {/* ── Section 2: My Account ── */}
+        {/* ── Section 2: My account ── */}
         <p className="px-3 pt-1 pb-0.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-          My Account
+          My account
         </p>
         <a href="/settings" className="block" onClick={onClose}>
           <Row

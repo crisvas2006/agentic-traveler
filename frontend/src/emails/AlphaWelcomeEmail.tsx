@@ -25,7 +25,7 @@ export const AlphaWelcomeEmail = ({ email }: AlphaWelcomeEmailProps) => {
     <Tailwind>
       <Html>
         <Head />
-        <Preview>Welcome to the Aletheia Travel Alpha!</Preview>
+        <Preview>You&rsquo;re in. Here&rsquo;s how to start your first journey.</Preview>
         <Body className="bg-slate-50 font-sans py-8">
           <Container className="mx-auto px-4">
             <Section className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 md:p-12 max-w-2xl mx-auto">
@@ -38,22 +38,22 @@ export const AlphaWelcomeEmail = ({ email }: AlphaWelcomeEmailProps) => {
               </Text>
 
               <Text className="text-base text-slate-700 leading-relaxed mb-8">
-                Thank you for joining our alpha! You are now part of an exclusive group helping us rethink travel planning - focusing on energy levels, motivations, and life phases rather than just finding the cheapest flight.
+                You&rsquo;re in. You&rsquo;ve got one of the first 100 early-access seats — thanks for jumping in this early. Aletheia plans trips around who you actually are, not the average tourist: your energy, your motivations, and the season of life you&rsquo;re in.
               </Text>
 
               <Heading as="h3" className="text-lg font-bold text-slate-900 mb-4">
-                Get Started in 3 Steps:
+                Three steps to your first plan
               </Heading>
 
               <Section className="mb-8">
                 <Text className="text-sm text-slate-700 mb-4">
-                  <strong className="text-blue-600">1. Access your Companion:</strong> Use the link below to open our companion (currently via Telegram).
+                  <strong className="text-blue-600">1. Open your companion.</strong> Use the link below to start chatting on Telegram. A native web chat is in development.
                 </Text>
                 <Text className="text-sm text-slate-700 mb-4">
-                  <strong className="text-blue-600">2. Define your Traveler DNA:</strong> Start the bot and complete the short onboarding form. This allows our agents to understand what truly makes a trip meaningful for you.
+                  <strong className="text-blue-600">2. Build your Traveler DNA.</strong> Start the bot and run the short onboarding — 15 dimensions of how you actually like to travel. Every suggestion runs through it.
                 </Text>
                 <Text className="text-sm text-slate-700 mb-4">
-                  <strong className="text-blue-600">3. Chat Naturally:</strong> Tell the bot how you feel. Try: <em className="text-slate-500">"I'm feeling adventurous but have low energy today"</em> or <em className="text-slate-500">"Plan a 3-day quiet escape."</em>
+                  <strong className="text-blue-600">3. Talk to it like a friend.</strong> Try: <em className="text-slate-500">&ldquo;feeling adventurous but low energy today&rdquo;</em> or <em className="text-slate-500">&ldquo;plan a 3-day quiet escape, end of May.&rdquo;</em>
                 </Text>
               </Section>
 
@@ -73,13 +73,13 @@ export const AlphaWelcomeEmail = ({ email }: AlphaWelcomeEmailProps) => {
                     lineHeight: '120%',
                   }}
                 >
-                  Start Your Journey
+                  Start your journey
                 </Button>
               </Section>
 
               <Section className="bg-slate-50 rounded-lg p-6 mb-8 border border-slate-100">
                 <Text className="text-sm text-slate-600 leading-relaxed m-0 italic">
-                  <strong>Coming Soon:</strong> We are currently building a full web interface to complement the mobile experience. We'll send you updates as we roll out new features!
+                  <strong>In active development:</strong> a full web home where you can review your Traveler DNA, browse itineraries, and chat with your companion alongside the map. We&rsquo;ll write when it&rsquo;s ready — no marketing blasts.
                 </Text>
               </Section>
 
@@ -89,12 +89,12 @@ export const AlphaWelcomeEmail = ({ email }: AlphaWelcomeEmailProps) => {
                 Safe travels,
               </Text>
               <Text className="text-sm font-semibold text-slate-900">
-                The Aletheia Travel Team
+                Cristian — Aletheia Travel
               </Text>
             </Section>
 
             <Text className="text-[10px] text-center text-slate-400 mt-8 uppercase tracking-widest">
-              Aletheia Travel Alpha • This email was sent to {email}, if you didn't sign up for this email, you can safely ignore it.
+              Aletheia Travel • Sent to {email}. If this wasn&rsquo;t you, ignore it — no further mail.
             </Text>
           </Container>
         </Body>

@@ -9,27 +9,27 @@ import { Reveal } from "@/components/ui/Reveal";
 const faqs = [
   {
     question: "What exactly is Aletheia Travel?",
-    answer: "Aletheia Travel is an agentic AI travel companion. Unlike simple chatbots, it uses a multi-agent system to understand your unique 'Traveler DNA' and provides personalized discovery, planning, and real-time assistance during your trip.",
+    answer: "A travel companion that actually adapts to you. Most planners optimize for the cheapest flight; Aletheia uses your Traveler DNA — 15 dimensions of how you like to travel — to plan trips that fit your real life.",
   },
   {
     question: "How is it different from ChatGPT?",
-    answer: "ChatGPT is a general-purpose model. Aletheia Travel is a specialized travel system that uses multiple agents (Discovery, Planner, Companion) and maintains long-term memory of your preferences. It also integrates real-world data like weather and events specifically for your itinerary.",
+    answer: "ChatGPT is general-purpose. Aletheia is built specifically for travel — it remembers your preferences, pulls in real-world weather and events, and runs three specialized models (one for discovery, one for planning, one for live trip adaptation) that hand off to each other.",
   },
   {
-    question: "Does Aletheia Travel book flights or hotels for me?",
-    answer: "Not directly. We provide a full itinerary and suggest the best options that fit your profile. Actual booking will be done by you on your preferred platforms.",
+    question: "Does Aletheia book flights or hotels for me?",
+    answer: "Not yet. You get a full itinerary with concrete suggestions; the booking happens on your preferred platforms. Auto-booking is on the roadmap, not in this release.",
   },
   {
     question: "Why do I need to use Telegram?",
-    answer: "During the alpha phase, Telegram provides the most reliable, mobile-first experience for a companion that needs to travel with you. A native web chat is currently in development.",
+    answer: "For now, Telegram is the most reliable way to keep a companion in your pocket while you travel. A native web chat is in development.",
   },
   {
     question: "Is it really free?",
-    answer: "Alpha access is free! We grant a credit allowance to new users which is sufficient for planning a complete trip. We may introduce paid tiers as we scale, but alpha pioneers will always have a special place in our ecosystem.",
+    answer: "Early access is free. Every new traveler gets an amount of credits — enough to fully plan a trip. Paid tiers may come later, but early-access travelers keep their place.",
   },
   {
     question: "What happens if the weather turns bad during my trip?",
-    answer: "That's where the 'Companion' agent shines. Just tell the bot your situation, and it will immediately suggest indoor alternatives or schedule adjustments that fit your mood and Traveler DNA.",
+    answer: "Message your companion. It pulls indoor options forward, pushes outdoor plans back, and rebalances the day around your energy and your Traveler DNA.",
   },
 ];
 
@@ -44,10 +44,10 @@ export default function FAQPage() {
             <div className="text-center mb-16">
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm mb-4">
                 <HelpCircle className="w-3.5 h-3.5 text-primary" />
-                <span className="text-xs text-primary font-medium uppercase tracking-wider">Have Questions?</span>
+                <span className="text-xs text-primary font-medium uppercase tracking-wider">Have questions</span>
               </div>
               <h1 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
-                Frequently Asked
+                Frequently asked
               </h1>
             </div>
 

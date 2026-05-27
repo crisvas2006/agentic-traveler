@@ -18,23 +18,20 @@ function HeroSection() {
         <Reveal className="max-w-4xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm mb-8">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
-            <span className="text-xs font-semibold text-primary uppercase tracking-wider">Alpha Access Available</span>
+            <span className="text-xs font-semibold text-primary uppercase tracking-wider">Early access — 100 seats</span>
           </div>
 
           <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight mb-4 leading-tight">
-            Don't book a trip.<br />Architect a journey.
+            Don&rsquo;t book a trip.<br />Architect a journey.
           </h1>
 
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-6 leading-tight">
-            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent animate-gradient-x bg-[length:200%_auto]">
-              Travel planning made smart.<br />
-              For the Individual,
+          <p className="text-lg md:text-xl text-muted-foreground mb-8 max-w-2xl mx-auto leading-relaxed">
+            Travel planning that adapts to who you actually are — built around your{" "}
+            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent font-semibold">
+              Traveler DNA
             </span>
-            <br />
-            <span className="text-foreground/60">
-              Not the Average.
-            </span>
-          </h2>
+            , not the average.
+          </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             <Button
@@ -48,7 +45,7 @@ function HeroSection() {
                 }
               }}
             >
-              Start Planning
+              Get early access
               <ArrowRight className="ml-2 w-4 h-4" />
             </Button>
             <Button
@@ -59,7 +56,7 @@ function HeroSection() {
                 document.getElementById('proof-section-bg')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
               }}
             >
-              Learn More
+              See how it works
             </Button>
           </div>
         </Reveal>
@@ -79,21 +76,21 @@ function HeroSection() {
 function ProofSection() {
   const roadmap = [
     {
-      phase: "Current Alpha",
-      title: "Discovery & Planning",
-      description: "Core AI planning and personalized destination discovery with realtime events and weather data.",
+      phase: "Available now",
+      title: "Discovery & planning",
+      description: "Vague requests in, real itineraries out. Realtime weather and events baked in.",
       active: true
     },
     {
       phase: "Upcoming",
-      title: "Interactive Itineraries",
-      description: "Trip structure with multiple layers and map.",
+      title: "Interactive itineraries",
+      description: "Day-by-day plans with alternates for tired days, rainy days, and second-wind days.",
       active: false
     },
     {
-      phase: "Future Vision",
-      title: "Seamless & Social",
-      description: "Group trips, automated bookings, social matching.",
+      phase: "Future vision",
+      title: "Seamless & social",
+      description: "Trips with friends. Auto-booking. Quiet matching for travelers who fit.",
       active: false
     },
   ];
@@ -105,13 +102,13 @@ function ProofSection() {
       <div className="container mx-auto px-4 relative z-10">
         <Reveal className="text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-8">
-            Everything You Need for the
+            Built for the trip
             <br />
-            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Perfect Trip</span>
+            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">only you would take</span>
           </h2>
 
           <p className="text-base md:text-lg text-muted-foreground mb-12 max-w-3xl mx-auto leading-relaxed">
-            Most platforms solve for the cheapest flight or the trendiest hotel. Aletheia Travel solves for the person. An AI travel companion that understands your energy levels, motivations, and life phases to create meaningful journeys.
+            Most platforms solve for the cheapest flight or the trendiest hotel. Aletheia solves for the person. A travel companion that reads your energy, your motivations, and the season of life you&rsquo;re in — and plans accordingly.
           </p>
         </Reveal>
 
@@ -157,26 +154,26 @@ function FeaturesSection() {
   const features = [
     {
       icon: Compass,
-      title: "Intuitive Discovery",
-      description: "Input vague requests like 'five days in late spring, feeling tired, want nature and culture' and receive curated destinations that fit your profile.",
+      title: "Intuitive discovery",
+      description: "Say “five days in late spring, feeling tired, want nature and culture.” Get back a shortlist that fits.",
       color: "from-purple-500 to-violet-500",
     },
     {
       icon: Calendar,
-      title: "Flexible Itineraries",
-      description: "Move away from rigid schedules with day-level plans that offer alternatives for different energy levels and moods.",
+      title: "Flexible itineraries",
+      description: "Day-level plans with alternates for low-energy mornings, weather curveballs, and unexpected second winds.",
       color: "from-violet-500 to-purple-500",
     },
     {
       icon: Zap,
-      title: "Live Adaptation",
-      description: "During your trip, share your current mood or weather changes via Telegram, and get actionable suggestions to improve your day.",
+      title: "Live adaptation",
+      description: "Mid-trip, message us on Telegram. Plans bend in real time — no replanning your whole week.",
       color: "from-purple-600 to-violet-600",
     },
     {
       icon: Shield,
       title: "Traveler DNA",
-      description: "The Odyssey Onboarding creates your structured Traveler DNA, filtering every suggestion through your personal lens of preferences and needs.",
+      description: "Odyssey Onboarding builds your Traveler DNA — 15 dimensions of how you actually like to travel. Every suggestion runs through it.",
       color: "from-violet-600 to-purple-600",
     },
   ];
@@ -191,10 +188,10 @@ function FeaturesSection() {
       <div className="container mx-auto px-4 relative z-10">
         <Reveal className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight">
-            How the Companion Works
+            How the companion works
           </h2>
           <p className="text-base text-muted-foreground max-w-2xl mx-auto">
-            A different approach to travel planning that adapts to you, not the other way around.
+            Planning that adapts to you, not the other way around.
           </p>
         </Reveal>
 
@@ -218,9 +215,9 @@ function FeaturesSection() {
 
         {/* Problem Statement */}
         <div className="mt-16 max-w-4xl mx-auto p-6 rounded-2xl bg-primary/5 border border-primary/10 backdrop-blur-sm">
-          <h3 className="text-xl font-bold text-foreground mb-3">The Problem with Static Planning</h3>
+          <h3 className="text-xl font-bold text-foreground mb-3">The problem with static planning</h3>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Hours are spent bouncing between blogs and booking sites with fuzzy desires but no clear destination. The result is often a trip chosen for the price rather than the fit, leading to overcrowded itineraries that fail to adapt when the weather turns or energy fades.
+            Hours lost across blogs, Reddit threads, and booking sites — and the trip you end up with was picked for price, not fit. By day three, you&rsquo;re overscheduled, the weather turned, and there&rsquo;s no plan B.
           </p>
         </div>
       </div>
@@ -229,16 +226,44 @@ function FeaturesSection() {
 }
 
 import { signupForAlpha } from "./actions";
+import { createClient as createBrowserSupabase } from "@/utils/supabase/client";
+import { ALPHA_CAP } from "@/lib/alpha-config";
 
 // CTA Section Component
 function CTASection() {
   const [status, setStatus] = useState<{ type: 'success' | 'error' | null, message: string }>({ type: null, message: "" });
   const [isPending, setIsPending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+  // null = not yet loaded or fetch failed → render static fallback copy
+  const [seatsTaken, setSeatsTaken] = useState<number | null>(null);
+
+  // Fetch the live waitlist count on mount. Anon role can read row count via
+  // the `waitlist_count_anon` RLS policy + column-level grant on (id, created_at).
+  // On any failure we silently fall back to the static "100 seats" copy.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createBrowserSupabase();
+        const { count, error } = await supabase
+          .from("waitlist")
+          .select("id", { count: "exact", head: true });
+        if (cancelled) return;
+        if (error || count === null) {
+          setSeatsTaken(null);
+        } else {
+          setSeatsTaken(count);
+        }
+      } catch {
+        if (!cancelled) setSeatsTaken(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Check initial cooldown on mount
   React.useEffect(() => {
-    const lastSubmitStr = localStorage.getItem('tripGenie_lastSignup');
+    const lastSubmitStr = localStorage.getItem('aletheia_lastSignup');
     if (lastSubmitStr) {
       const lastSubmitTime = parseInt(lastSubmitStr, 10);
       const timeSinceLastSubmit = Date.now() - lastSubmitTime;
@@ -266,7 +291,7 @@ function CTASection() {
     e.preventDefault();
 
     if (cooldown > 0) {
-      setStatus({ type: 'error', message: `Please wait ${cooldown} seconds before trying again.` });
+      setStatus({ type: 'error', message: `Hold up — wait ${cooldown}s and try again.` });
       return;
     }
 
@@ -277,7 +302,7 @@ function CTASection() {
     const result = await signupForAlpha(formData);
 
     if (result.success) {
-      localStorage.setItem('tripGenie_lastSignup', Date.now().toString());
+      localStorage.setItem('aletheia_lastSignup', Date.now().toString());
       setCooldown(30); // Start 60s cooldown
       setStatus({ type: 'success', message: result.message });
       (e.target as HTMLFormElement).reset();
@@ -296,11 +321,23 @@ function CTASection() {
       <div className="container mx-auto px-4 relative z-10">
         <div className="max-w-3xl mx-auto text-center">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
-            Ready to Transform Your Travel Experience?
+            Stop planning trips.<br />Start architecting journeys.
           </h2>
 
           <p className="text-base text-white/90 mb-10 leading-relaxed">
-            Join other travelers who are already planning smarter with our AI-powered platform. Limited alpha access is now open for early adopters.
+            {seatsTaken === null ? (
+              <>
+                Aletheia opens with {ALPHA_CAP} early-access seats. Drop your email — if you&rsquo;re in the first {ALPHA_CAP}, you&rsquo;ll get sign-in details within 24 hours. Either way, you&rsquo;re on the list.
+              </>
+            ) : seatsTaken >= ALPHA_CAP ? (
+              <>
+                Aletheia early access is full. <strong className="text-white">{ALPHA_CAP} of {ALPHA_CAP} seats</strong> taken. Drop your email — you&rsquo;ll join the waitlist and we&rsquo;ll get in touch when access expands.
+              </>
+            ) : (
+              <>
+                Aletheia is opening early access. <strong className="text-white">{seatsTaken} of {ALPHA_CAP} seats</strong> taken — <span className="text-white/95">{ALPHA_CAP - seatsTaken} left</span>. Drop your email and you&rsquo;re in.
+              </>
+            )}
           </p>
 
           <div className="p-6 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-md max-w-2xl mx-auto">
@@ -309,7 +346,7 @@ function CTASection() {
                 id="email-input"
                 name="email"
                 type="email"
-                placeholder="Enter your email"
+                placeholder="your@email.com"
                 required
                 className="flex-1 w-full bg-white/10 border-white/20 text-white placeholder:text-white/60 focus:border-white/40 rounded-full px-5 h-14 text-base"
               />
@@ -320,7 +357,7 @@ function CTASection() {
                 disabled={isPending || cooldown > 0}
                 className="w-full sm:w-auto h-14 bg-white text-blue-600 hover:bg-white/90 px-6 text-base rounded-full shadow-xl transition-all hover:scale-105 whitespace-nowrap font-bold disabled:opacity-50"
               >
-                {isPending ? "Joining..." : cooldown > 0 ? `Wait ${cooldown}s` : "Get Started"}
+                {isPending ? "Saving you a seat…" : cooldown > 0 ? `Wait ${cooldown}s` : "Request access"}
                 {!isPending && cooldown <= 0 && <ArrowRight className="ml-2 w-4 h-4" />}
               </Button>
             </form>
@@ -332,13 +369,14 @@ function CTASection() {
                   "bg-red-500/20 text-red-200 border border-red-500/30"
               )}>
                 {status.type === 'success' ? status.message :
-                  cooldown > 0 ? `Please wait ${cooldown} seconds before trying again.` : status.message}
+                  cooldown > 0 ? `Hold up — wait ${cooldown}s and try again.` : status.message}
               </div>
             )}
           </div>
 
           <p className="mt-6 text-sm text-white/60">
-            We respect your privacy. No credit card required for alpha entry.
+            No credit card. We&rsquo;ll only use your email to send your sign-in details and rare product updates.{" "}
+            <a href="/privacy" className="underline hover:text-white/80 transition">Privacy policy</a>.
           </p>
         </div>
       </div>
