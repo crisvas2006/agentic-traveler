@@ -91,7 +91,7 @@ function SignUpForm() {
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; confirmPw?: string; agreed?: string }>({});
-  const [status, setStatus] = useState<{ kind: "idle" | "loading" | "success" | "error"; message: string }>({ kind: "idle", message: "" });
+  const [status, setStatus] = useState<{ kind: "idle" | "loading" | "success" | "error"; message: string; isDuplicate?: boolean }>({ kind: "idle", message: "" });
   const [googleLoading, setGoogleLoading] = useState(false);
   const turnstileRef = useRef<TurnstileInstance>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(SITE_KEY ? null : "");
@@ -119,7 +119,7 @@ function SignUpForm() {
     setStatus({ kind: "loading", message: "" });
 
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -134,9 +134,16 @@ function SignUpForm() {
     if (error) {
       setStatus({ kind: "error", message: error.message });
     } else {
+      // Supabase never returns an error for duplicate emails (email enumeration protection).
+      // When the email is already confirmed, it returns data.user with identities: [].
+      const isDuplicate =
+        Array.isArray(data.user?.identities) && data.user.identities.length === 0;
       setStatus({
         kind: "success",
-        message: "Account created. Check your inbox to confirm your email, then sign in.",
+        message: isDuplicate
+          ? "duplicate"
+          : "A confirmation link is on its way. Click it to activate your account, then sign in.",
+        isDuplicate,
       });
     }
   };
@@ -154,6 +161,31 @@ function SignUpForm() {
     setErrors((prev) => ({ ...prev, [field]: undefined }));
 
   if (status.kind === "success") {
+    if (status.isDuplicate) {
+      return (
+        <div className="text-center py-4 animate-fade-up">
+          <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 grid place-items-center mx-auto mb-4">
+            <Mail className="w-6 h-6 text-primary" strokeWidth={2} />
+          </div>
+          <h3 className="text-lg font-bold text-foreground mb-2">Already have an account?</h3>
+          <p className="text-sm text-muted-foreground mb-6">
+            This email is already registered. Sign in to pick up where you left off — or reset your password if you've lost access.
+          </p>
+          <Link
+            href="/login"
+            className="inline-flex items-center gap-2 h-12 px-6 rounded-full font-semibold text-sm bg-gradient-to-br from-primary to-purple-600 text-white shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-px transition-all"
+          >
+            Sign in <ArrowRight className="w-4 h-4" />
+          </Link>
+          <p className="mt-4 text-sm text-muted-foreground">
+            <Link href="/forgot-password" className="font-semibold text-primary hover:underline">
+              Forgot your password?
+            </Link>
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="text-center py-4 animate-fade-up">
         <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 grid place-items-center mx-auto mb-4">

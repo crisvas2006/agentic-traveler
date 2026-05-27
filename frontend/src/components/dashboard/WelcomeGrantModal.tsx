@@ -104,7 +104,7 @@ export function WelcomeGrantModal({ onGranted, onDismiss }: WelcomeGrantModalPro
             Welcome to Aletheia
           </h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Thanks for joining. Here&rsquo;s a starter pack of credits so you can plan your first trip — on us.
+            Thanks for joining. Here&rsquo;s a starter pack of credits so you can plan your first trip - on us.
           </p>
         </div>
 
