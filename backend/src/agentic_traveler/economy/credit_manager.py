@@ -46,6 +46,8 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "gemini-3.0-flash":              {"input": 0.50, "output": 3.00},
     "gemini-3-flash-preview":        {"input": 0.50, "output": 3.00},
     "gemini-3.1-flash-lite-preview": {"input": 0.10, "output": 0.40},
+    "gemini-3.5-flash":              {"input": 1.50, "output": 9.00},
+    "gemini-3.1-flash-lite":         {"input": 0.25, "output": 1.50},
 }
 
 # USD per grounded prompt (flat add-on charge, billed per sub-agent call that

@@ -16,7 +16,7 @@ from agentic_traveler.orchestrator.client_factory import get_client
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3.1-flash-lite-preview"
+_MODEL = "gemini-3.1-flash-lite"
 
 _SYSTEM_PROMPT = """\
 You are a factual search assistant. Given a query and a desired output

@@ -26,7 +26,7 @@ from agentic_traveler.orchestrator.utils import has_grounding, check_weather
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3-flash-preview"
+_MODEL = "gemini-3.5-flash"
 
 _SYSTEM_PROMPT = """\
 You are a friendly, expert travel planner chatting with a traveler

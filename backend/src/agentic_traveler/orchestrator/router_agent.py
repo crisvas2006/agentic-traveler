@@ -25,7 +25,7 @@ from agentic_traveler.economy import credit_manager
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3.1-flash-lite-preview"
+_MODEL = "gemini-3.1-flash-lite"
 _SYSTEM_PROMPT = """\
 You are the intent router for Agentic Traveler, a travel companion chatbot.
 

@@ -5,7 +5,7 @@ Merges the responsibilities of the former DiscoveryAgent and CompanionAgent.
 Handles all travel-specific tasks that don't require a structured itinerary:
 destination suggestions, in-trip help, travel advice, comparisons.
 
-Uses gemini-3-flash-preview. Google Search grounding is NOT directly enabled —
+Uses gemini-3.5-flash. Google Search grounding is NOT directly enabled —
 real-time data is fetched via the SearchAgent proxy (opt-in only).
 """
 
@@ -23,7 +23,7 @@ from agentic_traveler.orchestrator.utils import has_grounding, check_weather
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3-flash-preview"
+_MODEL = "gemini-3.5-flash"
 
 _SYSTEM_PROMPT = """\
 You are a friendly, deeply knowledgeable travel advisor chatting with

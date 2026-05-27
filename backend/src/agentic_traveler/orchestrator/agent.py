@@ -8,9 +8,9 @@ Architecture (v2 — Thin Router + Specialized Agents):
     4. RouterAgent classifies intent (CHAT | TRIP | PLAN | OFF_TOPIC)
        and handles lightweight tools (preferences, feedback, credits).
     5. Dispatch to the appropriate specialized agent:
-       - CHAT      → ChatAgent   (gemini-3.1-flash-lite-preview)
-       - TRIP      → TripAgent   (gemini-3-flash-preview)
-       - PLAN      → PlannerAgent (gemini-3-flash-preview)
+       - CHAT      → ChatAgent   (gemini-3.1-flash-lite)
+       - TRIP      → TripAgent   (gemini-3.5-flash)
+       - PLAN      → PlannerAgent (gemini-3.5-flash)
        - OFF_TOPIC → router's natural redirection; off_topic_guard
                      increments counter silently.
     6. Log token usage for router + agent separately.
@@ -143,7 +143,7 @@ class OrchestratorAgent:
         if raw_router and hasattr(raw_router, "usage_metadata"):
             router_usage = usage_tracker.log_and_accumulate(
                 agent_name="router",
-                model_name="gemini-3.1-flash-lite-preview",
+                model_name="gemini-3.1-flash-lite",
                 user_id=telegram_user_id,
                 response=raw_router,
                 latency_ms=router_result.get("latency_ms", 0),
@@ -210,10 +210,10 @@ class OrchestratorAgent:
         if raw_agent and hasattr(raw_agent, "usage_metadata"):
             agent_name = {"CHAT": "chat", "TRIP": "trip", "PLAN": "planner"}.get(intent, "agent")
             model_name = {
-                "CHAT": "gemini-3.1-flash-lite-preview",
-                "TRIP": "gemini-3-flash-preview",
-                "PLAN": "gemini-3-flash-preview",
-            }.get(intent, "gemini-3-flash-preview")
+                "CHAT": "gemini-3.1-flash-lite",
+                "TRIP": "gemini-3.5-flash",
+                "PLAN": "gemini-3.5-flash",
+            }.get(intent, "gemini-3.5-flash")
             agent_usage = usage_tracker.log_and_accumulate(
                 agent_name=agent_name,
                 model_name=model_name,
@@ -231,7 +231,7 @@ class OrchestratorAgent:
             if raw_search and hasattr(raw_search, "usage_metadata"):
                 search_usage = usage_tracker.log_and_accumulate(
                     agent_name="search",
-                    model_name="gemini-3.1-flash-lite-preview",
+                    model_name="gemini-3.1-flash-lite",
                     user_id=telegram_user_id,
                     response=raw_search,
                     latency_ms=sr.get("lat", 0),

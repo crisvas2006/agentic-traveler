@@ -3,7 +3,7 @@ Chat Agent — conversational companion for non-travel messages.
 
 Handles greetings, banter, casual Q&A, emotional support, life chat,
 and anything conversational that isn't a travel task. Powered by
-gemini-3.1-flash-lite-preview for fast, low-cost responses.
+gemini-3.1-flash-lite for fast, low-cost responses.
 
 Receives the full user profile including personality dimension scores
 so every response feels genuinely personal.
@@ -23,7 +23,7 @@ from agentic_traveler.orchestrator.utils import has_grounding, check_weather
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3.1-flash-lite-preview"
+_MODEL = "gemini-3.1-flash-lite"
 
 _SYSTEM_PROMPT = """\
 You are "Agentic Traveler", the user's travel-obsessed best friend.
