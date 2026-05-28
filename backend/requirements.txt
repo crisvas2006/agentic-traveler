@@ -22,3 +22,4 @@ functions-framework
 fastapi
 uvicorn[standard]
 requests
+PyJWT

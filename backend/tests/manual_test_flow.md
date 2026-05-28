@@ -19,7 +19,7 @@ This document provides a step-by-step script for manually validating the Telegra
 **Step 1.2: Profile Linkage (ProfileAgent)**
 - **Action:** Complete the Tally form with dummy data. When redirected to Telegram, click the deep link (which sends a message like `/start <submissionId>`).
 - **Expected:**
-  - The bot sends a temporary "⏳ Mapping your travel DNA..." placeholder.
+  - The bot sends a temporary "⏳ Mapping your traveler DNA..." placeholder.
   - The placeholder updates to a success message.
   - The bot sends a personalized welcome greeting confirming your profile is linked.
 

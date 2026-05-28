@@ -6,19 +6,19 @@ from collections import defaultdict
 from threading import Lock
 
 import requests as http_requests
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from agentic_traveler.analytics import metrics_tracker
 from agentic_traveler.core.sanitize import sanitize_user_input, sanitize_telegram_markdown
 from agentic_traveler.economy import credit_manager
 from agentic_traveler.guards import off_topic_guard
 from agentic_traveler.interfaces.dependencies import (
-    SECRET_TOKEN,
     verify_telegram_ip,
     verify_telegram_secret,
 )
 from agentic_traveler.interfaces.schemas import TelegramWebhookPayload
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
+from agentic_traveler.tools.chat_repo import ChatRepository
 from agentic_traveler.tools.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ def _is_rate_limited(user_id: str) -> bool:
 
 _user_tool_instance: UserRepository | None = None
 _orchestrator_instance: OrchestratorAgent | None = None
+_chat_repo_instance: ChatRepository | None = None
 
 def get_user_tool() -> UserRepository:
     global _user_tool_instance
@@ -75,6 +76,12 @@ def get_orchestrator() -> OrchestratorAgent:
         logger.info("Initializing lazy OrchestratorAgent...")
         _orchestrator_instance = OrchestratorAgent(user_repo=get_user_tool())
     return _orchestrator_instance
+
+def get_chat_repo() -> ChatRepository:
+    global _chat_repo_instance
+    if _chat_repo_instance is None:
+        _chat_repo_instance = ChatRepository()
+    return _chat_repo_instance
 
 # ── Telegram helpers (zero-overhead performance testing mocks) ──
 
@@ -206,6 +213,23 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
     except Exception:
         logger.exception("Orchestrator error for user %s", user_id)
         reply = "Sorry, I hit an error processing your message. Please try again."
+        response = {"action": "ERROR"}
+
+    # Mirror the exchange into the web-visible messages table so Telegram users
+    # see their full history when they sign in on the web. Best-effort: never
+    # block the Telegram reply on a persistence failure.
+    internal_user_id = user_doc.get("id") if user_doc else None
+    if internal_user_id:
+        try:
+            get_chat_repo().append_pair(
+                user_id=internal_user_id,
+                user_body=text,
+                agent_body=reply,
+                source="telegram",
+                agent_metadata={"action": response.get("action")},
+            )
+        except Exception:
+            logger.exception("chat_repo append failed for telegram user %s", user_id)
 
     if placeholder_msg_id:
         logger.info("Editing placeholder %s for chat %s (reply_len=%d)", placeholder_msg_id, chat_id, len(reply))
@@ -235,7 +259,7 @@ def _handle_start(chat_id: int, user_id: str, text: str) -> None:
     if user_doc:
         name = user_doc.get("name", user_doc.get("user_name", "Traveler"))
 
-        placeholder_msg_id = send_telegram_message(chat_id, "⏳ Mapping your travel DNA...")
+        placeholder_msg_id = send_telegram_message(chat_id, "⏳ Mapping your traveler DNA...")
 
         try:
             from agentic_traveler.orchestrator.profile_agent import ProfileAgent

@@ -24,12 +24,28 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 Add all credentials to your `.env`:
 
 ```env
+# Core
 TELEGRAM_BOT_TOKEN=your-bot-token-from-botfather
 TELEGRAM_SECRET_TOKEN=your-generated-secret
 GOOGLE_API_KEY=your-gemini-api-key
 GOOGLE_PROJECT_ID=your-gcp-project-id
 GEMINI_REGION=europe-west1
+
+# Supabase (Project Settings → API + JWT Keys)
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_KEY=<service-role-key>
+SUPABASE_JWT_SECRET=<Legacy JWT secret, used to verify access tokens>
+
+# Web chat — comma-separated origin allowlist for CORS.
+# Local:      http://localhost:3000
+FRONTEND_ORIGIN=http://localhost:3000
+
+# Optional
+TALLY_WEBHOOK_TOKEN=<tally-secret>
+APP_ADMIN_API_KEY=<admin-key>
 ```
+
+> **JWT secret note:** Supabase is migrating to JWT Signing Keys (asymmetric RS256). For now, copy the value from the **Legacy JWT Secret** tab in Project Settings → API → JWT Keys — that's what tokens are still signed with. When the backend later moves to JWKS-based verification, this env var goes away.
 
 ## Pre-Deployment Regression Check
 
@@ -79,8 +95,8 @@ gcloud run deploy agentic-traveler \
   --no-cpu-throttling \
   --memory 512Mi \
   --timeout 120 \
-  --set-env-vars "GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=global" \
-  --set-secrets="TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_SECRET_TOKEN=TELEGRAM_SECRET_TOKEN:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,TALLY_WEBHOOK_TOKEN=TALLY_WEBHOOK_TOKEN:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest,APP_ADMIN_API_KEY=APP_ADMIN_API_KEY:latest"
+  --set-env-vars "GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=global,FRONTEND_ORIGIN=https://www..." \
+  --set-secrets="TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_SECRET_TOKEN=TELEGRAM_SECRET_TOKEN:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,TALLY_WEBHOOK_TOKEN=TALLY_WEBHOOK_TOKEN:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest,APP_ADMIN_API_KEY=APP_ADMIN_API_KEY:latest"
 ```
 
 > **Note on `--no-cpu-throttling`:** Required for FastAPI BackgroundTasks processing. Without it, Cloud Run throttles CPU to near-zero after the HTTP `200` is returned, stalling the background task before it completes the LLM call and Telegram reply.

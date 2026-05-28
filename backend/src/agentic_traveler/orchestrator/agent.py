@@ -82,14 +82,10 @@ class OrchestratorAgent:
         status_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """
-        Route a user message to the appropriate specialized agent.
+        Telegram entry point. Resolves the user by Telegram ID, then dispatches.
 
         Returns {"text": str, "action": str}.
         """
-        t_total = time.time()
-        token_records: list[Dict[str, Any]] = []
-
-        # ── 1. Fetch user profile ───────────────────────────────────────────
         user_doc, user_id = self.user_tool.get_user_with_ref(telegram_user_id)
         if not user_doc:
             logger.info("New user detected: %s", telegram_user_id)
@@ -103,6 +99,58 @@ class OrchestratorAgent:
                 ),
                 "action": "ONBOARDING_REQUIRED",
             }
+        return self._process_user_doc(
+            user_doc=user_doc,
+            user_id=user_id,
+            telegram_user_id=telegram_user_id,
+            message_text=message_text,
+            status_callback=status_callback,
+        )
+
+    def process_request_for_user(
+        self,
+        user_id: str,
+        message_text: str,
+        status_callback: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Web entry point. The user is already resolved by Supabase JWT → users.id;
+        we fetch the assembled user_doc and dispatch.
+
+        Returns {"text": str, "action": str}.
+        """
+        user_doc = self.user_tool.get_user_by_id(user_id)
+        if not user_doc:
+            logger.warning("process_request_for_user: no user row for id=%s", user_id)
+            return {
+                "text": "Your profile is missing. Please complete the travel profile to continue.",
+                "action": "ONBOARDING_REQUIRED",
+            }
+        # For web users we don't have a Telegram ID; use the internal user_id as the
+        # analytics/logging key. usage_tracker just needs a stable string identifier.
+        return self._process_user_doc(
+            user_doc=user_doc,
+            user_id=user_id,
+            telegram_user_id=user_id,
+            message_text=message_text,
+            status_callback=status_callback,
+        )
+
+    def _process_user_doc(
+        self,
+        user_doc: Dict[str, Any],
+        user_id: str,
+        telegram_user_id: str,
+        message_text: str,
+        status_callback: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Shared post-lookup pipeline. Used by both the Telegram and web entry
+        points so credit gating, off-topic enforcement, dispatch, and history
+        save behave identically across channels.
+        """
+        t_total = time.time()
+        token_records: list[Dict[str, Any]] = []
 
         # ── 1b. Credit gate ─────────────────────────────────────────────────
         if not credit_manager.has_credits(user_doc):
@@ -122,8 +170,6 @@ class OrchestratorAgent:
 
         current_time = _current_time_str()
         user_name = user_doc.get("user_name", "Traveler")
-        profile = user_doc.get("user_profile", {})
-        tone_preference = profile.get("tone_preference", "casual and friendly")
 
         # ── 4. Router — classify intent ─────────────────────────────────────
         t = time.time()
