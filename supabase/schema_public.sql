@@ -23,13 +23,13 @@ CREATE TABLE IF NOT EXISTS public.waitlist (
 
 -- ---------------------------------------------------------------------------
 -- users
--- Core application user record. Decoupled from auth.users on purpose:
---   • Telegram/Tally users have id = random UUID, auth_id = NULL
---   • Web users have auth_id = auth.users.id (set by the auth trigger)
+-- Core application user record.
+--   • Web users:        id = auth.users.id (set by the on_auth_user_created trigger)
+--   • Telegram/Tally:   id = random UUID (no auth.users counterpart)
+-- (See migrations/000_merge_auth_id.sql for the history of this design.)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.users (
   id            uuid  PRIMARY KEY DEFAULT gen_random_uuid(),
-  auth_id       uuid  UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
   telegram_id   text  UNIQUE,
   submission_id text  UNIQUE,
   name          text,
@@ -142,6 +142,61 @@ CREATE TABLE IF NOT EXISTS public.analytics_weekly (
   grounding_calls     integer DEFAULT 0,
   flushed_at          timestamptz
 );
+
+
+-- ---------------------------------------------------------------------------
+-- chat_threads
+-- Conversation envelope for the web chat UI. Today every user has one thread
+-- of kind 'direct_ai'. Schema is forward-compatible with 'group' and
+-- 'direct_user' kinds — they would introduce a chat_thread_members table
+-- (not part of this schema yet, see specs/task_41_chat_future_extensions.md).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.chat_threads (
+  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind          text        NOT NULL CHECK (kind IN ('direct_ai', 'group', 'direct_user')),
+  owner_user_id uuid        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  title         text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+-- One direct_ai thread per user. Group/DM threads are not constrained.
+CREATE UNIQUE INDEX IF NOT EXISTS chat_threads_owner_direct_ai_uniq
+  ON public.chat_threads (owner_user_id)
+  WHERE kind = 'direct_ai';
+
+
+-- ---------------------------------------------------------------------------
+-- messages
+-- Append-only message log. Source of truth for the user-facing web view.
+-- (The `conversations` table above is the agent's rolling context window —
+--  small, compacted, never user-visible. The two serve different purposes.)
+--   sender_type='user'  → sender_user_id = the human's users.id, body = their text
+--   sender_type='agent' → sender_user_id = NULL,                  body = agent reply
+--   source              = 'web' | 'telegram' (channel that produced this row)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.messages (
+  id              bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  thread_id       uuid        NOT NULL REFERENCES public.chat_threads(id) ON DELETE CASCADE,
+  sender_type     text        NOT NULL CHECK (sender_type IN ('user', 'agent')),
+  sender_user_id  uuid                 REFERENCES public.users(id) ON DELETE SET NULL,
+  body            text        NOT NULL,
+  source          text        NOT NULL CHECK (source IN ('web', 'telegram')),
+  metadata        jsonb       NOT NULL DEFAULT '{}',
+  created_at      timestamptz NOT NULL DEFAULT now(),
+
+  -- Generated tsvector for full-text search. 'simple' config = no stemming,
+  -- no stopword filtering — keeps multilingual content (EN/RO/…) searchable.
+  body_tsv        tsvector    GENERATED ALWAYS AS (to_tsvector('simple', body)) STORED
+);
+
+-- Newest-first pagination + cursor seeks on (thread, id).
+CREATE INDEX IF NOT EXISTS messages_thread_id_idx
+  ON public.messages (thread_id, id DESC);
+
+-- Full-text search.
+CREATE INDEX IF NOT EXISTS messages_body_tsv_idx
+  ON public.messages USING GIN (body_tsv);
 
 
 -- ---------------------------------------------------------------------------

@@ -41,14 +41,13 @@ CREATE POLICY "waitlist_count_anon" ON public.waitlist
 -- ---------------------------------------------------------------------------
 -- users — authenticated user may read and update their own row
 -- INSERT is handled exclusively by the handle_new_auth_user trigger (SECURITY DEFINER).
+-- After Task 27: users.id IS the auth UUID for web users, so the policy is a
+-- direct equality check rather than a subquery.
 -- ---------------------------------------------------------------------------
 CREATE POLICY "users_self" ON public.users
   FOR ALL
-  USING      (auth_id = auth.uid())
-  WITH CHECK (auth_id = auth.uid());
--- USING:      filters which rows the user can touch (checked against the OLD row).
--- WITH CHECK: validates the resulting row after INSERT/UPDATE so a user cannot
---             change their own auth_id to steal another user's row.
+  USING      (id = auth.uid())
+  WITH CHECK (id = auth.uid());
 
 
 -- ---------------------------------------------------------------------------
@@ -56,11 +55,7 @@ CREATE POLICY "users_self" ON public.users
 -- ---------------------------------------------------------------------------
 CREATE POLICY "profiles_self" ON public.user_profiles
   FOR ALL
-  USING (
-    user_id IN (
-      SELECT id FROM public.users WHERE auth_id = auth.uid()
-    )
-  );
+  USING (user_id = auth.uid());
 
 
 -- ---------------------------------------------------------------------------
@@ -71,9 +66,29 @@ CREATE POLICY "profiles_self" ON public.user_profiles
 -- ---------------------------------------------------------------------------
 CREATE POLICY "credits_self_read" ON public.credits
   FOR SELECT
+  USING (user_id = auth.uid());
+
+
+-- ---------------------------------------------------------------------------
+-- chat_threads — authenticated user may read only their own threads.
+-- All writes go through the service-role backend.
+-- Forward-looking: when group/DM threads land, this will switch from a direct
+-- owner check to a membership check against chat_thread_members.
+-- ---------------------------------------------------------------------------
+CREATE POLICY "chat_threads_self_read" ON public.chat_threads
+  FOR SELECT
+  USING (owner_user_id = auth.uid());
+
+
+-- ---------------------------------------------------------------------------
+-- messages — authenticated user may read only messages in their own threads.
+-- ---------------------------------------------------------------------------
+CREATE POLICY "messages_self_read" ON public.messages
+  FOR SELECT
   USING (
-    user_id IN (
-      SELECT id FROM public.users WHERE auth_id = auth.uid()
+    thread_id IN (
+      SELECT id FROM public.chat_threads
+      WHERE owner_user_id = auth.uid()
     )
   );
 
@@ -95,6 +110,11 @@ GRANT SELECT, UPDATE ON public.user_profiles TO authenticated;
 
 -- credits: read-only for authenticated users; writes go through service-role only
 GRANT SELECT         ON public.credits       TO authenticated;
+
+-- chat_threads + messages: read-only for authenticated users; the FastAPI
+-- backend writes via the service role.
+GRANT SELECT         ON public.chat_threads  TO authenticated;
+GRANT SELECT         ON public.messages      TO authenticated;
 
 -- waitlist: anon may read only id + created_at (enough for COUNT, never email).
 -- The matching SELECT policy is "waitlist_count_anon" above.
