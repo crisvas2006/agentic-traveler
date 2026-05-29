@@ -315,7 +315,9 @@ function CTASection() {
   return (
     <section className="pt-32 pb-24 bg-gradient-to-br from-blue-600 to-purple-600 text-white relative overflow-hidden">
       <div className="absolute inset-0">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white/10 rounded-full blur-[120px] animate-pulse" />
+        {/* Was `animate-pulse` — pulsing a 600px blurred element forces a
+            composited repaint of a huge layer every frame. Static is fine. */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white/10 rounded-full blur-[80px]" />
       </div>
 
       <div className="container mx-auto px-4 relative z-10">

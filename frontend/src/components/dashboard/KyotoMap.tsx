@@ -81,9 +81,11 @@ export function KyotoMap({ days, todayN, activeDayN, onSelectPin, theme, novelty
           <stop offset="0%" stopColor="var(--primary)" />
           <stop offset="100%" stopColor="#9333ea" />
         </linearGradient>
-        <filter id="route-glow" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="3" />
-        </filter>
+        {/* Was: <filter id="route-glow"><feGaussianBlur stdDeviation="3"/></filter>
+            Removed — SVG filters re-run every frame the path under them
+            redraws (and the dashed route below animates continuously). We get
+            the same soft glow much cheaper by stacking a wider semi-transparent
+            stroke underneath the main path. See the route block below. */}
         <pattern id="paper" x="0" y="0" width="6" height="6" patternUnits="userSpaceOnUse">
           <circle
             cx="1" cy="1" r="0.4"
@@ -199,12 +201,17 @@ export function KyotoMap({ days, todayN, activeDayN, onSelectPin, theme, novelty
       {/* Route for active day */}
       {routePath && (
         <>
+          {/* Soft glow: three stacked semi-transparent strokes replacing the
+              old feGaussianBlur filter. Static — no per-frame GPU filter pass. */}
+          <path d={routePath} stroke="url(#route-grad)" strokeWidth="16" fill="none"
+                opacity="0.10" strokeLinecap="round" />
           <path d={routePath} stroke="url(#route-grad)" strokeWidth="10" fill="none"
-                opacity="0.4" filter="url(#route-glow)" strokeLinecap="round" />
+                opacity="0.25" strokeLinecap="round" />
+          {/* Static dashed route. The previous marching-ants animation
+              repainted the SVG (and therefore re-blurred the glass panels)
+              every frame for a purely cosmetic effect. */}
           <path d={routePath} stroke="url(#route-grad)" strokeWidth="3" fill="none"
-                strokeDasharray="6 6" strokeLinecap="round" strokeLinejoin="round">
-            <animate attributeName="stroke-dashoffset" from="0" to="-24" dur="3s" repeatCount="indefinite" />
-          </path>
+                strokeDasharray="6 6" strokeLinecap="round" strokeLinejoin="round" />
         </>
       )}
 
@@ -212,10 +219,9 @@ export function KyotoMap({ days, todayN, activeDayN, onSelectPin, theme, novelty
       {todayBlocks.map((b, i) => (
         <g key={b.id} onClick={() => onSelectPin?.(b)} style={{ cursor: "pointer" }}>
           {b.current && (
-            <circle cx={b.pin.x} cy={b.pin.y} r="22" fill={PIN.today.ring}>
-              <animate attributeName="r" values="20;28;20" dur="2.4s" repeatCount="indefinite" />
-              <animate attributeName="opacity" values=".5;0;.5" dur="2.4s" repeatCount="indefinite" />
-            </circle>
+            <circle cx={b.pin.x} cy={b.pin.y} r="22" fill={PIN.today.ring}
+                    className="map-pin-pulse"
+                    style={{ transformOrigin: `${b.pin.x}px ${b.pin.y}px` }} />
           )}
           <circle
             cx={b.pin.x} cy={b.pin.y} r="16"
@@ -232,26 +238,25 @@ export function KyotoMap({ days, todayN, activeDayN, onSelectPin, theme, novelty
         </g>
       ))}
 
-      {/* Wild novelty halos */}
+      {/* Wild novelty halos — static rings. The SMIL r animation here added
+          three continuously-redrawing circles on top of an already-busy SVG
+          for very subtle visual benefit. */}
       {novelty === "wild" && currentBlock && (
         <g opacity="0.5">
-          {[80, 130, 180].map((r, i) => (
+          {[80, 130, 180].map((r) => (
             <circle
               key={r} cx={currentBlock.pin.x} cy={currentBlock.pin.y} r={r}
               fill="none" stroke="url(#route-grad)" strokeWidth="0.6" strokeDasharray="1 6"
-            >
-              <animate attributeName="r" values={`${r};${r + 8};${r}`} dur={`${4 + i}s`} repeatCount="indefinite" />
-            </circle>
+            />
           ))}
         </g>
       )}
 
-      {/* You-are-here marker */}
+      {/* You-are-here marker — CSS-driven blink. */}
       {currentBlock && (
         <g>
-          <circle cx={currentBlock.pin.x - 30} cy={currentBlock.pin.y - 30} r="5" fill="#34d399">
-            <animate attributeName="opacity" values="1;.3;1" dur="1.6s" repeatCount="indefinite" />
-          </circle>
+          <circle cx={currentBlock.pin.x - 30} cy={currentBlock.pin.y - 30} r="5"
+                  fill="#34d399" className="map-here-blink" />
           <text
             x={currentBlock.pin.x - 22} y={currentBlock.pin.y - 26}
             fontFamily="'Geist Mono', monospace" fontSize="10"

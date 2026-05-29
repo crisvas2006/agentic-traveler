@@ -1075,14 +1075,16 @@ export function AccountSettings() {
 
   return (
     <>
-      {/* Ambient backdrop */}
+      {/* Ambient backdrop — static. Dropped the animate-float + blur-[120px]
+          orbs (a perpetual full-layer recomposite for an imperceptible drift)
+          in favour of a flat tint + grid. */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <div
-          className="absolute -top-[10%] -left-[5%] w-[35%] h-[35%] rounded-full blur-[120px] animate-float"
+          className="absolute -top-[10%] -left-[5%] w-[35%] h-[35%] rounded-full blur-[60px]"
           style={{ background: "color-mix(in oklab, var(--primary) 6%, transparent)" }}
         />
         <div
-          className="absolute bottom-[6%] -right-[6%] w-[30%] h-[30%] rounded-full blur-[120px] animate-float-reverse"
+          className="absolute bottom-[6%] -right-[6%] w-[30%] h-[30%] rounded-full blur-[60px]"
           style={{ background: "color-mix(in oklab, #9333ea 6%, transparent)" }}
         />
         <div className="absolute inset-0 grid-bg" />

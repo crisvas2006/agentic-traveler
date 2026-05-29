@@ -165,6 +165,38 @@ body {
   .chat-md strong { font-weight: 700; }
   .chat-md em { font-style: italic; }
 
+  /* ── SVG map elements are intentionally STATIC.
+     Animating SVG sub-elements (a <circle> or dashed <path>) does NOT get a
+     GPU compositor layer the way HTML does — it repaints the SVG region on
+     the main thread every frame, and because the map sits behind the frosted
+     glass panels, every such repaint also forces the panels to re-blur. That
+     was the bulk of the idle GPU load. The classes below now just set a fixed
+     resting appearance (no `animation`). */
+  .map-pin-pulse {
+    transform-box: fill-box;
+    transform: scale(1.05);
+    opacity: 0.35;
+  }
+  .map-here-blink {
+    opacity: 1;
+  }
+
+  /* Single switch to disable all decorative motion for users who ask for it.
+     Also applies to the ChatPanel typing dots / flash, the orb-free pulse, etc. */
+  @media (prefers-reduced-motion: reduce) {
+    .chat-typing-dot,
+    .chat-bubble-interactive,
+    .animate-pulse-soft,
+    .animate-float,
+    .animate-float-reverse,
+    .animate-pulse,
+    .animate-ping,
+    .animate-bounce {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+
   /* Interactive bubble — hint that right-click does something. */
   .chat-bubble-interactive {
     cursor: context-menu;
@@ -185,16 +217,41 @@ body {
   }
 }
 
-/* Shared glass card — used by dashboard panels, auth cards */
+/* Shared glass card — used by dashboard panels, auth cards.
+ *
+ * Backdrop-filter (frosted glass) is only expensive *while the pixels behind
+ * it change*. The 30% GPU was caused by perpetual motion behind the panels
+ * (floating orbs, SVG SMIL, the marching route dash) forcing the blurred
+ * layer to be recomputed every frame. With that motion removed elsewhere,
+ * the browser caches the blurred backdrop and idle cost drops to ~0; the
+ * blur only recomputes briefly on scroll/hover.
+ *
+ * NOTE: do NOT add `contain: paint|layout` here — it makes the card a
+ * containing block for `position: fixed` descendants (the chat context menu)
+ * and clips overflow (the emoji picker that pops above the composer). It was
+ * also not helping, since `contain` doesn't stop backdrop-filter resampling.
+ */
 .aletheia-card {
-  background: color-mix(in oklab, var(--background) 70%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: color-mix(in oklab, var(--background) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
   border-radius: 1.75rem;
   box-shadow:
     0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent) inset,
     0 30px 60px -30px color-mix(in oklab, var(--foreground) 25%, transparent);
+}
+
+/* Mobile / touch devices: drop the live backdrop blur entirely and use a
+ * near-opaque panel instead. Backdrop-filter carries a per-layer memory +
+ * recomposite cost that drains battery and warms phones on scroll. The solid
+ * panel is visually almost identical against the map and costs nothing. */
+@media (hover: none), (max-width: 768px) {
+  .aletheia-card {
+    background: color-mix(in oklab, var(--background) 94%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 /* Themed slim scrollbar — use on horizontally-scrollable containers */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 interface BeamsBackgroundProps {
@@ -8,6 +8,11 @@ interface BeamsBackgroundProps {
   children?: React.ReactNode;
   intensity?: "subtle" | "medium" | "strong";
 }
+
+// Cap device-pixel-ratio for a soft decorative background — going past 1.5x
+// quadruples fill-rate cost for visually negligible gain (the gradients are
+// already soft and the layer is downscaled by the browser anyway).
+const MAX_DPR = 1.5;
 
 interface Beam {
   x: number;
@@ -62,33 +67,41 @@ function resetBeam(beam: Beam, index: number, totalBeams: number, width: number,
 }
 
 const INTENSITY_MAP = {
-  subtle: 15,
-  medium: 25,
-  strong: 40,
+  subtle: 10,
+  medium: 18,
+  strong: 28,  // was 40 — visually near-identical, ~30% less fill cost
 };
 
 export function BeamsBackground({
   className,
-  children,
+  children: _children,
   intensity = "medium",
 }: BeamsBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const beamsRef = useRef<Beam[]>([]);
   const animationFrameRef = useRef<number>(0);
+  const runningRef = useRef(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    // Respect the user's OS motion preference.
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reducedMotion) return;
+
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
 
     const updateCanvasSize = () => {
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
       canvas.style.width = "100%";
       canvas.style.height = "100%";
+      // Reset transform before re-scaling — otherwise ctx.scale stacks on
+      // every resize and the canvas resolution explodes.
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
 
       const totalBeams = INTENSITY_MAP[intensity];
@@ -103,44 +116,82 @@ export function BeamsBackground({
     window.addEventListener("resize", updateCanvasSize);
 
     const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!runningRef.current) return;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
 
-      beamsRef.current.forEach((beam, index) => {
+      ctx.clearRect(0, 0, w, h);
+
+      const beams = beamsRef.current;
+      for (let i = 0; i < beams.length; i++) {
+        const beam = beams[i];
         beam.y -= beam.speed;
         beam.x += Math.tan(beam.angle) * beam.speed;
         beam.pulse += beam.pulseSpeed;
 
         if (beam.y + beam.length < -100) {
-          resetBeam(beam, index, beamsRef.current.length, window.innerWidth, window.innerHeight);
+          resetBeam(beam, i, beams.length, w, h);
         }
 
         drawBeam(ctx, beam);
-      });
+      }
 
       animationFrameRef.current = requestAnimationFrame(animate);
     };
 
-    animate();
-
-    return () => {
-      window.removeEventListener("resize", updateCanvasSize);
+    const start = () => {
+      if (runningRef.current) return;
+      runningRef.current = true;
+      animate();
+    };
+    const stop = () => {
+      runningRef.current = false;
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = 0;
       }
+    };
+
+    // Pause when the tab is hidden — browsers throttle rAF in background tabs
+    // already, but explicit stop is cheaper and avoids the occasional 1Hz tick.
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") stop();
+      else start();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // Pause when the canvas is scrolled out of view.
+    let observer: IntersectionObserver | null = null;
+    if ("IntersectionObserver" in window) {
+      observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) start();
+        else stop();
+      }, { threshold: 0 });
+      observer.observe(canvas);
+    } else {
+      start();
+    }
+
+    return () => {
+      stop();
+      window.removeEventListener("resize", updateCanvasSize);
+      document.removeEventListener("visibilitychange", onVisibility);
+      observer?.disconnect();
     };
   }, [intensity]);
 
   return (
     <div className={cn("absolute inset-0 overflow-hidden", className)}>
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0"
-        style={{ filter: "blur(8px)" }}
-      />
-      {/* Pulse overlay using CSS animation instead of Framer Motion */}
-      <div 
-        className="absolute inset-0 bg-primary/5 animate-pulse-soft pointer-events-none" 
-        style={{ animationDuration: '8s' }}
+      {/*
+        Canvas: the soft blur is now baked into each beam's gradient stops
+        (alpha fades to 0 at both ends), so the GPU-expensive
+        `filter: blur(8px)` on the full viewport canvas is no longer needed.
+        That single change is the largest perf win in this component.
+      */}
+      <canvas ref={canvasRef} className="absolute inset-0" />
+      <div
+        className="absolute inset-0 bg-primary/5 animate-pulse-soft pointer-events-none"
+        style={{ animationDuration: "8s" }}
       />
     </div>
   );

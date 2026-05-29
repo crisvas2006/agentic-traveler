@@ -11,7 +11,6 @@ import { KyotoMap } from "./KyotoMap";
 import { ChatStripIcons, ChatPanel, ChatBubbleFloating } from "./ChatPanel";
 import { SparklesIcon, LibraryIcon } from "./DashIcons";
 import { AvatarButton, ProfileDropdown } from "./ProfileDropdown";
-import { BeamsBackground } from "@/components/ui/BeamsBackground";
 
 /* ── Map legend ── */
 function MapLegend() {
@@ -36,24 +35,28 @@ function MapLegend() {
   );
 }
 
-/* ── Ambient backdrop ── */
+/* ── Ambient backdrop ──
+ * Deliberately minimal. The Kyoto map is opaque and slice-covers the whole
+ * content area, so almost all of this backdrop is hidden behind it — only the
+ * thin strip behind the (frosted) TopNav and any panel gaps ever show it.
+ *
+ * Previous versions rendered:
+ *   • a perpetual <BeamsBackground> canvas (animating 60fps entirely BEHIND
+ *     the opaque map — 100% wasted GPU), and
+ *   • two blur-[120px] floating orbs (the "moving/fading orb" — expensive and
+ *     pointless behind the map).
+ * Both are removed. A flat themed gradient + static grid is all that's needed. */
 function Backdrop({ theme }: { theme: "light" | "dark" }) {
   return (
     <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-      <div className={`absolute inset-0 transition-opacity duration-700 ${theme === "dark" ? "opacity-100" : "opacity-0"}`}>
-        {theme === "dark" && <BeamsBackground intensity="medium" />}
-      </div>
       <div
-        className={`absolute inset-0 transition-opacity duration-700 ${theme === "dark" ? "opacity-0" : "opacity-100"}`}
-        style={{ background: "linear-gradient(135deg, #eef4ff 0%, var(--background) 50%, #f5f0ff 100%)" }}
-      />
-      <div
-        className="absolute -top-[10%] -left-[5%] w-[35%] h-[35%] rounded-full blur-[120px] animate-float"
-        style={{ background: theme === "dark" ? "rgba(59,130,246,.08)" : "rgba(37,99,235,.16)" }}
-      />
-      <div
-        className="absolute bottom-[6%] -right-[6%] w-[30%] h-[30%] rounded-full blur-[120px] animate-float-reverse"
-        style={{ background: theme === "dark" ? "rgba(147,51,234,.08)" : "rgba(147,51,234,.14)" }}
+        className="absolute inset-0"
+        style={{
+          background:
+            theme === "dark"
+              ? "linear-gradient(135deg, #0a0f1f 0%, var(--background) 60%, #0d1326 100%)"
+              : "linear-gradient(135deg, #eef4ff 0%, var(--background) 50%, #f5f0ff 100%)",
+        }}
       />
       <div className="absolute inset-0 grid-bg" />
     </div>
