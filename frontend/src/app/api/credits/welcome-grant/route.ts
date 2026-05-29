@@ -40,28 +40,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // ── 2. Resolve the public.users row ───────────────────────────────────
-    // We use the service client here: auth.getUser() already validated the JWT,
-    // so filtering by user.id is safe without relying on RLS / auth.uid().
+    // ── 2. Service-role client (writes bypass RLS) ────────────────────────
+    // After Task 36, user.id IS the public.users.id — no separate lookup needed.
     const service = createServiceClient();
-
-    const { data: publicUser, error: userError } = await service
-      .from("users")
-      .select("id")
-      .eq("auth_id", user.id)
-      .maybeSingle();
-
-    if (userError) {
-      console.error("[welcome-grant] users lookup failed:", userError);
-      return NextResponse.json({ error: "DB lookup failed." }, { status: 500 });
-    }
-    if (!publicUser) {
-      console.error("[welcome-grant] no public.users row for auth_id:", user.id);
-      return NextResponse.json(
-        { error: "User record not found." },
-        { status: 500 }
-      );
-    }
 
     // ── 3. Read grant amount (server-side env only — no NEXT_PUBLIC_) ──────
     const creditAmount = parseInt(
@@ -77,7 +58,7 @@ export async function POST(request: Request) {
         initial_grant: creditAmount,
         welcome_credits_claimed_at: new Date().toISOString(),
       })
-      .eq("user_id", publicUser.id)
+      .eq("user_id", user.id)
       .is("welcome_credits_claimed_at", null) // idempotency guard
       .select("balance")
       .maybeSingle();

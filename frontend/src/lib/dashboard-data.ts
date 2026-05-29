@@ -67,11 +67,9 @@ export interface TripDay {
   suggestions?: DaySuggestion[];
 }
 
-export interface ChatMessage {
-  from: "ai" | "me";
-  t: string;
-  text: string;
-}
+// ChatMessage was moved to `@/hooks/useChat` and is now sourced from the
+// `messages` Supabase table. The old static `CHAT_HISTORY` constant has been
+// removed — ChatPanel renders live data via the `useChat` hook.
 
 export const TRIPS: Trip[] = [
   {
@@ -288,14 +286,6 @@ export const KYOTO_DAYS: TripDay[] = [
 ];
 
 export const DNA_TAGS = ["Slow traveler", "Culture-curious", "Energy-aware"];
-
-export const CHAT_HISTORY: ChatMessage[] = [
-  { from: "ai", t: "07:12", text: "Morning. Forecast says light rain until noon. Want me to dial today down?" },
-  { from: "me", t: "07:14", text: "Yeah I slept badly. Low energy please." },
-  { from: "ai", t: "07:14", text: "Got it. Replaced the Inari hike with Tofuku-ji's moss garden — covered approach, 1.5h. Pottery district stays. OK?" },
-  { from: "me", t: "07:15", text: "Perfect" },
-  { from: "ai", t: "07:15", text: "Updated. Dinner is still Pontocho — bring an umbrella. Check in around 6pm and I'll tweak if needed." },
-];
 
 export const TYPE_META: Record<string, { glyph: string; label: string }> = {
   culture: { glyph: "⛩", label: "Culture" },
