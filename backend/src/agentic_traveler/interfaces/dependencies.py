@@ -77,9 +77,32 @@ def verify_admin_key(x_admin_key: str = Header(default="")) -> None:
         raise HTTPException(status_code=403, detail="Unauthorized")
 
 
+_jwk_client: jwt.PyJWKClient | None = None
+
+def get_jwk_client() -> jwt.PyJWKClient:
+    """Initialize and return a globally cached PyJWKClient instance pointing to Supabase JWKS."""
+    global _jwk_client
+    if _jwk_client is None:
+        supabase_url = os.getenv("SUPABASE_URL", "")
+        if not supabase_url:
+            logger.error("SUPABASE_URL is not configured")
+            raise HTTPException(status_code=500, detail="Server Configuration Error")
+        
+        # Supabase API Gateway (Kong) requires an apikey header to authorize auth/v1/ routes
+        supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+        headers = {}
+        if supabase_key:
+            headers["apikey"] = supabase_key
+        
+        jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        logger.info("Initializing Supabase JWK client for asymmetric RS256 decoding at %s", jwks_url)
+        _jwk_client = jwt.PyJWKClient(jwks_url, cache_keys=True, max_cached_keys=16, headers=headers)
+    return _jwk_client
+
+
 def verify_supabase_jwt(authorization: str = Header(default="")) -> WebUserCtx:
     """
-    Verify a Supabase access token (HS256 signed with SUPABASE_JWT_SECRET) and
+    Verify a Supabase access token (RS256 dynamically verified via JWKS keys) and
     resolve it to a public.users row.
 
     Returns:
@@ -89,20 +112,35 @@ def verify_supabase_jwt(authorization: str = Header(default="")) -> WebUserCtx:
         401 — missing/invalid/expired token.
         403 — token valid but no matching users row (profile not provisioned).
     """
-    secret = os.getenv("SUPABASE_JWT_SECRET", "")
-    if not secret:
-        logger.error("SUPABASE_JWT_SECRET is not configured")
-        raise HTTPException(status_code=500, detail="Server Configuration Error")
-
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = authorization[len("Bearer "):].strip()
 
+    # Safely log the JWT unverified header and a secure truncated representation
+    try:
+        unverified_header = jwt.get_unverified_header(token)
+        truncated_token = f"{token[:15]}...{token[-15:]}" if len(token) > 30 else token
+        logger.debug(
+            "🔑 Debug JWT Info | Header: %s | Truncated Token: %s",
+            unverified_header,
+            truncated_token,
+        )
+    except Exception as exc:
+        logger.warning("Failed to extract unverified JWT header: %s", exc)
+
+    # Retrieve the correct public signing key dynamically from Supabase's JWKS
+    try:
+        jwk_client = get_jwk_client()
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
+    except Exception as exc:
+        logger.warning("Failed to resolve signing key from Supabase JWKS: %s", exc)
+        raise HTTPException(status_code=401, detail="Invalid token signing key")
+
     try:
         payload = jwt.decode(
             token,
-            secret,
-            algorithms=["HS256"],
+            signing_key.key,
+            algorithms=["RS256", "ES256"],
             audience="authenticated",
         )
     except jwt.ExpiredSignatureError:
