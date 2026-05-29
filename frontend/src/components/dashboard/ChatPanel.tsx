@@ -141,7 +141,7 @@ export function ChatStripIcons({ onExpand }: { onExpand: () => void }) {
   ];
 
   return (
-    <aside className="aletheia-card h-full w-14 flex flex-col items-center py-4 gap-2">
+    <aside className="aletheia-card is-solid h-full w-14 flex flex-col items-center py-4 gap-2">
       <button
         type="button"
         onClick={onExpand}
@@ -477,7 +477,7 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
         : "text-muted-foreground";
 
   return (
-    <aside className="aletheia-card h-full flex flex-col overflow-hidden">
+    <aside className="aletheia-card is-solid h-full flex flex-col overflow-hidden">
       <header className="px-4 py-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div

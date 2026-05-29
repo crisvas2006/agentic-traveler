@@ -232,14 +232,25 @@ body {
  * also not helping, since `contain` doesn't stop backdrop-filter resampling.
  */
 .aletheia-card {
-  background: color-mix(in oklab, var(--background) 82%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: color-mix(in oklab, var(--background) 70%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: 1.75rem;
   box-shadow:
     0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent) inset,
     0 30px 60px -30px color-mix(in oklab, var(--foreground) 25%, transparent);
+}
+
+/* Solid variant — opaque, no backdrop blur. Used by the chat panel, where
+ * the message text must stay fully legible (never show the map through it)
+ * and where the long scroll surface shouldn't pay a per-frame re-blur cost.
+ * Higher specificity than the mobile override below, so it stays opaque on
+ * every device. */
+.aletheia-card.is-solid {
+  background: var(--background);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* Mobile / touch devices: drop the live backdrop blur entirely and use a
