@@ -97,7 +97,9 @@ CREATE TABLE IF NOT EXISTS public.usage_tracking (
   total_input_tokens    bigint DEFAULT 0,
   total_output_tokens   bigint DEFAULT 0,
   call_count            integer DEFAULT 0,
-  grounded_prompt_count integer DEFAULT 0
+  grounded_prompt_count integer DEFAULT 0,
+  total_cost_credits    bigint DEFAULT 0,
+  CONSTRAINT usage_tracking_user_model_uniq UNIQUE (user_id, model_name)
 );
 
 
@@ -140,6 +142,7 @@ CREATE TABLE IF NOT EXISTS public.analytics_weekly (
   token_usage         jsonb   DEFAULT '{}',
   promo_redeemed      jsonb   DEFAULT '{}',
   grounding_calls     integer DEFAULT 0,
+  total_cost_credits  bigint  DEFAULT 0,
   flushed_at          timestamptz
 );
 
@@ -219,4 +222,50 @@ AS $$
     total_spent = total_spent + LEAST(balance, p_amount)
   WHERE user_id = p_user_id
   RETURNING balance;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- accumulate_user_usage  (RPC — called by the Python backend)
+-- Atomically increments input/output tokens, call count, grounded prompts, and cost credits.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.accumulate_user_usage(
+  p_user_id uuid,
+  p_model_name text,
+  p_input_tokens bigint,
+  p_output_tokens bigint,
+  p_is_grounded integer,
+  p_cost_credits bigint
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  INSERT INTO public.usage_tracking (
+    user_id,
+    model_name,
+    total_input_tokens,
+    total_output_tokens,
+    call_count,
+    grounded_prompt_count,
+    total_cost_credits
+  )
+  VALUES (
+    p_user_id,
+    p_model_name,
+    p_input_tokens,
+    p_output_tokens,
+    1,
+    p_is_grounded,
+    p_cost_credits
+  )
+  ON CONFLICT (user_id, model_name)
+  DO UPDATE SET
+    total_input_tokens  = public.usage_tracking.total_input_tokens + EXCLUDED.total_input_tokens,
+    total_output_tokens = public.usage_tracking.total_output_tokens + EXCLUDED.total_output_tokens,
+    call_count          = public.usage_tracking.call_count + 1,
+    grounded_prompt_count = public.usage_tracking.grounded_prompt_count + EXCLUDED.grounded_prompt_count,
+    total_cost_credits  = public.usage_tracking.total_cost_credits + EXCLUDED.total_cost_credits;
+END;
 $$;

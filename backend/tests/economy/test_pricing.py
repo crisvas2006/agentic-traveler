@@ -1,4 +1,3 @@
-import pytest
 from agentic_traveler.economy.credit_manager import calculate_cost
 
 def test_calculate_cost_gemini_3():
@@ -69,7 +68,7 @@ def test_calculate_cost_gemini_3_1_flash_lite():
     # 10,000 output tokens = $0.015
     # Total = $0.040
     # Total EUR = 0.040 * 0.90 = 0.036 EUR = 3.6 eurocents
-    # With markup (3x) = 10.8 -> ceil(10.8) = 11 credits
+    # With markup (5x) = 18.0 -> ceil(18.0) = 18 credits
     
     records = [
         {
@@ -80,5 +79,5 @@ def test_calculate_cost_gemini_3_1_flash_lite():
     ]
     
     credits = calculate_cost(records)
-    assert credits == 11
+    assert credits == 18
 

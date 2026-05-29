@@ -17,11 +17,37 @@ Supabase layout (``usage_tracking`` table):
 """
 
 import logging
-from typing import Any, Dict
+import uuid
+from typing import Any, Dict, Optional
 
 from agentic_traveler.economy import credit_manager as _credit_manager
+from agentic_traveler.tools.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_user_uuid(user_id_str: str) -> Optional[str]:
+    """
+    Resolve the internal user UUID from the provided ID string.
+    Works for both Web users (valid UUID) and Telegram users (telegram_id string).
+    """
+    if not user_id_str:
+        return None
+
+    # Check if already a valid UUID (Web User)
+    try:
+        uuid.UUID(user_id_str)
+        return user_id_str
+    except ValueError:
+        pass
+
+    # Otherwise treat as telegram_id string and resolve from DB
+    try:
+        user_repo = UserRepository()
+        return user_repo.get_user_ref_by_telegram_id(user_id_str)
+    except Exception:
+        logger.warning("Failed to resolve user UUID for telegram_id %s", user_id_str)
+        return None
 
 
 def log_and_accumulate(
@@ -71,9 +97,21 @@ def log_and_accumulate(
         input_tokens, output_tokens, total_tokens, latency_ms, grounding_used,
     )
 
-    # Accumulate in Supabase (the user_id here is the telegram_id string;
-    # accumulation is best-effort and non-blocking via the metrics buffer)
-    if total_tokens > 0:
+    # Calculate credit cost using credit_manager formulas
+    records = [{"model_name": model_name, "input_tokens": input_tokens, "output_tokens": output_tokens}]
+    if grounding_used:
+        records.append({
+            "model_name": "grounding",
+            "grounding_count": 1,
+            "grounding_cost_credits": grounding_cost_credits
+        })
+    cost_credits = _credit_manager.calculate_cost(records)
+
+    # Accumulate directly ONLY for system/background calls (like compaction)
+    # which do not go through agent._save_and_finish. User request turns
+    # are aggregated and saved at the turn level in agent.py.
+    if user_id == "system" and (total_tokens > 0 or grounding_used):
+        # 1. Weekly Global Summary buffer
         try:
             from agentic_traveler.analytics import metrics_tracker
             metrics_tracker.record_token_usage(
@@ -81,16 +119,17 @@ def log_and_accumulate(
                 model_name=model_name,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                total_cost_credits=cost_credits,
             )
         except Exception:
             logger.exception("Failed to record token usage in metrics_tracker.")
 
-    if grounding_used:
-        try:
-            from agentic_traveler.analytics import metrics_tracker
-            metrics_tracker.record_grounding_used()
-        except Exception:
-            logger.exception("Failed to record grounding metric.")
+        if grounding_used:
+            try:
+                from agentic_traveler.analytics import metrics_tracker
+                metrics_tracker.record_grounding_used()
+            except Exception:
+                logger.exception("Failed to record grounding metric.")
 
     return {
         "input_tokens": input_tokens,
@@ -99,6 +138,7 @@ def log_and_accumulate(
         "model_name": model_name,
         "grounding_used": grounding_used,
         "grounding_cost_credits": grounding_cost_credits,
+        "total_cost_credits": cost_credits,
     }
 
 

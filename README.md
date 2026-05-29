@@ -614,7 +614,7 @@ isort .
 - **Multi-Agent Orchestration**: Specialised agents for Discovery, Planning, and in-trip Companionship.
 - **Real-time Context Awareness**: Weather-aware suggestions and adaptive itineraries based on current mood and energy.
 - **Safety & Moderation**: Integrated off-topic guard and multi-layer webhook security.
-- **Usage & Metrics Tracking**: Weekly analytics flush to Firestore covering interactions, active users, and token costs.
+- **Usage & Metrics Tracking**: Real-time per-user LLM usage and estimated credit cost tracking (where `1 credit = 1 eurocent`) inside the Supabase `usage_tracking` table, alongside weekly global analytics rollups flushed to the `analytics_weekly` table.
 - **Interactive CLI & Webhook**: Support for both local development (CLI) and production Telegram bot interactions.
 - **Feedback Loop**: Integrated tool for capturing user sentiment to refine future suggestions.
 

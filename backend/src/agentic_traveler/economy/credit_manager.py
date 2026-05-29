@@ -212,7 +212,7 @@ def calculate_cost(token_records: List[Dict[str, Any]]) -> int:
     if not token_records:
         return 0
 
-    total_cost_usd = 0.0
+    total_token_credits_raw = 0.0
     any_tokens = False
     grounding_credits = 0
 
@@ -232,16 +232,16 @@ def calculate_cost(token_records: List[Dict[str, Any]]) -> int:
 
         any_tokens = True
         pricing = MODEL_PRICING.get(model, _DEFAULT_PRICING)
-        cost = (inp / 1_000_000 * pricing["input"]) + (
+        cost_usd = (inp / 1_000_000 * pricing["input"]) + (
             out / 1_000_000 * pricing["output"]
         )
-        total_cost_usd += cost
+        cost_eur = cost_usd * USD_TO_EUR_RATE
+        
+        # Determine markup multiplier: 5x for cheap lite models, 3x for others
+        markup = 5 if "lite" in model.lower() else 3
+        total_token_credits_raw += cost_eur * 100 * markup
 
-    token_credits = 0
-    if any_tokens:
-        total_cost_eur = total_cost_usd * USD_TO_EUR_RATE
-        token_credits = math.ceil(total_cost_eur * 100 * MARKUP_MULTIPLIER)
-
+    token_credits = math.ceil(round(total_token_credits_raw, 9)) if any_tokens else 0
     total_credits = token_credits + grounding_credits
 
     if not any_tokens and grounding_credits == 0:

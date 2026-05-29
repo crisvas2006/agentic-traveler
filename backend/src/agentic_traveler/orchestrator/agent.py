@@ -394,4 +394,82 @@ def _save_and_finish(
         if cost > 0:
             credit_manager.deduct_credits_async(user_id, cost)
 
+        # Group token records by model_name to aggregate tokens & grounding
+        by_model = {}
+        for rec in token_records:
+            model = rec.get("model_name")
+            if not model:
+                continue
+            if model not in by_model:
+                by_model[model] = {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "grounding_used": False,
+                    "grounding_count": 0,
+                    "grounding_cost_credits": 0,
+                }
+            by_model[model]["input_tokens"] += rec.get("input_tokens", 0)
+            by_model[model]["output_tokens"] += rec.get("output_tokens", 0)
+            if rec.get("grounding_used"):
+                by_model[model]["grounding_used"] = True
+                by_model[model]["grounding_count"] += rec.get("grounding_count", 1)
+                by_model[model]["grounding_cost_credits"] += rec.get("grounding_cost_credits", 0)
+
+        # For each model, calculate the exact aggregated cost for the turn and record it
+        for model_name, usage in by_model.items():
+            # Build list of records for this model to pass to calculate_cost
+            recs = [{
+                "model_name": model_name,
+                "input_tokens": usage["input_tokens"],
+                "output_tokens": usage["output_tokens"],
+            }]
+            if usage["grounding_used"]:
+                recs.append({
+                    "model_name": "grounding",
+                    "grounding_count": usage["grounding_count"],
+                    "grounding_cost_credits": usage["grounding_cost_credits"]
+                })
+            
+            # Calculate exact turn-level aggregated cost for this model
+            model_cost = credit_manager.calculate_cost(recs)
+            
+            # 1. Record in weekly global metrics_tracker
+            try:
+                metrics_tracker.record_token_usage(
+                    agent_name="orchestrator",
+                    model_name=model_name,
+                    input_tokens=usage["input_tokens"],
+                    output_tokens=usage["output_tokens"],
+                    total_cost_credits=model_cost,
+                )
+            except Exception:
+                logger.exception("Failed to record aggregated token usage in metrics_tracker.")
+
+            # Record grounding used globally if any
+            if usage["grounding_used"]:
+                try:
+                    metrics_tracker.record_grounding_used()
+                except Exception:
+                    logger.exception("Failed to record grounding metric in metrics_tracker.")
+
+            # 2. Record in per-user usage_tracking table
+            resolved_uuid = usage_tracker._resolve_user_uuid(telegram_user_id)
+            if resolved_uuid:
+                try:
+                    from agentic_traveler.tools.db_client import get_db
+                    get_db().rpc("accumulate_user_usage", {
+                        "p_user_id": resolved_uuid,
+                        "p_model_name": model_name,
+                        "p_input_tokens": usage["input_tokens"],
+                        "p_output_tokens": usage["output_tokens"],
+                        "p_is_grounded": 1 if usage["grounding_used"] else 0,
+                        "p_cost_credits": model_cost
+                    }).execute()
+                except Exception:
+                    logger.warning(
+                        "Telemetry warning: Failed to accumulate usage in usage_tracking table "
+                        "for user_id=%s model=%s. Bypassing.",
+                        resolved_uuid, model_name, exc_info=True
+                    )
+
     logger.info("⏱ TOTAL: %s", _elapsed(t_total))

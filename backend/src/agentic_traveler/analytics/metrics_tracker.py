@@ -90,6 +90,7 @@ def record_token_usage(
     model_name: str,
     input_tokens: int,
     output_tokens: int,
+    total_cost_credits: int = 0,
 ) -> None:
     """Record token usage from an LLM call (called by usage_tracker)."""
     global _event_count
@@ -99,10 +100,11 @@ def record_token_usage(
 
         safe_model = model_name.replace(".", "_").replace("/", "_")
         if safe_model not in _token_usage:
-            _token_usage[safe_model] = {"input": 0, "output": 0, "call_count": 0}
+            _token_usage[safe_model] = {"input": 0, "output": 0, "call_count": 0, "total_cost_credits": 0}
         _token_usage[safe_model]["input"] += input_tokens
         _token_usage[safe_model]["output"] += output_tokens
         _token_usage[safe_model]["call_count"] += 1
+        _token_usage[safe_model]["total_cost_credits"] += total_cost_credits
         _event_count += 1
         if _event_count >= FLUSH_THRESHOLD:
             _flush_locked()
@@ -228,13 +230,21 @@ def _write_to_supabase(snapshot: Dict[str, Any]) -> None:
         # Merge token_usage
         merged_token_usage = dict(existing.get("token_usage") or {})
         for model, tokens in snapshot["token_usage"].items():
-            existing_model = merged_token_usage.get(model, {"input": 0, "output": 0, "call_count": 0})
+            existing_model = merged_token_usage.get(model, {"input": 0, "output": 0, "call_count": 0, "total_cost_credits": 0})
             merged_token_usage[model] = {
                 "input": existing_model.get("input", 0) + tokens["input"],
                 "output": existing_model.get("output", 0) + tokens["output"],
                 "call_count": existing_model.get("call_count", 0) + tokens.get("call_count", 0),
+                "total_cost_credits": existing_model.get("total_cost_credits", 0) + tokens.get("total_cost_credits", 0),
             }
         merged["token_usage"] = merged_token_usage
+
+        # Sum total weekly cost from all models
+        total_cost_credits = sum(
+            model_data.get("total_cost_credits", 0)
+            for model_data in merged_token_usage.values()
+        )
+        merged["total_cost_credits"] = total_cost_credits
 
         # Merge promo_redeemed
         merged_promos = dict(existing.get("promo_redeemed") or {})
