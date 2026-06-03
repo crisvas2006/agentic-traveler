@@ -69,14 +69,14 @@ function Row({
       type="button"
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left group ${destructive
-          ? "hover:bg-rose-500/10 text-rose-500 dark:text-rose-400"
-          : "hover:bg-foreground/5 text-foreground"
+        ? "hover:bg-rose-500/10 text-rose-500 dark:text-rose-400"
+        : "hover:bg-foreground/5 text-foreground"
         }`}
     >
       <span
         className={`flex-shrink-0 ${destructive
-            ? "text-rose-500 dark:text-rose-400"
-            : "text-muted-foreground group-hover:text-foreground transition-colors"
+          ? "text-rose-500 dark:text-rose-400"
+          : "text-muted-foreground group-hover:text-foreground transition-colors"
           }`}
       >
         {icon}
@@ -135,12 +135,12 @@ function CreditsRow({ balance, initialGrant }: { balance: number; initialGrant: 
           </div>
           {critical && (
             <p className="text-[11px] text-rose-500 dark:text-rose-400 ml-7 mt-1.5">
-              Almost out — top up in account settings.
+              Top up in account settings.
             </p>
           )}
           {low && (
             <p className="text-[11px] text-amber-500 dark:text-amber-400 ml-7 mt-1.5">
-              Running low — top up when you can.
+              Running low. Top up when you can.
             </p>
           )}
         </>
@@ -271,6 +271,9 @@ export function ProfileDropdown({
     };
   }, [onClose, containerRef, excludeRef]);
 
+  const [showInfo, setShowInfo] = useState(false);
+  const [expandedTags, setExpandedTags] = useState(false);
+
   const handleSignOut = async () => {
     // POST to the route handler so the sign-out is server-side and cannot be
     // triggered via CSRF (a GET-based logout can be fired by any <img> tag).
@@ -278,7 +281,7 @@ export function ProfileDropdown({
     window.location.href = "/login";
   };
 
-  const hasDna = userProfile.dnaTags.length > 0;
+  const hasDna = userProfile.hasCompletedForm || userProfile.dnaTags.length > 0;
 
   return (
     <div
@@ -310,29 +313,83 @@ export function ProfileDropdown({
           {/* DNA tags or CTA */}
           <div className="mt-3">
             {hasDna ? (
-              <div className="flex flex-wrap gap-1.5">
-                {userProfile.dnaTags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold"
-                    style={{
-                      background: "color-mix(in oklab, var(--primary) 12%, transparent)",
-                      color: "var(--primary)",
-                      border: "1px solid color-mix(in oklab, var(--primary) 25%, transparent)",
-                    }}
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
+              userProfile.dnaTags.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {(expandedTags ? userProfile.dnaTags : userProfile.dnaTags.slice(0, 7)).map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                      style={{
+                        background: "color-mix(in oklab, var(--primary) 12%, transparent)",
+                        color: "var(--primary)",
+                        border: "1px solid color-mix(in oklab, var(--primary) 25%, transparent)",
+                      }}
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                  {userProfile.dnaTags.length > 7 && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedTags((v) => !v)}
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold transition hover:bg-foreground/5 text-primary hover:text-primary-active border border-dashed border-primary/30 cursor-pointer"
+                    >
+                      {expandedTags ? "Show less" : `+${userProfile.dnaTags.length - 7} more`}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground italic">
+                  Syncing Traveler DNA...
+                </span>
+              )
             ) : (
-              <button
-                type="button"
-                onClick={onClose}
-                className="text-xs font-semibold text-primary hover:underline"
-              >
-                Complete your Traveler DNA →
-              </button>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={userProfile.balance === 0}
+                    onClick={async () => {
+                      if (userProfile.balance === 0) return;
+                      onClose();
+                      try {
+                        const res = await fetch("/api/account/onboarding-link", { method: "POST" });
+                        const data = await res.json();
+                        if (data?.url) {
+                          window.open(data.url, "_blank");
+                        }
+                      } catch (err) {
+                        console.error("Failed to load onboarding link:", err);
+                      }
+                    }}
+                    className={`text-xs font-semibold ${userProfile.balance === 0
+                      ? "text-muted-foreground/50 cursor-not-allowed no-underline"
+                      : "text-primary hover:underline"
+                      }`}
+                  >
+                    Complete your Traveler DNA →
+                  </button>
+                  {userProfile.balance === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowInfo((v) => !v)}
+                      className="text-muted-foreground/60 hover:text-foreground inline-flex items-center focus:outline-none"
+                      title="Why is this disabled?"
+                    >
+                      <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4" />
+                        <path d="M12 8h.01" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {userProfile.balance === 0 && showInfo && (
+                  <p className="text-[10px] text-amber-500/90 leading-normal max-w-[240px] animate-fade-up">
+                    Taking the quiz requires active credits to map your Traveler DNA. Please top up your balance to proceed.
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </div>

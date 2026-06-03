@@ -140,57 +140,17 @@ def test_non_message_update_accepted(client):
 
 
 @patch.dict("os.environ", {"TELEGRAM_SECRET_TOKEN": "test-secret", "SKIP_IP_CHECK": "1"})
-@patch("agentic_traveler.interfaces.routers.telegram.edit_telegram_message")
 @patch("agentic_traveler.interfaces.routers.telegram.send_telegram_message")
-@patch("agentic_traveler.interfaces.routers.telegram.get_user_tool")
-@patch("agentic_traveler.tools.db_client.get_db")
-@patch("agentic_traveler.orchestrator.profile_agent.ProfileAgent")
-def test_start_with_submission_id(mock_profile_agent, mock_get_db, mock_tool, mock_send, mock_edit, client, start_update):
-    """/start <submissionId> links the user and sends welcome."""
-    mock_profile_agent.return_value.build_initial_profile.return_value = {
-        "greeting": "Hi Alice! Welcome aboard.",
-        "summary": "Adventure traveler",
-    }
-    mock_tool.return_value.link_telegram_user.return_value = ({"name": "Alice", "id": "uuid-1", "user_profile": {}}, True)
-
+def test_start_with_unsupported_submission_id(mock_send, client, start_update):
+    """/start <submissionId> (legacy/unsupported deep-link parameter) warns user and returns 200."""
     resp = client.post(
         "/webhook/test-secret",
         json=start_update,
         headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
     )
     assert resp.status_code == 200
-    mock_tool.return_value.link_telegram_user.assert_called_once_with("abc123", "67890")
-
-    assert mock_send.call_count >= 1
-    found_alice = any("Alice" in str(c) for c in mock_edit.call_args_list)
-    found_alice = found_alice or any("Alice" in str(c) for c in mock_send.call_args_list)
-    assert found_alice is True
-
-
-@patch.dict("os.environ", {"TELEGRAM_SECRET_TOKEN": "test-secret", "SKIP_IP_CHECK": "1"})
-@patch("agentic_traveler.interfaces.routers.telegram.send_telegram_message")
-@patch("agentic_traveler.interfaces.routers.telegram.get_user_tool")
-def test_start_unknown_submission(mock_tool, mock_send, client):
-    """/start with unknown submissionId → error message."""
-    mock_tool.return_value.link_telegram_user.return_value = (None, False)
-
-    update = {
-        "update_id": 1,
-        "message": {
-            "message_id": 1,
-            "chat": {"id": 123},
-            "from": {"id": 456},
-            "text": "/start unknown_id",
-            "date": 1700000000,
-        },
-    }
-    resp = client.post(
-        "/webhook/test-secret",
-        json=update,
-        headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
-    )
-    assert resp.status_code == 200
-    assert "completed the travel form" in mock_send.call_args[0][1].lower()
+    mock_send.assert_called_once()
+    assert "Invalid link parameter" in mock_send.call_args[0][1]
 
 
 # ── Regular Message Tests ──
@@ -245,20 +205,12 @@ def test_tally_webhook_unauthorized(client):
 
 @patch.dict("os.environ", {"TALLY_WEBHOOK_TOKEN": "test-tally-token"})
 @patch("agentic_traveler.interfaces.routers.tally.get_db")
-def test_tally_webhook_success(mock_get_db, client):
-    """Valid Tally submission upserts to users and user_profiles."""
-    mock_db = mock_get_db.return_value
-    mock_table = mock_db.table.return_value
-    mock_upsert = mock_table.upsert.return_value
-    mock_execute = mock_upsert.execute
-    
-    mock_execute.return_value.data = [{"id": "new-user-uuid"}]
-
+def test_tally_webhook_dropped_missing_token(mock_get_db, client):
+    """Submissions without idToken are ignored/dropped with 200 status."""
     tally_payload = {
         "data": {
             "responseId": "sub_123",
             "fields": [
-                {"key": "question_Ldg8Ep", "type": "SHORT_ANSWER", "value": "Alice"},
                 {"key": "question_1rxjbl", "type": "SHORT_ANSWER", "value": "Paris"},
                 {"key": "question_aByWrb", "type": "SHORT_ANSWER", "value": "Solo"}
             ]
@@ -272,17 +224,5 @@ def test_tally_webhook_success(mock_get_db, client):
     )
     
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
-
-    upsert_calls = mock_table.upsert.call_args_list
-    assert len(upsert_calls) == 2
-    
-    users_upsert_args = upsert_calls[0][0][0]
-    assert users_upsert_args["submission_id"] == "sub_123"
-    assert users_upsert_args["name"] == "Alice"
-    assert users_upsert_args["location"] == "Paris"
-    assert users_upsert_args["source"] == "tally"
-
-    profiles_upsert_args = upsert_calls[1][0][0]
-    assert profiles_upsert_args["user_id"] == "new-user-uuid"
-    assert profiles_upsert_args["form_response"]["travel_bubble"] == "Solo"
+    assert resp.json()["status"] == "dropped"
+    assert resp.json()["reason"] == "Missing idToken"

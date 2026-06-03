@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import time
@@ -10,7 +9,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from agentic_traveler.analytics import metrics_tracker
 from agentic_traveler.core.sanitize import sanitize_user_input, sanitize_telegram_markdown
-from agentic_traveler.economy import credit_manager
 from agentic_traveler.guards import off_topic_guard
 from agentic_traveler.interfaces.dependencies import (
     verify_telegram_ip,
@@ -27,6 +25,10 @@ router = APIRouter()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "").strip()
+if not FRONTEND_ORIGIN:
+    raise RuntimeError("Missing required environment variable: FRONTEND_ORIGIN")
 
 # ── rate limiting (in-memory, per-user) ──
 
@@ -241,126 +243,152 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
         send_telegram_message(chat_id, reply)
 
 
+def _handle_telegram_link(chat_id: int, telegram_id: str, token: str) -> None:
+    """Handle short UUID link token to associate Telegram account to web user.
+
+    Tokens are stored in public.link_tokens (UUID, 36 chars).
+    The full ?start= payload is "link_" + token = 41 bytes — inside Telegram's
+    64-byte hard cap for deep-link start parameters.
+    """
+    import uuid
+    from datetime import datetime, timezone, timedelta
+    from agentic_traveler.tools.db_client import get_db
+
+    # Validate that the token is a valid UUID to prevent PostgREST/PostgreSQL
+    # syntax errors (22P02) when querying link_tokens.
+    try:
+        uuid.UUID(token)
+    except ValueError:
+        logger.warning("Invalid UUID link token received in Telegram deep-link: %s", token)
+        send_telegram_message(
+            chat_id,
+            "❌ This link is invalid or has already been used. "
+            "Please generate a new one from your Account Settings on the web app.",
+        )
+        return
+
+    db = get_db()
+
+    # Look up the token (service role bypasses RLS).
+    result = (
+        db.table("link_tokens")
+        .select("user_id, expires_at")
+        .eq("token", token)
+        .maybe_single()
+        .execute()
+    )
+
+    if not result.data:
+        logger.warning("Telegram link token not found: %s", token)
+        send_telegram_message(
+            chat_id,
+            "❌ This link is invalid or has already been used. "
+            "Please generate a new one from your Account Settings on the web.",
+        )
+        return
+
+    row = result.data
+    expires_raw = row["expires_at"]
+    # Supabase returns ISO-8601 with timezone; normalise to aware datetime.
+    if expires_raw.endswith("Z"):
+        expires_raw = expires_raw[:-1] + "+00:00"
+    expires_at = datetime.fromisoformat(expires_raw)
+
+    if expires_at < datetime.now(timezone.utc):
+        # Clean up the expired row.
+        db.table("link_tokens").delete().eq("token", token).execute()
+        send_telegram_message(
+            chat_id,
+            "❌ This link has expired (links are valid for 10 minutes). "
+            "Please generate a new one from your Account Settings on the web.",
+        )
+        return
+
+    web_user_id = row["user_id"]
+
+    # Consume the token — single-use.
+    db.table("link_tokens").delete().eq("token", token).execute()
+
+    success, msg = get_user_tool().link_telegram_to_web_user(web_user_id, telegram_id)
+    send_telegram_message(chat_id, msg)
+
+    if success:
+        metrics_tracker.record_interaction(user_id=telegram_id, is_new_user=False)
+        
+        # Check if they have completed the form
+        try:
+            profile_res = db.table("user_profiles").select("form_response").eq("user_id", web_user_id).maybe_single().execute()
+            has_completed_form = False
+            if profile_res and profile_res.data:
+                form_resp = profile_res.data.get("form_response")
+                if form_resp and isinstance(form_resp, dict) and len(form_resp) > 0:
+                    has_completed_form = True
+
+            if not has_completed_form:
+                # Check for active tally_submission token
+                token_check = db.table("link_tokens").select("token, expires_at").eq("user_id", web_user_id).eq("kind", "tally_submission").execute()
+                has_active_token = False
+                id_token = None
+                if token_check and token_check.data:
+                    for r in token_check.data:
+                        exp_raw = r["expires_at"]
+                        if exp_raw.endswith("Z"):
+                            exp_raw = exp_raw[:-1] + "+00:00"
+                        if datetime.fromisoformat(exp_raw) >= datetime.now(timezone.utc):
+                            has_active_token = True
+                            id_token = r["token"]
+                            break
+
+                if not has_active_token:
+                    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+                    tally_token_res = db.table("link_tokens").insert({
+                        "user_id": web_user_id,
+                        "kind": "tally_submission",
+                        "expires_at": expires_at.isoformat()
+                    }).execute()
+                    if tally_token_res and tally_token_res.data:
+                        id_token = tally_token_res.data[0]["token"]
+
+                if id_token:
+                    onboarding_url = f"https://tally.so/r/ODPGak?idToken={id_token}"
+                    invitation_msg = (
+                        "💡 *A Thoughtful Recommendation for Your Travels*\n\n"
+                        "To help me provide highly personalized recommendations tailored to your traveler style, "
+                        "you might enjoy taking 3 minutes to fill out our onboarding questionnaire! It maps out your Traveler DNA.\n\n"
+                        "Here is your personalized link (valid for 7 days, and you can always generate a new one in website settings):\n"
+                        f"{onboarding_url}"
+                    )
+                    send_telegram_message(chat_id, invitation_msg)
+        except Exception:
+            logger.exception("Failed to check or generate onboarding link for newly-linked user %s", web_user_id)
+
+
 def _handle_start(chat_id: int, user_id: str, text: str) -> None:
     """Handle /start command — link Telegram user to Supabase profile."""
     parts = text.split(maxsplit=1)
     submission_id = parts[1].strip() if len(parts) > 1 else ""
 
+    if submission_id.startswith("link_"):
+        token = submission_id[5:]
+        _handle_telegram_link(chat_id, user_id, token)
+        return
+
     if not submission_id:
+        user_doc = get_user_tool().get_user_by_telegram_id(user_id)
+        name = user_doc.get("name", "Traveler") if user_doc else "Traveler"
         send_telegram_message(
             chat_id,
-            "👋 Welcome to TripGenie! To get started, please fill out "
-            "your travel profile:\nhttps://tally.so/r/ODPGak",
+            f"👋 Welcome back to *Aletheia Travel*, {name}!\n\n"
+            "How can I help you plan your next adventure today?",
         )
         return
 
-    logger.debug("Submission ID: %s, User ID: %s", submission_id, user_id)
-    user_doc, is_update = get_user_tool().link_telegram_user(submission_id, user_id)
-    if user_doc:
-        name = user_doc.get("name", user_doc.get("user_name", "Traveler"))
+    logger.warning("Unsupported or invalid deep-link start parameter received: %s (telegram_id: %s)", submission_id, user_id)
+    send_telegram_message(
+        chat_id,
+        "⚠️ Invalid link parameter. If you wanted to link your web account, please generate a link from settings inside the web app.",
+    )
 
-        placeholder_msg_id = send_telegram_message(chat_id, "⏳ Mapping your traveler DNA...")
-
-        try:
-            from agentic_traveler.orchestrator.profile_agent import ProfileAgent
-            profile_agent = ProfileAgent()
-
-            def _safe_serialize(obj):
-                if isinstance(obj, dict):
-                    return {k: _safe_serialize(v) for k, v in obj.items()}
-                if isinstance(obj, list):
-                    return [_safe_serialize(v) for v in obj]
-                try:
-                    json.dumps(obj)
-                    return obj
-                except (TypeError, ValueError):
-                    return str(obj)
-
-            form_response = user_doc.get("user_profile", {}).get("form_response", {})
-            if not form_response:
-                logger.warning(
-                    "user_profile.form_response is empty for user %s — profile may be incomplete.",
-                    user_id,
-                )
-
-            safe_form_data = _safe_serialize(form_response)
-            logger.info("Building profile from form_response with %d keys.", len(safe_form_data))
-
-            structured_data = profile_agent.build_initial_profile(
-                {"form_response": safe_form_data}
-            )
-            greeting = structured_data.pop("greeting", None)
-
-            user_uuid = user_doc.get("id")
-            if user_uuid:
-                get_user_tool().upsert_structured_profile(user_uuid, structured_data)
-
-            if not greeting:
-                greeting = f"Great to meet you, {name}! Your profile is mapped out and ready to go."
-
-            examples = (
-                "You can now ask me anything — try:\n"
-                "• \"Suggest me a 5-day trip in May\"\n"
-                "• \"I want a nature getaway under 800 EUR\"\n"
-                "• \"What do you know about me?\""
-            )
-
-            if is_update:
-                edit_telegram_message(
-                    chat_id, placeholder_msg_id,
-                    f"✅ Welcome back, {name}! Your profile was updated.",
-                )
-            else:
-                edit_telegram_message(
-                    chat_id, placeholder_msg_id,
-                    f"✅ Welcome, {name}! Your travel profile is linked.",
-                )
-
-            send_telegram_message(chat_id, f"_{greeting}_\n\n{examples}")
-
-            metrics_tracker.record_interaction(user_id=user_id, is_new_user=not is_update)
-
-            # Initialize credits for new users (user_uuid is the credits FK)
-            if not is_update and user_uuid:
-                credit_manager.initialize_credits(user_uuid)
-
-        except Exception:
-            logger.exception("Failed to build initial profile.")
-            if placeholder_msg_id:
-                edit_telegram_message(chat_id, placeholder_msg_id, "✅ Linked! Ready to chat.")
-            else:
-                send_telegram_message(chat_id, "✅ Linked! Ready to chat.")
-    else:
-        send_telegram_message(
-            chat_id,
-            "❌ I couldn't find a profile for that link. "
-            "Please make sure you've completed the travel form first:\n"
-            "https://tally.so/r/ODPGak",
-        )
-
-
-def _handle_promo(chat_id: int, user_id: str, text: str) -> None:
-    """Handle /promo <CODE> command — redeem a promo code via Telegram."""
-    parts = text.split(maxsplit=1)
-    code = parts[1].strip() if len(parts) > 1 else ""
-
-    if not code:
-        send_telegram_message(
-            chat_id,
-            "🎫 To redeem a promo code, send:\n/promo YOUR_CODE",
-        )
-        return
-
-    user_doc, user_uuid = get_user_tool().get_user_with_ref(user_id)
-    if not user_doc or not user_uuid:
-        send_telegram_message(
-            chat_id,
-            "❌ You need to complete your travel profile first before using a promo code.",
-        )
-        return
-
-    success, message, credits_added = credit_manager.redeem_promo(user_doc, user_uuid, code)
-    send_telegram_message(chat_id, message)
 
 
 # ── Webhook Route ──
@@ -399,6 +427,28 @@ async def telegram_webhook(
     if not chat_id or not user_id or not text:
         return {"ok": True}
 
+    # ── Unlinked/unregistered user guard ──
+    is_link_flow = False
+    if text.startswith("/start"):
+        parts = text.split(maxsplit=1)
+        param = parts[1].strip() if len(parts) > 1 else ""
+        if param.startswith("link_"):
+            is_link_flow = True
+
+    if not is_link_flow:
+        user_doc = get_user_tool().get_user_by_telegram_id(user_id)
+        if not user_doc:
+            msg = (
+                "👋 Welcome to Aletheia Travel\n\n"
+                "Visit our web app for more information:\n"
+                f" {FRONTEND_ORIGIN}\n\n"
+                "If you want to chat here please create an account first:\n"
+                f" {FRONTEND_ORIGIN}/sign-up\n\n"
+                "Then go to settings and find the option to link telegram to your account."
+            )
+            background_tasks.add_task(send_telegram_message, chat_id, msg)
+            return {"ok": True}
+
     if _is_rate_limited(user_id):
         send_telegram_message(
             chat_id,
@@ -409,9 +459,6 @@ async def telegram_webhook(
     if text.startswith("/start"):
         logger.info("Dispatching /start for user %s", user_id)
         background_tasks.add_task(_handle_start, chat_id, user_id, text)
-    elif text.startswith("/promo"):
-        logger.info("Dispatching /promo for user %s", user_id)
-        background_tasks.add_task(_handle_promo, chat_id, user_id, text)
     else:
         logger.info("Dispatching message for user %s: %s", user_id, text[:80])
         background_tasks.add_task(_process_message_bg, chat_id, user_id, text)

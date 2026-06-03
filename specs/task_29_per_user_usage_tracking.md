@@ -1,5 +1,7 @@
 # Task Spec: Per-User LLM Usage and Cost Tracking in Supabase
 
+**Status: 🔲 COMPLETED**
+
 - **Summary:** Implement real-time, per-user and per-model token usage logging and accumulation in the Supabase `usage_tracking` table. Every time an LLM call finishes, update the user's aggregate usage for that specific model.
 - **Background:** Cost management and usage tracking are critical for our unit economics. While we currently buffer and roll up global weekly metrics into the `analytics_weekly` table, our database schema defines a per-user `usage_tracking` table that is currently empty and unpopulated. We need to wire this table up to our active logging pipeline.
 - **Primary Owner:** Lead Developer

@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS public.usage_tracking (
   call_count            integer DEFAULT 0,
   grounded_prompt_count integer DEFAULT 0,
   total_cost_credits    bigint DEFAULT 0,
+  updated_at            timestamptz DEFAULT now(),
   CONSTRAINT usage_tracking_user_model_uniq UNIQUE (user_id, model_name)
 );
 
@@ -203,6 +204,34 @@ CREATE INDEX IF NOT EXISTS messages_body_tsv_idx
 
 
 -- ---------------------------------------------------------------------------
+-- link_tokens
+-- Short-lived one-time tokens that link a web account to a Telegram account.
+--
+-- Why not a JWT?  Telegram's ?start= deep-link parameter is hard-capped at
+-- 64 bytes.  A HS256 JWT is ~160 chars — it silently gets dropped.
+-- A UUID is 36 chars; with the "link_" prefix = 41 bytes. ✓
+--
+-- Flow:
+--   1. Frontend inserts a row (user_id = auth.uid()), gets back the UUID token.
+--   2. Frontend builds https://t.me/AletheiaTravelBot?start=link_<token>
+--   3. User opens that link → Telegram sends /start link_<token> to the bot.
+--   4. Backend looks up the token, checks expiry, links accounts, deletes row.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.link_tokens (
+  token      uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  expires_at timestamptz NOT NULL DEFAULT (now() + interval '10 minutes'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  kind       text        NOT NULL DEFAULT 'telegram_link' CHECK (kind IN ('telegram_link', 'tally_submission'))
+);
+
+-- Auto-purge: index on expires_at so a periodic vacuum or pg_cron can clean
+-- up rows cheaply; also used by the backend to spot-check expiry.
+CREATE INDEX IF NOT EXISTS link_tokens_expires_at_idx
+  ON public.link_tokens (expires_at);
+
+
+-- ---------------------------------------------------------------------------
 -- deduct_credits  (RPC — called by the Python backend)
 -- Atomically deducts credits, flooring at 0.
 -- Returns the new balance.
@@ -249,7 +278,8 @@ BEGIN
     total_output_tokens,
     call_count,
     grounded_prompt_count,
-    total_cost_credits
+    total_cost_credits,
+    updated_at
   )
   VALUES (
     p_user_id,
@@ -258,7 +288,8 @@ BEGIN
     p_output_tokens,
     1,
     p_is_grounded,
-    p_cost_credits
+    p_cost_credits,
+    now()
   )
   ON CONFLICT (user_id, model_name)
   DO UPDATE SET
@@ -266,6 +297,7 @@ BEGIN
     total_output_tokens = public.usage_tracking.total_output_tokens + EXCLUDED.total_output_tokens,
     call_count          = public.usage_tracking.call_count + 1,
     grounded_prompt_count = public.usage_tracking.grounded_prompt_count + EXCLUDED.grounded_prompt_count,
-    total_cost_credits  = public.usage_tracking.total_cost_credits + EXCLUDED.total_cost_credits;
+    total_cost_credits  = public.usage_tracking.total_cost_credits + EXCLUDED.total_cost_credits,
+    updated_at          = now();
 END;
 $$;

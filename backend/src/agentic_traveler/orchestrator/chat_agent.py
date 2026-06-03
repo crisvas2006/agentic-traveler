@@ -125,7 +125,6 @@ class ChatAgent:
                 contents=user_content,
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,
-                    temperature=0.8,
                     max_output_tokens=2000,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
                         maximum_remote_calls=3,

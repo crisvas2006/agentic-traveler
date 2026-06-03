@@ -9,5 +9,14 @@ export default async function SettingsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  return <AccountSettings />;
+  let botUsername = process.env.TELEGRAM_BOT_USERNAME || "";
+  if (!botUsername) {
+    throw new Error("Missing required environment variable: TELEGRAM_BOT_USERNAME");
+  }
+
+  if (botUsername.startsWith("@")) {
+    botUsername = botUsername.substring(1);
+  }
+
+  return <AccountSettings botUsername={botUsername} />;
 }

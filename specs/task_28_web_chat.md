@@ -1,6 +1,6 @@
 # Task 28: Web Chat — Persistent Messaging on the Dashboard
 
-**Status: 🔲 NOT STARTED**
+**Status: ✅ COMPLETED**
 
 > Bring the conversational experience from Telegram to the web dashboard.
 > Persist every individual message (web + Telegram) in a new, append-only

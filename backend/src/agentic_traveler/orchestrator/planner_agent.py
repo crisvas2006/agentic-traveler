@@ -134,7 +134,6 @@ class PlannerAgent:
                 contents=user_content,
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,
-                    temperature=0.7,
                     max_output_tokens=4500,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
                         maximum_remote_calls=8,  # raised from 3: full itinerary planning needs multiple searches + weather per day

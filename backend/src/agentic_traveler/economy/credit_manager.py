@@ -60,9 +60,7 @@ _DEFAULT_PRICING = {"input": 0.50, "output": 3.00}
 # Static hardcoded message for zero-credit users (no LLM call needed)
 CREDITS_EXHAUSTED_MSG = (
     "⚠️ You've used all your chat credits! You can still use the other features of the app.\n\n"
-    "To keep chatting, you can:\n"
-    "• Use a promo code: send /promo YOUR_CODE\n"
-    "• Contact us for more credits\n\n"
+    "To keep chatting, top up with credits or use a promo code in user settings in the web app.\n\n"
     "Thanks for using Agentic Traveler! 🌍"
 )
 
@@ -318,3 +316,146 @@ def redeem_promo(
     except Exception:
         logger.exception("Failed to redeem promo %s for user_id=%s", normalized, user_id)
         return False, "❌ Something went wrong applying the promo code. Please try again.", 0
+
+
+def record_usage_and_bill(
+    *,
+    user_id: str,
+    token_records: List[Dict[str, Any]],
+    default_agent_name: str = "agent",
+    run_async: bool = False,
+) -> int:
+    """
+    Consolidates credit billing calculation, atomic database deduction,
+    weekly metrics logging, and database usage telemetry updates.
+
+    Args:
+        user_id:            Database UUID or telegram ID.
+        token_records:      List of LLM usage records.
+        default_agent_name: Agent name fallback.
+        run_async:          Deduct credits asynchronously if True.
+
+    Returns:
+        Total credits deducted.
+    """
+    if not token_records or not user_id:
+        return 0
+
+    from agentic_traveler.analytics import usage_tracker
+    resolved_uuid = usage_tracker._resolve_user_uuid(user_id)
+    if not resolved_uuid:
+        logger.warning("record_usage_and_bill: Could not resolve user UUID for %s", user_id)
+        return 0
+
+    # 1. Calculate combined total credit cost and deduct
+    total_cost = calculate_cost(token_records)
+    if total_cost > 0:
+        if run_async:
+            deduct_credits_async(resolved_uuid, total_cost)
+        else:
+            deduct_credits(resolved_uuid, total_cost)
+
+    # 2. Distribute costs proportionally among non-grounding records
+    raw_records = []
+    for rec in token_records:
+        if rec.get("model_name") == "grounding":
+            raw_records.append(rec.get("grounding_cost_credits", 0))
+        else:
+            raw_records.append(calculate_cost([rec]))
+    total_raw = sum(raw_records)
+
+    non_grounding_recs = [
+        (idx, rec) for idx, rec in enumerate(token_records)
+        if rec.get("model_name") != "grounding"
+    ]
+
+    share_costs = {}
+    if non_grounding_recs:
+        for list_idx, (idx, rec) in enumerate(non_grounding_recs):
+            share_cost = 0
+            if total_raw > 0:
+                share_cost = int(total_cost * raw_records[idx] / total_raw)
+                if list_idx == len(non_grounding_recs) - 1:
+                    share_cost = total_cost - sum(share_costs.values())
+            share_costs[idx] = share_cost
+
+    # 3. Record global weekly metrics and telemetry
+    from agentic_traveler.analytics import metrics_tracker
+    by_agent_model = {}
+    for idx, rec in enumerate(token_records):
+        model = rec.get("model_name")
+        if model == "grounding":
+            try:
+                metrics_tracker.record_grounding_used()
+            except Exception:
+                logger.exception("Failed to record grounding metric in metrics_tracker.")
+            continue
+
+        rec_agent_name = rec.get("agent_name") or default_agent_name
+        key = (rec_agent_name, model)
+        if key not in by_agent_model:
+            by_agent_model[key] = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_credits": 0,
+            }
+        by_agent_model[key]["input_tokens"] += rec.get("input_tokens", 0)
+        by_agent_model[key]["output_tokens"] += rec.get("output_tokens", 0)
+        by_agent_model[key]["cost_credits"] += share_costs.get(idx, 0)
+
+    for (rec_agent_name, model), usage in by_agent_model.items():
+        try:
+            metrics_tracker.record_token_usage(
+                agent_name=rec_agent_name,
+                model_name=model,
+                input_tokens=usage["input_tokens"],
+                output_tokens=usage["output_tokens"],
+                total_cost_credits=usage["cost_credits"],
+            )
+        except Exception:
+            logger.exception("Failed to record token usage in metrics_tracker.")
+
+    # 4. Group by model and record weekly per-user database telemetry
+    by_model = {}
+    for rec in token_records:
+        model = rec.get("model_name")
+        if not model or model == "grounding":
+            continue
+        if model not in by_model:
+            by_model[model] = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "grounding_used": False,
+            }
+        by_model[model]["input_tokens"] += rec.get("input_tokens", 0)
+        by_model[model]["output_tokens"] += rec.get("output_tokens", 0)
+        if rec.get("grounding_used"):
+            by_model[model]["grounding_used"] = True
+
+    model_share_costs = {}
+    for idx, rec in enumerate(token_records):
+        model = rec.get("model_name")
+        if not model or model == "grounding":
+            continue
+        model_share_costs[model] = model_share_costs.get(model, 0) + share_costs.get(idx, 0)
+
+    from agentic_traveler.tools.db_client import get_db
+    for model, usage in by_model.items():
+        try:
+            get_db().rpc("accumulate_user_usage", {
+                "p_user_id": resolved_uuid,
+                "p_model_name": model,
+                "p_input_tokens": usage["input_tokens"],
+                "p_output_tokens": usage["output_tokens"],
+                "p_is_grounded": 1 if usage["grounding_used"] else 0,
+                "p_cost_credits": model_share_costs.get(model, 0)
+            }).execute()
+        except Exception:
+            logger.warning(
+                "Telemetry warning: Failed to accumulate usage in usage_tracking table "
+                "for user_id=%s model=%s.",
+                resolved_uuid, model, exc_info=True
+            )
+
+    return total_cost
+

@@ -19,7 +19,7 @@ from google import genai
 from google.genai import types
 
 from agentic_traveler.orchestrator.client_factory import get_client
-from agentic_traveler.orchestrator.preference_learner import PreferenceLearner
+from agentic_traveler.orchestrator.profile_agent import ProfileAgent
 from agentic_traveler.tools.feedback_tool import FeedbackTool
 from agentic_traveler.economy import credit_manager
 
@@ -30,8 +30,7 @@ _SYSTEM_PROMPT = """\
 You are the intent router for Agentic Traveler, a travel companion chatbot.
 
 Your job: classify the user's message into exactly one intent and extract
-the core request. You do NOT generate the final response — a specialized
-agent handles that — EXCEPT for OFF_TOPIC messages, where you provide
+the core request. You do NOT generate the final response EXCEPT for OFF_TOPIC messages, where you provide
 a natural, friendly redirection yourself in the same language as the user.
 
 INTENTS:
@@ -55,18 +54,16 @@ INTENTS:
   Examples: "plan my 5-day trip to Rome", "make me an itinerary for
   Lombok", "organize my week in Tokyo", "help me plan day by day"
 
-• OFF_TOPIC — The message is clearly unrelated to travel AND is not
+• OFF_TOPIC — The last user message is clearly unrelated to travel AND is not
   casual/fun conversation. Math homework, coding questions, politics, etc.
   BE LENIENT: jokes, banter, personal stories, and life advice are CHAT,
   not OFF_TOPIC.
   When you classify OFF_TOPIC, generate a short, warm, natural redirection
   in the "response" field. Don't be robotic — redirect like a friend would.
 
-Classify the intent. If the user's message warrants it, call the appropriate tool AND still classify the intent.
+Classify the intent. If the user's message warrants calling a tool, call the appropriate tool AND still classify the intent.
 
-CRITICAL: Do NOT call update_preferences if the preference is already listed below in your prompt!
-
-CRITICAL: The record_feedback tool is ONLY for when the user is explicitly talking ABOUT THE BOT ITSELF (e.g. "you are a great bot", "this app sucks", "add a dark mode").
+CRITICAL: The record_feedback tool is ONLY for the current message and if the user is explicitly talking ABOUT THE BOT ITSELF (e.g. "you are a great bot", "this app sucks", "add a dark mode").
 Do NOT use it for travel questions, personal statements, frustration with travel, testing, or random gibberish. If you are not 100% sure it is app feedback, DO NOT call it.
 
 CRITICAL: Call get_my_credits ONLY when the current message explicitly asks about credits or balance. Do NOT call it proactively or because credits were mentioned earlier.
@@ -95,7 +92,7 @@ class RouterAgent:
 
     def __init__(self, client: Optional[genai.Client] = None):
         self._client = client or get_client()
-        self._preference_learner = PreferenceLearner()
+        self._profile_agent = ProfileAgent()
         self._feedback_tool = FeedbackTool()
 
     def classify(
@@ -107,6 +104,7 @@ class RouterAgent:
         user_name: str,
         current_time: str,
         conversation_context: str = "",
+        token_records: Optional[list] = None,
     ) -> Dict[str, Any]:
         """
         Classify user intent and handle lightweight tool calls.
@@ -127,7 +125,7 @@ class RouterAgent:
             Persist a NEWLY learned or CHANGED user preference to their profile.
 
             Call this when the user's CURRENT message reveals a new personal preference
-            or changes an existing one (e.g. budget, travel style, dietary needs, tone).
+            or changes an existing one (e.g. related to budget, travel style, dietary needs, tone).
             
             CRITICAL: DO NOT call this tool for preferences that are already known and 
             listed in your system prompt (e.g. if the prompt says 'Tone preference: intense', 
@@ -143,9 +141,10 @@ class RouterAgent:
             """
             logger.info("🔧 Router tool: update_preferences(%s=%s)", preference_key, preference_value)
             if user_id:
-                self._preference_learner.save_preference(
+                self._profile_agent.save_preference(
                     preference_key, preference_value,
                     user_doc, user_id,
+                    # Do not pass token_records so it executes asynchronously
                 )
             return f"Noted: {preference_key} = {preference_value}"
 
@@ -195,18 +194,17 @@ class RouterAgent:
                 f"Credits are used for AI-powered features like destination discovery, "
                 f"itinerary planning, and weather checks. "
                 f"Each interaction costs 1 or more credits depending on complexity. "
-                f"You can top up with a promo code via /promo YOUR_CODE."
+                f"You can top up with credits or use a promo code in your web app user settings."
             )
 
         _ = telegram_user_id  # referenced by outer scope, avoids lint warning
 
         # ── execution ────────────────────────────────────────────────────────
 
-        profile_data = user_doc.get("user_profile", {})
-        known_prefs_dict = {k: v for k, v in profile_data.items() if isinstance(v, (str, int, bool))}
+        from agentic_traveler.orchestrator.profile_utils import build_profile_summary
+        known_prefs = build_profile_summary(user_doc, include_scores=False, include_summary=True)
         if user_doc.get("language"):
-            known_prefs_dict["language"] = user_doc.get("language")
-        known_prefs = ", ".join(f"{k}: {v}" for k, v in known_prefs_dict.items())
+            known_prefs += f"\nLanguage: {user_doc.get('language')}"
         if not known_prefs:
             known_prefs = "None"
 
@@ -224,7 +222,6 @@ class RouterAgent:
                 contents=message,
                 config=types.GenerateContentConfig(
                     system_instruction=system,
-                    temperature=0.1,
                     max_output_tokens=256,
                     response_mime_type="application/json",
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(

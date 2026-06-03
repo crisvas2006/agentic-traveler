@@ -48,7 +48,9 @@ interface SettingsData {
   createdAt: string | null;
   lastSignIn: string | null;
   provider: string; // "google" | "email" | …
+  telegramLinked: boolean;
   loading: boolean;
+  hasCompletedForm: boolean;
 }
 
 function deriveInitials(name: string): string {
@@ -413,6 +415,8 @@ function ProfileSection({
   data: SettingsData;
   onNameSave: (n: string) => Promise<void>;
 }) {
+  const [showInfo, setShowInfo] = useState(false);
+
   return (
     <section className="aletheia-card p-7">
       <SectionHeader
@@ -460,35 +464,114 @@ function ProfileSection({
       <div className="mt-7 pt-6 border-t border-border">
         <div className="flex items-center justify-between mb-4">
           <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground">Traveler DNA</div>
-          {data.dnaTags.length > 0 && (
-            <a href="#" className="text-xs font-semibold text-primary hover:underline inline-flex items-center gap-1">
-              Re-take quiz <ChevronRightIcon width={12} height={12} />
-            </a>
+          {(data.hasCompletedForm || data.dnaTags.length > 0) && (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={data.balance === 0}
+                onClick={async () => {
+                  if (data.balance === 0) return;
+                  try {
+                    const res = await fetch("/api/account/onboarding-link", { method: "POST" });
+                    const d = await res.json();
+                    if (d?.url) {
+                      window.open(d.url, "_blank");
+                    }
+                  } catch (err) {
+                    console.error("Failed to load onboarding link:", err);
+                  }
+                }}
+                className={`text-xs font-semibold inline-flex items-center gap-1 ${data.balance === 0
+                    ? "text-muted-foreground/50 cursor-not-allowed no-underline"
+                    : "text-primary hover:underline"
+                  }`}
+              >
+                Re-take quiz <ChevronRightIcon width={12} height={12} />
+              </button>
+              {data.balance === 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowInfo((v) => !v)}
+                  className="text-muted-foreground/60 hover:text-foreground inline-flex items-center focus:outline-none"
+                  title="Why is this disabled?"
+                >
+                  <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                  </svg>
+                </button>
+              )}
+            </div>
           )}
         </div>
-        {data.dnaTags.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {data.dnaTags.map((t) => (
-              <span
-                key={t}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold"
-                style={{
-                  background: "color-mix(in oklab, var(--primary) 14%, transparent)",
-                  border: "1px solid color-mix(in oklab, var(--primary) 35%, transparent)",
-                }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-                {t}
-              </span>
-            ))}
-          </div>
+        {(data.hasCompletedForm || data.dnaTags.length > 0) ? (
+          data.dnaTags.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {data.dnaTags.map((t) => (
+                <span
+                  key={t}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold"
+                  style={{
+                    background: "color-mix(in oklab, var(--primary) 14%, transparent)",
+                    border: "1px solid color-mix(in oklab, var(--primary) 35%, transparent)",
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                  {t}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground italic">
+              Form submitted! Syncing your Traveler DNA...
+            </p>
+          )
         ) : (
           <p className="text-sm text-muted-foreground italic">
             No DNA tags yet —{" "}
-            <a href="#" className="text-primary font-semibold not-italic hover:underline">
+            <button
+              type="button"
+              disabled={data.balance === 0}
+              onClick={async () => {
+                if (data.balance === 0) return;
+                try {
+                  const res = await fetch("/api/account/onboarding-link", { method: "POST" });
+                  const d = await res.json();
+                  if (d?.url) {
+                    window.open(d.url, "_blank");
+                  }
+                } catch (err) {
+                  console.error("Failed to load onboarding link:", err);
+                }
+              }}
+              className={`font-semibold not-italic ${data.balance === 0
+                  ? "text-muted-foreground/50 cursor-not-allowed no-underline"
+                  : "text-primary hover:underline"
+                }`}
+            >
               complete the onboarding quiz
-            </a>
+            </button>
+            {data.balance === 0 && (
+              <button
+                type="button"
+                onClick={() => setShowInfo((v) => !v)}
+                className="ml-1 text-muted-foreground/60 hover:text-foreground inline-flex items-center focus:outline-none"
+                title="Why is this disabled?"
+              >
+                <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="inline">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 16v-4" />
+                  <path d="M12 8h.01" />
+                </svg>
+              </button>
+            )}
             .
+          </p>
+        )}
+        {data.balance === 0 && showInfo && (
+          <p className="mt-3 text-xs text-amber-500/90 leading-normal max-w-md animate-fade-up">
+            Taking the quiz requires active credits to map your Traveler DNA. Please top up your balance to proceed.
           </p>
         )}
       </div>
@@ -648,8 +731,29 @@ function AccountInfoSection({ data }: { data: SettingsData }) {
 }
 
 /* ── Security ───────────────────────────────────────────────────────── */
-function SecuritySection({ data }: { data: SettingsData }) {
+function SecuritySection({
+  data,
+  linkingTelegram,
+  onLinkTelegram,
+  botUsername,
+  isPollingTelegram,
+  linkToken,
+}: {
+  data: SettingsData;
+  linkingTelegram: boolean;
+  onLinkTelegram: () => void;
+  botUsername: string;
+  isPollingTelegram: boolean;
+  linkToken: string;
+}) {
   const isGoogle = data.provider === "google";
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(`/start link_${linkToken}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <section className="aletheia-card p-7">
@@ -710,6 +814,93 @@ function SecuritySection({ data }: { data: SettingsData }) {
               : "••••••••••••"}
           </span>
         </FieldRow>
+
+        <FieldRow
+          label="Telegram Integration"
+          action={
+            data.telegramLinked ? (
+              <div className="flex items-center gap-3">
+                <span
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20"
+                >
+                  <CheckIcon width={13} height={13} />
+                  Linked
+                </span>
+                <a
+                  href={`https://t.me/${botUsername}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                >
+                  Open chat
+                  <ChevronRightIcon width={12} height={12} />
+                </a>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onLinkTelegram}
+                disabled={linkingTelegram}
+                className="h-9 px-4 rounded-full text-sm font-semibold inline-flex items-center gap-1.5 transition hover:-translate-y-px"
+                style={{
+                  background: "color-mix(in oklab, var(--primary) 10%, transparent)",
+                  border: "1px solid color-mix(in oklab, var(--primary) 30%, transparent)",
+                  color: "var(--primary)",
+                }}
+              >
+                {linkingTelegram ? (
+                  <>
+                    <span className="w-3 h-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                    Connecting…
+                  </>
+                ) : (
+                  "Link Telegram"
+                )}
+              </button>
+            )
+          }
+        >
+          {data.telegramLinked ? (
+            <span className="text-foreground">Connected to Telegram bot</span>
+          ) : (
+            <span className="text-muted-foreground italic">Link your Telegram account</span>
+          )}
+        </FieldRow>
+
+        {isPollingTelegram && linkToken && (
+          <div
+            className="mt-4 p-4 rounded-xl text-sm space-y-3 border transition-all animate-fade-up"
+            style={{
+              background: "color-mix(in oklab, var(--primary) 4%, transparent)",
+              borderColor: "color-mix(in oklab, var(--primary) 20%, transparent)",
+            }}
+          >
+            <div className="font-bold flex items-center gap-2 text-primary">
+              <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+              Waiting for Telegram connection...
+            </div>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              If the Telegram app did not open automatically, you can link manually:
+            </p>
+            <ol className="list-decimal list-inside space-y-1.5 text-xs text-muted-foreground">
+              <li>Open your Telegram app (on phone or web).</li>
+              <li>Search for <span className="font-semibold text-foreground">@{botUsername}</span>.</li>
+              <li>Send this command to the bot chat:</li>
+            </ol>
+            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-background border border-border mt-1">
+              <code className="text-xs font-mono select-all truncate flex-1 text-foreground">
+                /start link_{linkToken}
+              </code>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="h-8 px-3 rounded-md text-[11px] font-semibold transition bg-primary text-white hover:bg-primary-hover flex-shrink-0"
+              >
+                {copied ? "Copied!" : "Copy command"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -807,8 +998,8 @@ function MiscSection() {
                   type="button"
                   disabled={!lang.enabled}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold transition ${isSelected
-                      ? ""
-                      : "opacity-50 cursor-not-allowed"
+                    ? ""
+                    : "opacity-50 cursor-not-allowed"
                     }`}
                   title={lang.enabled ? "" : "Coming soon"}
                   style={
@@ -999,55 +1190,112 @@ function SettingsNav() {
 }
 
 /* ── Root component ─────────────────────────────────────────────────── */
-export function AccountSettings() {
+export function AccountSettings({ botUsername }: { botUsername: string }) {
   const [data, setData] = useState<SettingsData>({
     name: "", email: "", initials: "…", dnaTags: [],
     balance: 0, totalSpent: 0, firstClaimed: null,
     createdAt: null, lastSignIn: null, provider: "",
-    loading: true,
+    telegramLinked: false, loading: true, hasCompletedForm: false,
   });
+
+  const [linkingTelegram, setLinkingTelegram] = useState(false);
+  const [isPollingTelegram, setIsPollingTelegram] = useState(false);
+  const [linkToken, setLinkToken] = useState("");
 
   // Load all settings data client-side
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const supabase = createClient();
+      try {
+        const supabase = createClient();
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || cancelled) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || cancelled) return;
 
-      const email = user.email ?? "";
-      const provider = (user.app_metadata?.provider as string) ?? "email";
-      const lastSignIn = fmtDateTime(user.last_sign_in_at);
+        const email = user.email ?? "";
+        const provider = (user.app_metadata?.provider as string) ?? "email";
+        const lastSignIn = fmtDateTime(user.last_sign_in_at);
 
-      const [usersResult, creditsResult] = await Promise.all([
-        supabase.from("users").select("name, created_at, user_profiles(profile_data)").maybeSingle(),
-        supabase.from("credits").select("balance, total_spent, welcome_credits_claimed_at").maybeSingle(),
-      ]);
+        const [usersResult, creditsResult] = await Promise.all([
+          supabase.from("users").select("name, telegram_id, created_at, user_profiles(profile_data, form_response, summary)").maybeSingle(),
+          supabase.from("credits").select("balance, total_spent, welcome_credits_claimed_at").maybeSingle(),
+        ]);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      const profileRows = usersResult.data?.user_profiles as Array<{ profile_data: { tags?: string[] } | null }> | null;
-      const name = usersResult.data?.name || email.split("@")[0] || "Traveler";
-      const dnaTags = profileRows?.[0]?.profile_data?.tags ?? [];
-      const cred = creditsResult.data;
+        const rawProfile = usersResult.data?.user_profiles;
+        const profileRow = (Array.isArray(rawProfile) ? rawProfile[0] : rawProfile) as {
+          profile_data: { tags?: string[] } | null;
+          form_response: any;
+          summary: string | null;
+        } | null;
+        const name = usersResult.data?.name || email.split("@")[0] || "Traveler";
+        const dnaTags = profileRow?.profile_data?.tags ?? [];
+        const cred = creditsResult.data;
 
-      setData({
-        name,
-        email,
-        initials: deriveInitials(name),
-        dnaTags,
-        balance: cred?.balance ?? 0,
-        totalSpent: cred?.total_spent ?? 0,
-        firstClaimed: fmtDate(cred?.welcome_credits_claimed_at),
-        createdAt: fmtDate(usersResult.data?.created_at),
-        lastSignIn,
-        provider,
-        loading: false,
-      });
+        const formResponse = profileRow?.form_response || null;
+        const hasCompletedForm =
+          formResponse != null &&
+          typeof formResponse === "object" &&
+          Object.keys(formResponse).length > 0;
+
+        setData({
+          name,
+          email,
+          initials: deriveInitials(name),
+          dnaTags,
+          balance: cred?.balance ?? 0,
+          totalSpent: cred?.total_spent ?? 0,
+          firstClaimed: fmtDate(cred?.welcome_credits_claimed_at),
+          createdAt: fmtDate(usersResult.data?.created_at),
+          lastSignIn,
+          provider,
+          telegramLinked: !!usersResult.data?.telegram_id,
+          loading: false,
+          hasCompletedForm,
+        });
+      } catch (err) {
+        console.error("[AccountSettings] unhandled exception during load:", err);
+        if (!cancelled) {
+          setData((d) => ({ ...d, loading: false }));
+        }
+      }
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Ephemeral polling to detect successful Telegram linking (starts only when redirected)
+  useEffect(() => {
+    if (!isPollingTelegram) return;
+
+    let cancelled = false;
+    const checkLink = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+
+      const { data: userData } = await supabase
+        .from("users")
+        .select("telegram_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (userData?.telegram_id) {
+        setData((d) => ({ ...d, telegramLinked: true }));
+        setIsPollingTelegram(false);
+      }
+    };
+
+    checkLink();
+    const interval = setInterval(checkLink, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isPollingTelegram]);
 
   // Name save — UPDATE users table
   const handleNameSave = useCallback(async (newName: string) => {
@@ -1055,6 +1303,27 @@ export function AccountSettings() {
     // After Task 36: users.id IS the auth UUID — direct equality, no auth_id column.
     const { error } = await supabase.from("users").update({ name: newName }).eq("id", (await supabase.auth.getUser()).data.user?.id ?? "");
     if (!error) setData((d) => ({ ...d, name: newName, initials: deriveInitials(newName) }));
+  }, []);
+
+  // Telegram Link handler
+  const handleLinkTelegram = useCallback(async () => {
+    setLinkingTelegram(true);
+    try {
+      const res = await fetch("/api/account/telegram-link", { method: "POST" });
+      const json = await res.json();
+      if (res.ok && json.launchUrl) {
+        setLinkToken(json.token);
+        window.open(json.launchUrl, "_blank");
+        setIsPollingTelegram(true);
+      } else {
+        alert(json.error ?? "Failed to initiate Telegram link.");
+      }
+    } catch (err) {
+      console.error("Failed to link Telegram:", err);
+      alert("Network error. Please try again.");
+    } finally {
+      setLinkingTelegram(false);
+    }
   }, []);
 
   // Promo code success — bump balance optimistically
@@ -1103,7 +1372,7 @@ export function AccountSettings() {
             <ProfileSection data={data} onNameSave={handleNameSave} />
             <CreditsSection data={data} onPromoSuccess={handlePromoSuccess} />
             <AccountInfoSection data={data} />
-            <SecuritySection data={data} />
+            <SecuritySection data={data} linkingTelegram={linkingTelegram} onLinkTelegram={handleLinkTelegram} botUsername={botUsername} isPollingTelegram={isPollingTelegram} linkToken={linkToken} />
             <MiscSection />
             <DangerSection />
           </div>

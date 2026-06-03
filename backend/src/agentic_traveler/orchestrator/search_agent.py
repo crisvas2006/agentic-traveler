@@ -75,7 +75,6 @@ class SearchAgent:
                 contents=f"Format: {format}\n\nQuery: {query}",
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,
-                    temperature=0.2,
                     max_output_tokens=3500,
                     tools=[types.Tool(google_search=types.GoogleSearch())],
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(

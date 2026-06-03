@@ -86,6 +86,8 @@ async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_s
     if not reply_text:
         reply_text = "I had trouble coming up with a response just now. Please try again."
 
+
+
     # 3. Persist the agent reply.
     try:
         agent_row = repo.append_agent_message(

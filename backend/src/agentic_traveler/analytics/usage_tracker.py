@@ -136,6 +136,7 @@ def log_and_accumulate(
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "model_name": model_name,
+        "agent_name": agent_name,
         "grounding_used": grounding_used,
         "grounding_cost_credits": grounding_cost_credits,
         "total_cost_credits": cost_credits,

@@ -131,7 +131,6 @@ class TripAgent:
                 contents=user_content,
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,
-                    temperature=0.7,
                     max_output_tokens=3500,
                     thinking_config=types.ThinkingConfig(
                         thinking_budget=512,  # tokens

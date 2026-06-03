@@ -8,6 +8,9 @@ export interface UserProfile {
   email: string;
   initials: string;
   dnaTags: string[];
+  formResponse: any;
+  summary: string;
+  hasCompletedForm: boolean;
   balance: number;
   initialGrant: number;
   /** null = not yet claimed → may show modal. undefined = fetch failed/unknown → never show modal. */
@@ -22,6 +25,9 @@ const EMPTY: UserProfile = {
   email: "",
   initials: "…",
   dnaTags: [],
+  formResponse: null,
+  summary: "",
+  hasCompletedForm: false,
   balance: 0,
   initialGrant: 0,
   welcomeClaimedAt: undefined, // unknown until loaded
@@ -69,7 +75,7 @@ export function useUserProfile(): UserProfile {
       const [usersResult, creditsResult] = await Promise.all([
         supabase
           .from("users")
-          .select("name, user_profiles ( profile_data )")
+          .select("name, user_profiles ( profile_data, form_response, summary )")
           .maybeSingle(),
         supabase
           .from("credits")
@@ -91,10 +97,12 @@ export function useUserProfile(): UserProfile {
         return;
       }
 
-      const profileRows = usersResult.data.user_profiles as
-        | Array<{ profile_data: { tags?: string[] } | null }>
-        | null;
-      const profileRow = profileRows?.[0];
+      const rawProfile = usersResult.data.user_profiles;
+      const profileRow = (Array.isArray(rawProfile) ? rawProfile[0] : rawProfile) as {
+        profile_data: { tags?: string[] } | null;
+        form_response: any;
+        summary: string | null;
+      } | null;
       const name = usersResult.data.name || email.split("@")[0] || "Traveler";
 
       const credits = creditsResult.data;
@@ -110,11 +118,20 @@ export function useUserProfile(): UserProfile {
           ? credits.welcome_credits_claimed_at  // null = unclaimed → show modal
           : undefined;                           // no row / error → unknown
 
+      const formResponse = profileRow?.form_response || null;
+      const hasCompletedForm =
+        formResponse != null &&
+        typeof formResponse === "object" &&
+        Object.keys(formResponse).length > 0;
+
       setProfile({
         name,
         email,
         initials: deriveInitials(name),
         dnaTags: profileRow?.profile_data?.tags ?? [],
+        formResponse,
+        summary: profileRow?.summary ?? "",
+        hasCompletedForm,
         balance: credits?.balance ?? 0,
         initialGrant: credits?.initial_grant ?? 0,
         welcomeClaimedAt,

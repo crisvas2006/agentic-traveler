@@ -9,43 +9,50 @@ agent can consume without needing to know the raw field names.
 from typing import Dict, Any
 
 
-def build_profile_summary(user_doc: Dict[str, Any]) -> str:
+def build_profile_summary(
+    user_doc: Dict[str, Any],
+    include_scores: bool = True,
+    include_summary: bool = True,
+) -> str:
     """
     Convert a raw user document into a concise text block suitable for LLM prompts.
 
-    Now specifically tailored to read the outputs of the ProfileAgent:
-    - tags
-    - additional_info
-    - summary
-    - extreme personality_dimensions_scores
+    Tailored to read the outputs of the ProfileAgent and custom user preferences stored
+    in the database `user_profiles.profile_data`.
     """
     name = user_doc.get("name", user_doc.get("user_name", "Traveler"))
     profile = user_doc.get("user_profile", {})
-    extras = user_doc.get("learned_extras", {})
+    profile_data = profile.get("profile_data") or {}
+
+    # Gather data from profile_data (which is the direct database representation)
+    summary = profile.get("summary") or profile_data.get("summary", "")
+    tags = profile_data.get("tags")
+    tone_pref = profile_data.get("tone_preference")
+    add_info = profile_data.get("additional_info")
+    scores = profile_data.get("personality_dimensions_scores", {})
 
     parts = [f"Name: {name}"]
-    
-    # Check if this is a newly structured profile or legacy form data
-    if "personality_dimensions_scores" in profile or "summary" in profile:
-        # --- New Intelligent Profile Structure ---
-        if profile.get("summary"):
-            parts.append(f"Profile Summary: {profile['summary']}")
-            
-        if profile.get("tags"):
-            tags = profile["tags"]
-            parts.append(f"Tags: {', '.join(tags) if isinstance(tags, list) else tags}")
-            
-        if profile.get("tone_preference"):
-            parts.append(f"Tone/Communication Preference: {profile['tone_preference']}")
-            
-        if profile.get("additional_info"):
-            parts.append(f"Additional Info/Constraints: {profile['additional_info']}")
-            
-        # Extract and explain extreme personality scores
-        scores = profile.get("personality_dimensions_scores", {})
+
+    # 1. Profile Summary
+    if include_summary and summary:
+        parts.append(f"Profile Summary: {summary}")
+
+    # 2. Tags
+    if tags:
+        parts.append(f"Tags: {', '.join(tags) if isinstance(tags, list) else tags}")
+
+    # 3. Tone/Communication Preference
+    if tone_pref:
+        parts.append(f"Tone/Communication Preference: {tone_pref}")
+
+    # 4. Additional Info/Constraints
+    if add_info:
+        parts.append(f"Additional Info/Constraints: {add_info}")
+
+    # 5. Strong Personality Dimensions (if include_scores is True)
+    if include_scores and scores:
         high_traits = []
         low_traits = []
-        
         for dim, val in scores.items():
             try:
                 val = float(val)
@@ -55,30 +62,38 @@ def build_profile_summary(user_doc: Dict[str, Any]) -> str:
                     low_traits.append(f"{dim} ({val})")
             except (ValueError, TypeError):
                 continue
-                
         if high_traits or low_traits:
             parts.append("\nStrong Personality Dimensions (0.0 to 1.0 scale):")
             if high_traits:
                 parts.append(f"  High (>0.7): {', '.join(high_traits)}")
             if low_traits:
                 parts.append(f"  Low (<0.3): {', '.join(low_traits)}")
-                
-    else:
-        # --- Legacy Fallback (just basic info if no profile agent ran yet) ---
-        parts.append("\n(Legacy Profile - waiting for ProfileAgent update)")
-        if profile.get("location"):
-            parts.append(f"Home base: {profile['location']}")
-        if profile.get("trip_vibe"):
-            vibes = profile["trip_vibe"]
-            parts.append(f"Trip vibes: {', '.join(vibes) if isinstance(vibes, list) else vibes}")
-        if profile.get("absolute_avoidances"):
-            avoids = profile["absolute_avoidances"]
-            parts.append(f"Avoids: {', '.join(avoids) if isinstance(avoids, list) else avoids}")
 
-    # --- agent-learned preferences (manual fallbacks outside the profile agent) ---
-    if extras:
-        parts.append("\nAgent-learned preferences:")
-        for k, v in extras.items():
-            parts.append(f"  {k}: {v}")
+    # 6. Gather all other key-value preferences stored in profile_data
+    known_keys = {
+        "summary", "tags", "tone_preference", "additional_info",
+        "personality_dimensions_scores", "short_summary"
+    }
+    extra_prefs = {
+        k: v for k, v in profile_data.items()
+        if k not in known_keys and v is not None and v != "" and v != []
+    }
+
+    # Also check if there are flat keys directly under profile that are not in profile_data
+    # (just in case they exist, though in the new design they are stored in profile_data)
+    for k, v in profile.items():
+        if k not in ("profile_data", "form_response", "summary") and k not in known_keys:
+            if v is not None and v != "" and v != []:
+                if k not in extra_prefs:
+                    extra_prefs[k] = v
+
+    if extra_prefs:
+        parts.append("\nUser Preferences:")
+        for k, v in sorted(extra_prefs.items()):
+            if isinstance(v, list):
+                val_str = ", ".join(str(item) for item in v)
+            else:
+                val_str = str(v)
+            parts.append(f"  {k}: {val_str}")
 
     return "\n".join(parts)

@@ -75,7 +75,7 @@ class UserRepository:
         return assembled, user_id
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch a user dict by their UUID."""
+        """Fetch a user dict by their UUID. Merge user related data from all user-connected tables into one dict."""
         try:
             resp = (
                 get_db()
@@ -152,13 +152,18 @@ class UserRepository:
         """
         Upsert the AI-generated structured profile_data into user_profiles.
 
-        This is distinct from upsert_form_response (raw Tally data) and
-        upsert_profile (full profile with summary). Use this specifically
-        after ProfileAgent generates a new structured profile schema.
+        Pops the 'summary' from profile_data and stores it in the dedicated
+        'summary' column, matching the layout used by the ProfileAgent.
         """
         try:
+            data_copy = dict(profile_data)
+            summary = data_copy.pop("summary", "")
             get_db().table("user_profiles").upsert(
-                {"user_id": user_id, "profile_data": profile_data}
+                {
+                    "user_id": user_id,
+                    "profile_data": data_copy,
+                    "summary": summary,
+                }
             ).execute()
         except Exception:
             logger.exception("Failed to upsert structured profile for user_id=%s", user_id)
@@ -276,6 +281,51 @@ class UserRepository:
         except Exception:
             logger.exception("link_telegram_user: update failed")
             return None, False
+
+    def link_telegram_to_web_user(self, user_id: str, telegram_id: str) -> Tuple[bool, str]:
+        """
+        Link a Telegram account (telegram_id) to an authenticated web user (user_id).
+
+        Returns:
+            (success, message)
+        """
+        db = get_db()
+
+        # 1. Check if this telegram_id is already linked to a different user
+        try:
+            existing = (
+                db.table("users")
+                .select("id, telegram_id")
+                .eq("telegram_id", telegram_id)
+                .maybe_single()
+                .execute()
+            )
+        except Exception:
+            logger.exception("link_telegram_to_web_user: check existing failed")
+            return False, "Database error during collision check."
+
+        if existing and existing.data:
+            if existing.data["id"] != user_id:
+                return False, "This Telegram account is already linked to a different profile."
+            else:
+                return True, "Your Telegram chat is already connected to your web account."
+
+        # 2. Perform the update
+        try:
+            resp = (
+                db.table("users")
+                .update({"telegram_id": telegram_id})
+                .eq("id", user_id)
+                .execute()
+            )
+            if resp and resp.data:
+                logger.info("Successfully linked telegram_id=%s to web user_id=%s", telegram_id, user_id)
+                return True, "✅ Linked! Your Telegram chat is now connected to your web account."
+            else:
+                return False, "User profile not found."
+        except Exception:
+            logger.exception("link_telegram_to_web_user: update failed")
+            return False, "Database error during link update."
 
 
 # ------------------------------------------------------------------

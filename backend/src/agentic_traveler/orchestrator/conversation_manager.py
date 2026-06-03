@@ -195,7 +195,6 @@ Write ONLY the updated summary, nothing else.
                 model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.2,
                     max_output_tokens=1800,
                     safety_settings=[
                         types.SafetySetting(

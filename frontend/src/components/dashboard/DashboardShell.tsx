@@ -349,6 +349,16 @@ export function DashboardShell() {
   // Live user data: fetched once here, passed down as props
   const userProfileRaw = useUserProfile();
 
+  // Trigger onboarding welcome message if the user has not completed the onboarding form
+  useEffect(() => {
+    if (!userProfileRaw.loading && !userProfileRaw.fetchError) {
+      if (!userProfileRaw.hasCompletedForm) {
+        fetch("/api/chat/init-welcome", { method: "POST" })
+          .catch((err) => console.error("Failed to initialize welcome message:", err));
+      }
+    }
+  }, [userProfileRaw.loading, userProfileRaw.fetchError, userProfileRaw.hasCompletedForm]);
+
   // Allow the WelcomeGrantModal to optimistically update the balance in state
   // without requiring a full re-fetch after a successful claim.
   const [profileOverride, setProfileOverride] = useState<Partial<typeof userProfileRaw>>({});
@@ -372,7 +382,30 @@ export function DashboardShell() {
     }
   };
 
-  const handleDismiss = () => setModalDismissed(true);
+  const handleDismiss = async () => {
+    setModalDismissed(true);
+    try {
+      const res = await fetch("/api/credits/welcome-grant", { method: "POST" });
+      let body: { status?: "granted" | "already_claimed"; balance?: number; error?: string };
+      try {
+        body = await res.json();
+      } catch {
+        body = {};
+      }
+      if (res.ok && body.status === "granted" && typeof body.balance === "number") {
+        setProfileOverride({
+          balance: body.balance,
+          initialGrant: body.balance,
+          welcomeClaimedAt: new Date().toISOString(),
+        });
+      } else {
+        setProfileOverride({ welcomeClaimedAt: new Date().toISOString() });
+      }
+    } catch (err) {
+      console.error("Failed to silently claim welcome credits on dismiss:", err);
+      setProfileOverride({ welcomeClaimedAt: new Date().toISOString() });
+    }
+  };
 
   // Show modal only when:
   //   • profile has fully loaded (not loading)

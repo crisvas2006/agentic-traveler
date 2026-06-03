@@ -119,3 +119,36 @@ GRANT SELECT         ON public.messages      TO authenticated;
 -- waitlist: anon may read only id + created_at (enough for COUNT, never email).
 -- The matching SELECT policy is "waitlist_count_anon" above.
 GRANT SELECT (id, created_at) ON public.waitlist TO anon;
+
+
+-- ---------------------------------------------------------------------------
+-- link_tokens — short-lived one-time tokens for account linking or onboarding.
+-- Web users insert their own token; the Python backend (service role) reads
+-- and deletes it.  No web user ever needs to read another user's token.
+-- ---------------------------------------------------------------------------
+
+-- Allow a web user to insert a token for themselves.
+CREATE POLICY "link_tokens_self_insert"
+  ON public.link_tokens
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (user_id = auth.uid());
+
+-- Allow a web user to read back their own pending tokens (e.g. to check status
+-- or display the link again).  Not strictly required but harmless.
+CREATE POLICY "link_tokens_self_select"
+  ON public.link_tokens
+  FOR SELECT
+  TO authenticated
+  USING (user_id = auth.uid());
+
+-- Allow a web user to delete their own tokens (e.g. user cancels the flow).
+CREATE POLICY "link_tokens_self_delete"
+  ON public.link_tokens
+  FOR DELETE
+  TO authenticated
+  USING (user_id = auth.uid());
+
+-- Authenticated users need INSERT + SELECT (and optionally DELETE) on this table.
+-- The backend (service role) bypasses RLS and needs no GRANT.
+GRANT INSERT, SELECT, DELETE ON public.link_tokens TO authenticated;

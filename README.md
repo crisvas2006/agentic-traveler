@@ -87,34 +87,20 @@ A Tally form, “The Odyssey Onboarding” collects a deep but structured profil
     
 *   Practical constraints: vacation days, diet/lifestyle, climate/logistics avoidances
     
-*   Goals & dreams: what they want from their next trip, dream trip style, open notes
-    
+*   Goals & dreams: what they want from their next trip, dream trip style, This form sends data directly to the backend's `/tally-webhook` endpoint, which persists it into Supabase.
 
-This form sends data directly to the backend's `/tally-webhook` endpoint, which persists it into Supabase:
-
-*   Table: `users`
-    
-*   Each row includes:
-    
-    *   `user_profile`: A JSONB column with nested sections reflecting the questionnaire
-        
-    *   `credits`: A linked table managing the user's interaction budget
-        
-    *   `off_topic_state`: Tracks usage patterns to enforce service boundaries
-        
-    *   `conversations`: Persists recent chat history and LLM-generated summaries
-        
-
-The `user_profile` field is the main personalization source for the agents.
-        
-
-The user\_profile field is the main personalization source for the agents.
+To support seamless linking of onboarding profiles for existing web users, the system uses a secure token handshake:
+*   **Table: `link_tokens`**: Manages secure random UUID tokens (avoiding exposure of database user IDs) of two kinds:
+    *   `telegram_link` (10-minute TTL): Connects a Telegram account to a web profile via `/settings`.
+    *   `tally_submission` (7-day TTL): Connects Tally onboarding form submissions to an existing web profile.
+*   **Personalized Onboarding**: If a linked Telegram user or Web Chat user has not yet completed the form, they receive a thoughtful recommendation with a personalized deep-link: `https://tally.so/r/<formid>?idToken=<token>`.
+*   **Webhook Merging**: If the webhook receives a submission with a valid `idToken`, it resolves the existing user record, updates it gracefully (mapping `submission_id`, and optionally `location` if provided in the submission), deletes the single-use token, verifies that the user has remaining credits, and then triggers background traveler DNA profiling (`ProfileAgent`) with full LLM cost-tracking and credit deduction, or logs a warning and returns early if no credits remain.
 
 #### 2\. Automation and messaging
 
-*   Telegram is the main interface.
+*   Telegram is a major communication interface.
     
-*   The Telegram Bot webhook calls the Cloud Run endpoint directly (/webhook/<secret>).
+*   The Telegram Bot webhook calls the Cloud Run endpoint directly (`/webhook/<secret>`).
     
 *   The backend sends replies back to Telegram via the Bot API.
     
@@ -350,41 +336,35 @@ The primary interaction channel is Telegram chat. A web frontend is under active
 
 User personalization is collected through a Tally form (https://tally.so/r/ODPGak):
 
-*   Form: “Know Thy Damn Self (for Travel)”
-    
+*   Form: "The Odyssey Onboarding"
+
 *   Fields cover:
-    
+
     *   Quick context: age band, base city, budget style.
-        
+
     *   Lifestyle and energy: daily rhythm, physical activity.
-        
+
     *   Travel style: desired trip vibe, structure preference, solo comfort.
-        
+
     *   Personality and values: spontaneity, social vs independent, motivation to travel, spiritual interest, risk tolerance.
-        
+
     *   Past travel: best trip, bad trip patterns, solo travel experience and pain points.
-        
+
     *   Practical constraints: vacation days, budget approach, dietary and lifestyle preferences, hard avoidances.
-        
+
     *   Goals and dreams: what they want from next trip, dream trip style, extra notes.
-        
 
 Technical intake:
 
-*   Tally form → HTTP triggered Cloud Function on GCP.
-    
-*   Function writes to Firestore in project agentic-traveler-db, collection users.
-    
-*   Each document in users has:
-    
-    *   user\_profile: all structured and free text answers from the questionnaire, organized in logical sections.
-        
-    *   Identification fields: name, email, createdDate.
-        
-    *   Later fields: telegramUserId, defaultHomeBase, etc.
-        
+*   Tally form → `/tally-webhook` endpoint on the Cloud Run backend (no separate Cloud Function).
 
-This user\_profile is the main personalization source for the agents.
+*   The webhook handler authenticates the request via the `TALLY_WEBHOOK_TOKEN` bearer header and persists the raw submission to Supabase.
+
+*   The **`ProfileAgent`** then maps the raw responses into a structured **Traveler DNA** (tags, personality-dimension scores, tone preference) and sends the user a message acknowledging that onboarding succeeded.
+
+*   **Linking flow:** If the submission carries an `idToken` query parameter (issued via the `link_tokens` table as a single-use `tally_submission` token), the handler merges into the existing user record instead of creating a duplicate, then runs the same Traveler DNA pass without an intrusive chat alert.
+
+The resulting Traveler DNA is the main personalization source for the agents.
 
 ### 1.3 MVP capabilities
 
@@ -539,64 +519,69 @@ Learning:
 Main components:
 
 *   **Tally form**
-    
-    *   Collects user personalization data.
-        
-    *   Sends responses to a GCP HTTP Cloud Function.
-        
-*   **Profile ingestion function (Cloud Function)**
-    
-    *   Receives HTTP payload from Tally.
-        
-    *   Maps questionnaire fields into a structured user\_profile object with sections that reflect the form sections.
-        
-    *   Writes or updates document in Firestore:
-        
-        *   Project: agentic-traveler-db
-            
-        *   Collection: users
-            
-        *   Document id: derived from email or Tally id, plus later mapped to Telegram id.
-            
-        *   Fields: user\_profile, name, email, createdDate, other metadata.
-            
-*   **Firestore**
-    
-    *   users collection:
-        
-        *   user\_profile with nested sections: quickContext, lifestyleEnergy, travelStyle, personalityValues, pastTravel, practicalConstraints, goals.
-            
-        *   Identification and mapping fields.
-            
-        *   Optionally preferenceSignals for lightweight counts and learned preferences.
-            
-    *   trips collection:
-        
-        *   Trip constraints, candidate destinations, chosen destination, itinerary summary, current trip status.
-            
-    *   events collection:
-        
-        *   Per user and trip, logs of suggestions and user feedback.
-            
-*   **Telegram Bot**
-    
-    *   Used by the traveler as main interface.
-        
-    *   Sends webhook updates directly to the Cloud Run service.
-        
 
-*   **Cloud Run service “agentic-traveler-orchestrator”**
-    
-    *   Stateless HTTP service in Python.
-        
-    *   Hosts a GenAI SDK-based multi-agent system.
-        
-    *   Entry point endpoint: `/webhook/<secret>` receives Telegram updates directly.
-        
-    *   Uses Firestore as the source of truth for profiles, trips, and events.
-        
-    *   Uses external tools such as web search, weather, and maps as needed.
-        
+    *   Collects user personalization data.
+
+    *   Sends responses directly to the Cloud Run backend (`/tally-webhook`).
+
+*   **Tally webhook handler** (part of the Cloud Run service — not a separate Cloud Function)
+
+    *   FastAPI route under `backend/src/agentic_traveler/interfaces/routers/`.
+
+    *   Authenticates each request via the `Authorization: Bearer <TALLY_WEBHOOK_TOKEN>` header.
+
+    *   Persists the raw submission to Supabase, then hands off to the `ProfileAgent` to build the Traveler DNA and acknowledge the user.
+
+    *   If the submission carries a valid `idToken` (issued via `link_tokens` as a `tally_submission` token), the handler merges into the existing user record instead of creating a duplicate.
+
+*   **Supabase (PostgreSQL)** — source of truth for all state. See `supabase/schema_public.sql` for the authoritative schema. Core tables:
+
+    *   `users`: identity record — `id` (UUID), `telegram_id`, `submission_id`, `name`, `location`, `source`, timestamps.
+
+    *   `user_profiles`: AI-generated Traveler DNA — `profile_data` (JSONB: `tags`, `personality_dimensions_scores`, `tone_preference`, `additional_info`), `form_response` (raw Tally answers), `summary`.
+
+    *   `credits`: per-user credit balance and spend history (`1 credit ≈ 1 eurocent`).
+
+    *   `conversations`: rolling, compacted conversation window owned by the Conversation Manager (agent context — not user-visible).
+
+    *   `chat_threads` + `messages`: append-only message log that is the source of truth for the web chat UI. `messages.source` is `'web'` or `'telegram'`.
+
+    *   `usage_tracking`: per-user / per-model LLM token counts and credit cost.
+
+    *   `feedback`: user-submitted feedback captured from the chat.
+
+    *   `analytics_weekly`: aggregated weekly metrics flushed in batches from the in-memory analytics buffer.
+
+    *   `link_tokens`: short-lived single-use tokens for `telegram_link` (10-minute TTL) and `tally_submission` (7-day TTL) flows.
+
+    *   `off_topic_state`, `waitlist`: off-topic restriction state and landing-page sign-ups.
+
+    *   **RLS is enforced** on user-scoped tables; atomic credit operations use Supabase RPCs (`deduct_credits`, `accumulate_user_usage`) invoked with the service key.
+
+*   **Web app (Next.js on Vercel)** — primary interface
+
+    *   Authenticated dashboard, chat, settings, and onboarding entry points (see §1.7).
+
+    *   Calls the Cloud Run backend for chat, credits, and account operations.
+
+*   **Telegram Bot** — optional secondary channel
+
+    *   Linked from `/settings` in the web app via a `telegram_link` token; a user can chat with the same agent from Telegram once linked.
+
+    *   Sends webhook updates directly to the Cloud Run service at `/webhook/<secret>`.
+
+*   **Cloud Run service "agentic-traveler-orchestrator"**
+
+    *   Stateless HTTP service in Python (FastAPI + Google GenAI SDK).
+
+    *   Hosts the multi-agent system (Coordinator + Router + Chat/Trip/Planner/Search/Profile + Conversation Manager — see §1 *Agentic backend on Cloud Run* above).
+
+    *   Entry-point endpoints: `/webhook/<secret>` (Telegram), `/tally-webhook` (Tally), plus authenticated web routes for chat and credits.
+
+    *   Uses Supabase as the single source of truth for profiles, conversations, messages, feedback, credits, and analytics.
+
+    *   Uses external tools (web search via Search Agent, weather, maps) only when an agent decides they're needed.
+
     *   Applies safety guidance and model safety settings before responding.
 
 
