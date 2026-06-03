@@ -7,6 +7,7 @@ The service key bypasses RLS and must only be used server-side.
 """
 
 import os
+import sys
 import httpx
 from supabase import create_client, Client, ClientOptions
 
@@ -21,9 +22,10 @@ def get_db() -> Client:
         key = os.environ["SUPABASE_SERVICE_KEY"].strip()
         # On Windows, sync HTTP/2 calls inside an ASGI/async environment can raise
         # WinError 10035 (WSAEWOULDBLOCK) due to transport pool conflicts.
-        # We explicitly disable HTTP/2 to enforce stable HTTP/1.1.
+        # We explicitly disable HTTP/2 on Windows, but enable it on Linux for production performance.
+        is_windows = sys.platform.startswith("win")
         opts = ClientOptions(
-            httpx_client=httpx.Client(http2=False)
+            httpx_client=httpx.Client(http2=not is_windows)
         )
         _client = create_client(url, key, options=opts)
     return _client

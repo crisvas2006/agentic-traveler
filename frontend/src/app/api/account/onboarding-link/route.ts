@@ -67,7 +67,11 @@ export async function POST(request: Request) {
       idToken = newToken.token;
     }
 
-    const onboardingUrl = `https://tally.so/r/ODPGak?idToken=${idToken}`;
+    const tallyBaseUrl = process.env.TALLY_FORM_URL;
+    if (!tallyBaseUrl) {
+      throw new Error("TALLY_FORM_URL environment variable is not set");
+    }
+    const onboardingUrl = `${tallyBaseUrl}?idToken=${idToken}`;
     return NextResponse.json({ url: onboardingUrl });
   } catch (err) {
     console.error("[onboarding-link] unhandled error:", err);

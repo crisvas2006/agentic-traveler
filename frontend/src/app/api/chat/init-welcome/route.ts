@@ -91,21 +91,18 @@ export async function POST(request: Request) {
       threadId = newThread.id;
     }
 
-    // ── 4. Idempotency Check — has the welcome message already been sent? ──
-    const { data: existingMsgs, error: msgCheckErr } = await service
+    // ── 4. Idempotency Check — has any message already been sent in this thread? ──
+    const { count, error: countErr } = await service
       .from("messages")
-      .select("id")
-      .eq("thread_id", threadId)
-      .eq("sender_type", "agent")
-      .like("body", "%A Thoughtful Recommendation for Your Travels%")
-      .limit(1);
+      .select("*", { count: "exact", head: true })
+      .eq("thread_id", threadId);
 
-    if (msgCheckErr) {
-      console.error("[init-welcome] failed to check existing messages:", msgCheckErr);
+    if (countErr) {
+      console.error("[init-welcome] failed to check messages count:", countErr);
       return NextResponse.json({ error: "Database error" }, { status: 500 });
     }
 
-    if (existingMsgs && existingMsgs.length > 0) {
+    if (count !== null && count > 0) {
       return NextResponse.json({ status: "already_initialized" });
     }
 
@@ -145,7 +142,11 @@ export async function POST(request: Request) {
     }
 
     // ── 6. Insert pre-populated welcome message ────────────────────────────
-    const onboardingUrl = `https://tally.so/r/ODPGak?idToken=${idToken}`;
+    const tallyBaseUrl = process.env.TALLY_FORM_URL;
+    if (!tallyBaseUrl) {
+      throw new Error("TALLY_FORM_URL environment variable is not set");
+    }
+    const onboardingUrl = `${tallyBaseUrl}?idToken=${idToken}`;
     const welcomeBody = 
       `👋 Welcome to Aletheia Travel! I'm your AI travel companion, ready to help you plan your next adventure, discover hidden gems, and curate seamless itineraries.\n\n` +
       `💡 *A Thoughtful Recommendation for Your Travels*\n\n` +

@@ -93,7 +93,7 @@ To support seamless linking of onboarding profiles for existing web users, the s
 *   **Table: `link_tokens`**: Manages secure random UUID tokens (avoiding exposure of database user IDs) of two kinds:
     *   `telegram_link` (10-minute TTL): Connects a Telegram account to a web profile via `/settings`.
     *   `tally_submission` (7-day TTL): Connects Tally onboarding form submissions to an existing web profile.
-*   **Personalized Onboarding**: If a linked Telegram user or Web Chat user has not yet completed the form, they receive a thoughtful recommendation with a personalized deep-link: `https://tally.so/r/<formid>?idToken=<token>`.
+*   **Personalized Onboarding**: If a linked Telegram user or Web Chat user has not yet completed the form, they receive a thoughtful recommendation with a personalized deep-link using the base URL configured in the `TALLY_FORM_URL` environment variable: `<TALLY_FORM_URL>?idToken=<token>`.
 *   **Webhook Merging**: If the webhook receives a submission with a valid `idToken`, it resolves the existing user record, updates it gracefully (mapping `submission_id`, and optionally `location` if provided in the submission), deletes the single-use token, verifies that the user has remaining credits, and then triggers background traveler DNA profiling (`ProfileAgent`) with full LLM cost-tracking and credit deduction, or logs a warning and returns early if no credits remain.
 
 #### 2\. Automation and messaging
