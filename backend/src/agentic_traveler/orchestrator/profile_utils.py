@@ -87,13 +87,22 @@ def build_profile_summary(
                 if k not in extra_prefs:
                     extra_prefs[k] = v
 
+    def _format_value(value: Any, indent_level: int = 1) -> str:
+        indent = "  " * indent_level
+        if isinstance(value, dict):
+            sub_parts = []
+            for sub_k, sub_v in sorted(value.items()):
+                sub_parts.append(f"\n{indent}{sub_k}: {_format_value(sub_v, indent_level + 1)}")
+            return "".join(sub_parts)
+        elif isinstance(value, list):
+            return ", ".join(str(item) for item in value)
+        else:
+            return str(value)
+
     if extra_prefs:
         parts.append("\nUser Preferences:")
         for k, v in sorted(extra_prefs.items()):
-            if isinstance(v, list):
-                val_str = ", ".join(str(item) for item in v)
-            else:
-                val_str = str(v)
+            val_str = _format_value(v, 2)
             parts.append(f"  {k}: {val_str}")
 
     return "\n".join(parts)

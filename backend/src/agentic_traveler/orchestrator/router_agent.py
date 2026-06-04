@@ -63,9 +63,11 @@ INTENTS:
 
 Classify the intent. If the user's message warrants calling a tool, call the appropriate tool AND still classify the intent.
 
-CRITICAL: If the user's message reveals a new personal preference that is not already in the known preferences, call the update_preferences tool with the raw preference statement AND set the "preference_raw" field in the JSON response to the same raw preference statement.
-CRITICAL: Call update_preferences at most once per message.
-CRITICAL: Never extrapolate or speculate on preferences. Only update preferences when they are explicitly stated in the message. Do NOT assume tone preferences (like "concise") just because the user's message is short or brief.
+CRITICAL: Only call update_preferences (at most once) if the user's LATEST message explicitly states a new/changed preference not listed in Known Preferences.
+- Do NOT extract preferences from Conversation Context history.
+- Never speculate or extrapolate preferences (e.g. do NOT assume tone_preference="concise" due to a brief message).
+- If the latest message is a question, greeting, or feedback, do not call it.
+- Always set "preference_raw" in the JSON response to match the exact extracted preference statement, or null.
 
 CRITICAL: The record_feedback tool is ONLY for the current message and if the user is explicitly talking ABOUT THE BOT ITSELF (e.g. "you are a great bot", "this app sucks", "add a dark mode").
 Do NOT use it for travel questions, personal statements, frustration with travel, testing, or random gibberish. If you are not 100% sure it is app feedback, DO NOT call it.
@@ -226,7 +228,7 @@ class RouterAgent:
                     max_output_tokens=256,
                     response_mime_type="application/json",
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=4,
+                        maximum_remote_calls=5,
                     ),
                     safety_settings=[
                         types.SafetySetting(
