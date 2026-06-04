@@ -25,7 +25,7 @@ def build_profile_summary(
     profile_data = profile.get("profile_data") or {}
 
     # Gather data from profile_data (which is the direct database representation)
-    summary = profile.get("summary") or profile_data.get("summary", "")
+    summary = profile.get("summary")
     tags = profile_data.get("tags")
     tone_pref = profile_data.get("tone_preference")
     add_info = profile_data.get("additional_info")

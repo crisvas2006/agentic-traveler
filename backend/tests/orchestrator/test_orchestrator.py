@@ -1,150 +1,130 @@
-"""
-Tests for the refactored OrchestratorAgent with tool-based routing.
-
-The orchestrator now uses a single LLM call with automatic function
-calling.  These tests mock the genai client and verify:
-- New user onboarding flow
-- Direct chat (no tool calls)
-- Tool calls trigger the right sub-agent
-- Preference updates via tool call
-- Conversation history is saved
-"""
-
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
 from agentic_traveler.tools.user_repo import UserRepository
 
-
 @pytest.fixture
-def mock_user_tool():
-    tool = MagicMock(spec=UserRepository)
-    return tool
-
+def mock_user_repo():
+    return MagicMock(spec=UserRepository)
 
 @pytest.fixture
 def patched_deps():
-    """Patch sub-agent classes and conversation manager."""
-    with patch("agentic_traveler.orchestrator.agent.DiscoveryAgent") as disc, \
-         patch("agentic_traveler.orchestrator.agent.PlannerAgent") as plan, \
-         patch("agentic_traveler.orchestrator.agent.CompanionAgent") as comp, \
-         patch("agentic_traveler.orchestrator.agent.ConversationManager") as conv, \
-         patch("agentic_traveler.orchestrator.agent.PreferenceLearner") as pref, \
+    with patch("agentic_traveler.orchestrator.agent.RouterAgent") as mock_router, \
+         patch("agentic_traveler.orchestrator.agent.ChatAgent") as mock_chat, \
+         patch("agentic_traveler.orchestrator.agent.TripAgent") as mock_trip, \
+         patch("agentic_traveler.orchestrator.agent.PlannerAgent") as mock_planner, \
+         patch("agentic_traveler.orchestrator.agent.ConversationManager") as mock_conv, \
+         patch("agentic_traveler.orchestrator.agent.credit_manager") as mock_credits, \
+         patch("agentic_traveler.orchestrator.agent.off_topic_guard") as mock_guard, \
          patch("agentic_traveler.orchestrator.agent.get_client") as mock_get_client:
-        # conversation context is empty by default
-        conv.return_value.build_context_block.return_value = ""
-        # genai client mock
+        
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
+        mock_credits.has_credits.return_value = True
+        mock_guard.is_restricted.return_value = None
+        mock_conv.return_value.build_context_block.return_value = "Mock history"
+        
         yield {
-            "discovery": disc,
-            "planner": plan,
-            "companion": comp,
-            "conversation": conv,
-            "preference": pref,
-            "get_client": mock_get_client,
+            "router": mock_router,
+            "chat": mock_chat,
+            "trip": mock_trip,
+            "planner": mock_planner,
+            "conv": mock_conv,
+            "credits": mock_credits,
+            "guard": mock_guard,
             "client": mock_client,
         }
 
-
-def test_new_user_onboarding(mock_user_tool, patched_deps):
+def test_new_user_onboarding(mock_user_repo, patched_deps):
     """Unknown Telegram ID → onboarding link."""
-    mock_user_tool.get_user_with_ref.return_value = (None, None)
-    agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
+    mock_user_repo.get_user_with_ref.return_value = (None, None)
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
     response = agent.process_request("unknown_id", "Hello")
     assert response["action"] == "ONBOARDING_REQUIRED"
     assert "tally.so" in response["text"]
 
+def test_credit_exhausted(mock_user_repo, patched_deps):
+    """If user has no credits, return credits exhausted message."""
+    mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
+    patched_deps["credits"].has_credits.return_value = False
+    
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    response = agent.process_request("123", "Hello")
+    assert response["action"] == "NO_CREDITS"
+    assert response["text"] == patched_deps["credits"].CREDITS_EXHAUSTED_MSG
 
-def test_direct_chat_response(mock_user_tool, patched_deps):
-    """For simple chat, the LLM responds directly (no tool calls)."""
-    doc_ref = MagicMock()
-    mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Alice", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
-    )
+def test_user_restricted(mock_user_repo, patched_deps):
+    """If user is restricted, return off-topic restriction message."""
+    mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
+    patched_deps["guard"].is_restricted.return_value = "You are restricted"
+    
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    response = agent.process_request("123", "Hello")
+    assert response["action"] == "RESTRICTED"
+    assert "restricted" in response["text"].lower()
 
-    # Mock the LLM to return a simple text with no tool calls
-    mock_response = MagicMock()
-    mock_response.text = "Hello Alice! How can I help you today?"
-    patched_deps["client"].models.generate_content.return_value = mock_response
+def test_off_topic_intent(mock_user_repo, patched_deps):
+    """If router returns OFF_TOPIC, record off-topic and return redirect text."""
+    mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
+    patched_deps["router"].return_value.classify.return_value = {
+        "intent": "OFF_TOPIC",
+        "response": "Please ask travel questions",
+        "raw_response": MagicMock(),
+        "latency_ms": 100
+    }
+    patched_deps["guard"].record_off_topic.return_value = {"restricted": False}
+    
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    response = agent.process_request("123", "Help with math")
+    
+    assert response["action"] == "RESPONSE"
+    assert "travel" in response["text"]
+    patched_deps["guard"].record_off_topic.assert_called_once()
 
-    agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
-    result = agent.process_request("123", "Hello!")
+def test_dispatch_to_trip_agent(mock_user_repo, patched_deps):
+    """TRIP intent should dispatch to TripAgent."""
+    mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
+    patched_deps["router"].return_value.classify.return_value = {
+        "intent": "TRIP",
+        "preference_updated": None,
+        "raw_response": MagicMock(),
+        "latency_ms": 100
+    }
+    mock_trip_instance = patched_deps["trip"].return_value
+    mock_trip_instance.process_request.return_value = {
+        "text": "Check out Paris!",
+        "action": "TRIP_RESULTS",
+        "_raw_response": MagicMock(),
+        "_latency_ms": 200
+    }
+    
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    response = agent.process_request("123", "Where should I go?")
+    
+    assert response["action"] == "RESPONSE"
+    assert "Paris" in response["text"]
+    mock_trip_instance.process_request.assert_called_once()
 
-    assert result["action"] == "RESPONSE"
-    assert "Alice" in result["text"]
-
-
-def test_conversation_saved_after_response(mock_user_tool, patched_deps):
-    """Conversation history is saved after every exchange."""
-    doc_ref = MagicMock()
-    mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Alice", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
-    )
-
-    mock_response = MagicMock()
-    mock_response.text = "Hello!"
-    patched_deps["client"].models.generate_content.return_value = mock_response
-
-    agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
-    agent.process_request("123", "Hi")
-
-    patched_deps["conversation"].return_value.append_and_save.assert_called_once()
-
-
-def test_llm_failure_returns_error(mock_user_tool, patched_deps):
-    """If the LLM call fails, the user gets a friendly error message."""
-    doc_ref = MagicMock()
-    mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Bob", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
-    )
-
-    patched_deps["client"].models.generate_content.side_effect = RuntimeError("LLM down")
-
-    agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
-    result = agent.process_request("123", "Plan something")
-
-    assert "traffic" in result["text"].lower() or "sorry" in result["text"].lower()
-
-
-def test_tool_functions_are_passed_to_llm(mock_user_tool, patched_deps):
-    """Verify that the LLM call includes tool functions."""
-    doc_ref = MagicMock()
-    mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Alice", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
-    )
-
-    mock_response = MagicMock()
-    mock_response.text = "Hello!"
-    patched_deps["client"].models.generate_content.return_value = mock_response
-
-    agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
-    agent.process_request("123", "Hello!")
-
-    call_kwargs = patched_deps["client"].models.generate_content.call_args
-    config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
-    assert config is not None
-    assert config.tools is not None
-    assert len(config.tools) == 9  # 9 tool functions
-
-
-def test_no_client_returns_error(mock_user_tool):
-    """Without an API key, LLM features are unavailable."""
-    doc_ref = MagicMock()
-    mock_user_tool.get_user_with_ref.return_value = (
-        {"user_name": "Bob", "user_profile": {}, "credits": {"balance": 10}}, doc_ref
-    )
-
-    with patch("agentic_traveler.orchestrator.agent.get_client") as mock_get_client, \
-         patch("agentic_traveler.orchestrator.agent.DiscoveryAgent"), \
-         patch("agentic_traveler.orchestrator.agent.PlannerAgent"), \
-         patch("agentic_traveler.orchestrator.agent.CompanionAgent"), \
-         patch("agentic_traveler.orchestrator.agent.ConversationManager") as conv, \
-         patch("agentic_traveler.orchestrator.agent.PreferenceLearner"):
-        mock_get_client.return_value = None
-        conv.return_value.build_context_block.return_value = ""
-
-        agent = OrchestratorAgent(firestore_user_tool=mock_user_tool)
-        agent._client = None  # force no client
-        result = agent.process_request("123", "Hello")
-        assert "unavailable" in result["text"].lower()
+def test_dispatch_to_planner_agent(mock_user_repo, patched_deps):
+    """PLAN intent should dispatch to PlannerAgent."""
+    mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
+    patched_deps["router"].return_value.classify.return_value = {
+        "intent": "PLAN",
+        "preference_updated": None,
+        "raw_response": MagicMock(),
+        "latency_ms": 100
+    }
+    mock_planner_instance = patched_deps["planner"].return_value
+    mock_planner_instance.process_request.return_value = {
+        "text": "Day 1: Rome",
+        "action": "PLANNER_RESULTS",
+        "_raw_response": MagicMock(),
+        "_latency_ms": 200
+    }
+    
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    response = agent.process_request("123", "Plan me 3 days in Rome")
+    
+    assert response["action"] == "RESPONSE"
+    assert "Rome" in response["text"]
+    mock_planner_instance.process_request.assert_called_once()

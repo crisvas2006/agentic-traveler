@@ -22,6 +22,7 @@ Supabase layout (``analytics_weekly`` table):
 import atexit
 import logging
 import os
+import sys
 import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict
@@ -292,4 +293,6 @@ def flush(sync: bool = False) -> None:
 
 # ── auto-flush on exit ────────────────────────────────────────────────────
 
-atexit.register(flush, sync=True)
+# Avoid registering atexit handler under pytest to prevent bad file descriptor logging errors
+if "pytest" not in sys.modules and "PYTEST_CURRENT_TEST" not in os.environ:
+    atexit.register(flush, sync=True)
