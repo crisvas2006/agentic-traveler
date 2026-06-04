@@ -135,6 +135,9 @@ breaking changes vs. older training data; consult
 | Email | React Email templates rendered, sent via Resend |
 | Hosting | Cloud Run (backend), Vercel (frontend) |
 | Channels | Telegram Bot webhook → Cloud Run; Tally form → `/tally-webhook` |
+| Realtime | Supabase Realtime (postgres_changes) on parent tables; child writes bump parent `updated_at` via Postgres trigger |
+| Streaming | Server-Sent Events (FastAPI `StreamingResponse`) for web; debounced `editMessageText` for Telegram |
+| Observability | LangSmith (`@traceable` on orchestrator + sagas + agents); structured metric events into `analytics_events` (7-day window) + `metrics_daily` (rollup) |
 
 **Python:** Target 3.13 (must match `backend/Dockerfile`). Pin versions in
 `requirements.txt`. Test syntax-sensitive changes against the Docker version.
@@ -232,6 +235,41 @@ For all agent routing, prompt design, memory, and tool changes you MUST follow
 - Keep runtime stateless; externalize all state to Supabase.
 - Version prompts and tools. Make tools safe to retry.
 
+### 7.1 Saga conventions (ratified by `specs/proposal_trip_model_and_planning_saga.md`)
+
+Once the proposal lands and §7.x of it ships, these apply to every new
+saga / agent / tool change:
+
+- **Sagas are slot-filling skills with state-as-data.** Never store conversation
+  state on `self` — always read from / return updates to the `SagaState`
+  TypedDict. This is the rule that keeps a future LangGraph migration
+  mechanical.
+- **Slot-fill is a return value, not an exception.** Return
+  `SagaResult(slot_request=SlotRequest(slot, prompt))`. Never raise.
+- **Every saga / agent / tool accepts an `EventEmitter`** and calls
+  `events.emit(phase, payload)` at three kinds of moment:
+  - `phase="status"` — user-facing progress strings, before each tool call
+    and at major phase boundaries (drives SSE + Telegram message-edit UX).
+  - `phase="delta"` — token-by-token output during streaming (final agents
+    only).
+  - `phase="metric"` — structured analytics rows (see §10 cost rules below).
+- **`@traceable` (LangSmith) on every orchestrator-level function:**
+  orchestrator entry points, `RouterAgent.classify`, every saga's `run`,
+  every heavy-agent `process_request`, the SearchAgent, and the Gemini-call
+  wrapper. Sample 100 % in dev, configurable in prod.
+- **Metric emission by default.** Every saga emits at minimum:
+  `saga_entered`, `saga_exited`, `slot_filled`, `error_raised`. Every tool
+  wrapper emits `tool_invoked` + `tool_succeeded` / `tool_failed` with
+  `latency_ms`. The orchestrator emits `turn_completed` per turn with
+  `{latency_ms, credits_charged, intent, owner_saga, tools_used}`.
+- **No booking engine.** All bookings are user-input (paste / PDF / chat
+  text); the `BookingInputSaga` is the canonical parser. Schema for bookings
+  must accept partial entries.
+- **Country / safety / health / money intel are cached world facts, never
+  authoritative.** Every render carries a "verify with official sources"
+  disclaimer. TTL refresh on view; never claim authority on visa, medical, or
+  legal matters.
+
 Read `AGENTIC_GUIDELINES.md` before proposing new agents, changing prompts,
 or adding tools.
 
@@ -245,6 +283,12 @@ or adding tools.
 - **Supabase RLS is mandatory** for every new table — write the policy in the
   same PR. Standard patterns: `auth.uid() = user_id` (personal),
   RPC + service key (atomic ops like credit deduction).
+- **Realtime subscription pattern:** for any parent table with child
+  collections, the frontend subscribes to the **parent only**; child writes
+  bump the parent's `updated_at` via a `touch_*` Postgres trigger. RLS on the
+  parent governs visibility — child tables inherit the security model
+  transparently. Goal: one WebSocket per active dashboard tab, never more
+  than ~4 multiplexed channels (free-tier discipline).
 - **Never call external APIs from the browser.** Client → Next.js Route Handler /
   Server Action / Python backend → external. Never prefix sensitive env vars
   with `NEXT_PUBLIC_`.
@@ -288,6 +332,20 @@ Frontend `.env.local`: `NEXT_PUBLIC_SUPABASE_URL`,
   concurrency, memory, `--no-cpu-throttling`).
 - Backend is stateless by design — reconstruct context per request rather than
   caching, unless cost analysis says otherwise.
+- **Free-tier discipline (Supabase, target: ≤1 000 users on the free plan):**
+  - No event/log table grows unbounded. Every such table has a `pg_cron`
+    "truncate after N days" companion job. Long-term answers live in a
+    daily roll-up (e.g. `metrics_daily`), not in the raw event log.
+  - Every new user-growing table ships **with** at least one canonical
+    `vw_<topic>_growth` SQL view in the same migration, so capacity can be
+    queried from day one.
+  - Watch the two free-tier gates that fire first under our usage profile:
+    (a) Realtime monthly event count (cap 2 M / mo) and (b) LangSmith trace
+    quota (cap 5 k / mo) — both visible via `vw_capacity_today`. Sample
+    LangSmith at < 1.0 in prod once traffic warrants.
+- **LangSmith trace volume scales with traffic.** Default to 100 % in dev,
+  intend to sample (`LANGCHAIN_TRACING_SAMPLE_RATE=0.1`) in prod past ~100
+  active users / day.
 
 ---
 
@@ -305,3 +363,4 @@ Frontend `.env.local`: `NEXT_PUBLIC_SUPABASE_URL`,
 | DB schema + RLS | `supabase/schema_public.sql`, `supabase/rls_policies.sql` |
 | Task spec structure | `task_template_v2.md` (canonical); `task_template.md` retained for legacy reference only |
 | Product / architecture overview | `README.md` |
+| Trip data model, saga state machine, realtime + streaming + metrics conventions | `specs/proposal_trip_model_and_planning_saga.md` (in review; ratified rules surfaced in §3, §7.1, §8, §10 above) |

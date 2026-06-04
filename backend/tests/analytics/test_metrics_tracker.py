@@ -1,8 +1,7 @@
 """Tests for the metrics_tracker module."""
 
 from datetime import date
-from unittest.mock import MagicMock, patch, call
-import pytest
+from unittest.mock import MagicMock, patch
 
 
 def test_get_week_key_returns_sunday():
@@ -34,8 +33,6 @@ def test_record_interaction_accumulates():
 
     assert mt._total_interactions == 2
     assert mt._new_users == 1
-    assert "user1" in mt._active_users
-    assert "user2" in mt._active_users
     assert mt._event_count == 2
 
 
@@ -92,7 +89,6 @@ def test_flush_writes_correct_supabase_payload():
     snap = mock_write.call_args[0][0]
     assert snap["total_interactions"] == 1
     assert snap["new_users"] == 1
-    assert "userA" in snap["active_users"]
     assert "orchestrator" in snap["agent_calls"]
     assert snap["token_usage"]["gemini-flash"]["total_cost_credits"] == 1
 
@@ -124,7 +120,6 @@ def test_write_to_supabase_merges_credits(mock_get_db):
         "week_ending": "2026-05-31",
         "total_interactions": 10,
         "new_users": 2,
-        "active_users": ["user1", "user2"],
         "agent_calls": {"orchestrator": 8},
         "token_usage": {
             "gemini-2_5-flash": {
@@ -165,7 +160,6 @@ def test_write_to_supabase_merges_credits(mock_get_db):
     snapshot = {
         "total_interactions": 5,
         "new_users": 1,
-        "active_users": ["user2", "user3"],
         "agent_calls": {"orchestrator": 2, "discovery": 1},
         "token_usage": {
             "gemini-2_5-flash": {
@@ -197,7 +191,6 @@ def test_write_to_supabase_merges_credits(mock_get_db):
     assert merged_payload["week_ending"] == "2026-05-31"
     assert merged_payload["total_interactions"] == 15
     assert merged_payload["new_users"] == 3
-    assert set(merged_payload["active_users"]) == {"user1", "user2", "user3"}
     assert merged_payload["agent_calls"] == {"orchestrator": 10, "discovery": 1}
     assert merged_payload["grounding_calls"] == 3
     

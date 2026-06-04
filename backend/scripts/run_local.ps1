@@ -13,7 +13,7 @@
 #
 # load_dotenv() in main.py picks these up automatically.
 # ─────────────────────────────────────────────────────────────────────────────
-$ErrorActionPreference = "Stop"
+Set-Location "$PSScriptRoot\.."
 
 # Skip the Telegram IP whitelist so /webhook/* (if you also test Telegram via
 # ngrok) doesn't bounce.
@@ -23,5 +23,5 @@ Write-Host "→ Starting uvicorn on http://127.0.0.1:8080 ..." -ForegroundColor 
 Write-Host "  Frontend should set BACKEND_URL=http://127.0.0.1:8080 in its .env.local" `
   -ForegroundColor DarkGray
 
-..\.venv\Scripts\uvicorn agentic_traveler.interfaces.main:app `
+.\.venv\Scripts\uvicorn agentic_traveler.interfaces.main:app `
   --reload --port 8080 --host 127.0.0.1

@@ -11,7 +11,6 @@ Supabase layout (``analytics_weekly`` table):
     week_ending        : DATE  (PK)
     total_interactions : INT
     new_users          : INT
-    active_users       : TEXT[]
     agent_calls        : JSONB  — {agent: count}
     token_usage        : JSONB  — {model: {input: int, output: int}}
     promo_redeemed     : JSONB  — {code: count}
@@ -46,7 +45,6 @@ _lock = threading.RLock()
 
 _total_interactions: int = 0
 _new_users: int = 0
-_active_users: set[str] = set()
 _agent_calls: Dict[str, int] = {}
 _token_usage: Dict[str, Dict[str, int]] = {}  # model → {input, output}
 _event_count: int = 0
@@ -60,7 +58,6 @@ def _reset_locked() -> None:
     with _lock:
         _total_interactions = 0
         _new_users = 0
-        _active_users.clear()
         _agent_calls.clear()
         _token_usage.clear()
         _promo_redeemed.clear()
@@ -77,7 +74,6 @@ def record_interaction(*, user_id: str, is_new_user: bool = False) -> None:
 
     with _lock:
         _total_interactions += 1
-        _active_users.add(user_id)
         if is_new_user:
             _new_users += 1
         _event_count += 1
@@ -162,7 +158,6 @@ def _take_snapshot() -> Dict[str, Any] | None:
         snapshot = {
             "total_interactions": _total_interactions,
             "new_users": _new_users,
-            "active_users": list(_active_users),
             "agent_calls": dict(_agent_calls),
             "token_usage": {k: dict(v) for k, v in _token_usage.items()},
             "promo_redeemed": dict(_promo_redeemed),
@@ -172,7 +167,6 @@ def _take_snapshot() -> Dict[str, Any] | None:
 
         _total_interactions = 0
         _new_users = 0
-        _active_users.clear()
         _agent_calls.clear()
         _token_usage.clear()
         _promo_redeemed.clear()
@@ -217,10 +211,7 @@ def _write_to_supabase(snapshot: Dict[str, Any]) -> None:
             "flushed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Merge active_users (deduplicated union)
-        existing_users = set(existing.get("active_users") or [])
-        existing_users.update(snapshot["active_users"])
-        merged["active_users"] = list(existing_users)
+
 
         # Merge agent_calls (JSONB dict of counts)
         merged_agent_calls = dict(existing.get("agent_calls") or {})

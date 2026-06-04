@@ -146,7 +146,6 @@ CREATE TABLE IF NOT EXISTS public.analytics_weekly (
   week_ending         date PRIMARY KEY,
   total_interactions  integer DEFAULT 0,
   new_users           integer DEFAULT 0,
-  active_users        text[]  DEFAULT '{}',
   agent_calls         jsonb   DEFAULT '{}',
   token_usage         jsonb   DEFAULT '{}',
   promo_redeemed      jsonb   DEFAULT '{}',

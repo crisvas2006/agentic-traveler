@@ -5,6 +5,8 @@
 # Exit immediately if any command fails
 $ErrorActionPreference = "Stop"
 
+Set-Location "$PSScriptRoot\.."
+
 # 1. Clean up any existing container with the same name
 $existing = docker ps -a --filter "name=agentic-traveler-restricted" --format "{{.ID}}"
 if ($existing) {
@@ -77,7 +79,7 @@ Write-Host "Initializing Locust headless load test (100 Virtual Users, 15s run t
 $env:TELEGRAM_SECRET_TOKEN = $token
 
 # Execute headless Locust suite
-..\.venv\Scripts\locust.exe -f tests/performance/locustfile.py --host http://127.0.0.1:8080 --headless -u 5000 -r 200 --run-time 30s --html=tests/performance/reports/locust_report.html
+.\.venv\Scripts\locust.exe -f tests/performance/locustfile.py --host http://127.0.0.1:8080 --headless -u 5000 -r 200 --run-time 30s --html=tests/performance/reports/locust_report.html
 
 # 7. Post-test cleanup
 Write-Host "Shutting down and removing Docker container..." -ForegroundColor Red

@@ -1,125 +1,78 @@
-# Agentic Traveler Monorepo
-This repository contains two isolated systems:
-1. `/frontend`: Next.js 16 app deployed on Vercel.
-2. `/backend`: Python FastAPI/Agentic core deployed on GCP.
-Rule: Never mix dependencies. Frontend code stays in `/frontend`, backend in `/backend`.
+# Agentic Traveler — Gemini Instructions
 
-# Development Guidelines
+This is the instructional guide for Gemini coding agents working in this repository.
 
-## How to Think
+> [!IMPORTANT]
+> **CLAUDE.md is the central instruction file and single source of truth** for repository layout, build/test/run commands, development guidelines, security rules, and project-specific invariants.
+> 
+> You MUST read and follow [CLAUDE.md](CLAUDE.md) before writing any code or proposing plans. Do not duplicate its content here.
 
-### 1. Think Before Coding
-Don't assume. Don't hide confusion. Surface tradeoffs.
+---
 
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
+## 1. Slash Commands
 
-### 2. Simplicity First
-Minimum code that solves the problem. Nothing speculative — but flag what's worth considering.
+This repository includes custom slash commands defined in the `.claude/commands/` directory. Gemini agents should recommend these commands to the user or mimic their workflows to verify code quality:
 
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-- Prefer a library when it reduces surface area you'd need to test and maintain — not just because it exists.
+- **`/spec <description>`** — Creates a task spec under `specs/` following `task_template_v2.md`. Highly recommended before implementing tasks that touch multiple modules or take >2 hours. (See [.claude/commands/spec.md](.claude/commands/spec.md))
+- **`/review [spec path]`** — Audits the current git diff against the hard blocks and guidelines in `CLAUDE.md` and the spec (if provided). (See [.claude/commands/review.md](.claude/commands/review.md))
+- **`/ship [spec path]`** — Pre-commit gate that runs linting, tests, builds, and checks spec DoD before the user commits. (See [.claude/commands/ship.md](.claude/commands/ship.md))
 
-**Proactive suggestions:** When you spot a meaningful improvement beyond the task scope, surface it — don't silently implement it, but don't silently discard it either.
-- **High confidence it's right and valuable** (clear win, low risk): include it in the plan as an intended step. The human will remove it if unwanted.
-- **Lower confidence or non-trivial tradeoff**: present it as a proposal and ask before implementing.
+---
 
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+## 2. Gemini 3.5 Agentic Development Guidelines
 
-### 3. Surgical Changes
-Touch only what you must. Clean up only your own mess.
+When modifying, designing, or adding agents, tools, or prompts in the `backend/src/agentic_traveler/orchestrator/` or `backend/src/agentic_traveler/tools/` layers, adhere to the following Gemini-specific best practices:
 
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it — don't delete it.
+### 1. Model Selection & Cost Control
+- **Lightweight Tasks:** Use `gemini-3.1-flash-lite` for intent routing, simple chat, summary tasks, and classification.
+- **Reasoning/Synthesis:** Use `gemini-3.5-flash` for complex destination discovery (`TripAgent`) and itinerary planning (`PlannerAgent`).
+- **Thinking Budget:** For reasoning-heavy sub-agents, enable `thinking_config` with a sensible budget (e.g., `512` tokens) to ensure high-quality output before synthesis.
 
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
+### 2. Google GenAI SDK Integration
+- **Always use the new `google-genai` SDK** (e.g., `from google import genai`). Do NOT use the legacy, deprecated `google-generativeai` package.
+- All GenAI client instances must be obtained via the client factory:
+  ```python
+  from agentic_traveler.orchestrator.client_factory import get_client
+  client = get_client()
+  ```
 
-Every changed line should trace directly to the user's request or an explicitly surfaced suggestion.
+### 3. Structured Output (JSON Mode & Schema Enforcement)
+- To guarantee the structure of the returned JSON, always use a Pydantic model with `response_schema` in the `GenerateContentConfig`:
+  ```python
+  from pydantic import BaseModel, Field
 
-### 4. Goal-Driven Execution
-Define success criteria. Loop until verified.
+  class RouteResponse(BaseModel):
+      intent: str = Field(description="Must be exactly one of: CHAT, TRIP, PLAN, OFF_TOPIC")
+      request_summary: str = Field(description="One-sentence description of the user request")
+      preference_updated: Optional[dict] = Field(default=None, description="Updated preference metadata")
+      response: Optional[str] = Field(default=None, description="Redirection or credit info response")
 
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
+  config = types.GenerateContentConfig(
+      response_mime_type="application/json",
+      response_schema=RouteResponse,
+      system_instruction=system_prompt,
+  )
+  ```
+- This forces the LLM to output valid JSON matching the exact schema structure, minimizing prompt engineering complexity.
+- Always parse the response using Pydantic validation (e.g. `RouteResponse.model_validate_json(response.text)`) wrapped in a `try...except` block, providing a sensible fallback (e.g., default to `CHAT` intent) if the validation or parsing fails.
 
-For multi-step tasks, state a brief plan:
+### 4. Automatic Function Calling (AFC) & Tools
+- Pass tools as standard Python functions in the `tools` list of `GenerateContentConfig`.
+- Leverage AFC by setting `automatic_function_calling` with a strict `maximum_remote_calls` limit:
+  - **Router Agent:** `maximum_remote_calls=4` (credit checks, updates).
+  - **Trip Agent:** `maximum_remote_calls=6` (weather checks, search).
+  - **Planner Agent:** `maximum_remote_calls=8` (multi-day planning requiring multiple weather and search calls).
+- Avoid enabling Google Search grounding directly in specialized agents. Instead, proxy grounding queries through `SearchAgent` using the `search_web` tool to capture grounding logs and handle token/credit billing correctly.
 
-[Step] → verify: [check]
-[Step] → verify: [check]
-[Step] → verify: [check]
-
-
-## Documentation
-- **MANDATORY:** Whenever you develop a new feature or change an existing one, you MUST update `README.md` to reflect the changes. There should never be discrepancies between the codebase and the `README.md`.
-- Documentation should be concise and explain the relevant parts in the code.
-- When creating or updating code, add or update comments for methods and classes if the code is not self-explanatory or the cognitive load is high.
-- All software should be documented in a way that is easy to understand and deploy by following the instructions in the repository.
-
-## Feature Planning & Task Specs
-Create a `task_spec_<feature_name>.md` before writing any code when a task meets either of these conditions:
-- **Scope:** touches more than one module, or expected to take more than ~2 hours.
-- **Cognitive complexity:** introduces mechanisms that are non-trivial to reason about (e.g. new async patterns, state machines, external integrations, security boundaries, data migrations).
-
-**MANDATORY:** Whenever you create a task spec, you MUST strictly follow the structure defined in `task_template.md`. Do not invent your own structure.
-
-The spec serves two purposes: guiding implementation, and helping humans understand what the task involves and why decisions were made.
-
-## Agentic Architecture Guidelines
-For all architectural decisions, agent routing, memory management, and tool design, you MUST adhere strictly to the rules laid out in `AGENTIC_GUIDELINES.md`. Read that file before proposing new agents, changing prompts, or adding new tools.
-
-## Code Quality
-- Write tests before or alongside implementation for the current task.
-- Use logging for meaningful context (user IDs, intent, timing) — but never log sensitive data.
-- Run `ruff check` before considering code complete.
-- Prioritize integrating libraries and APIs with low code rather than building complex features from scratch.
-
-## Security
-- Never hardcode secrets (API keys, tokens, passwords) in source code — always use environment variables.
-- Never log secrets or PII (user tokens, phone numbers, full API keys).
-- Sanitize user input before passing to LLM prompts (prompt injection risk).
-- Verify `.env` is in `.gitignore` — never commit secrets.
-
-## Python & Compatibility
-- Target Python 3.13 — must match the version in `Dockerfile`.
-- Pin dependency versions in `requirements.txt` for reproducible builds.
-- Test syntax-sensitive changes against the Docker Python version.
-
-## Deployment
-- Do not commit changes automatically.
-- Never auto-deploy to Cloud Run without explicit approval.
-- Always verify the container starts (check Cloud Run logs) after deployment.
-- Treat the `Dockerfile` Python version as source of truth for compatibility.
-
-## Data & Models
-- Do not remove fields of models without approval.
-
-## Cost Awareness
-- Prefer lightweight models for non-critical tasks (e.g., `gemini-2.5-flash-lite` for summarization).
-- Note Cloud Run billing implications of any config changes (instances, concurrency, memory).
-
-## Project Structure
-```
-project-root/
-    pyproject.toml      # deps, metadata, config for tools
-    src/
-        agentic_traveler/
-            __init__.py
-            ...
-    tests/
-        test_something.py
-    specs/               # domain knowledge, form content, etc.
-```
+### 5. Error Isolation & Safety
+- **Wrap Generate Content Calls:** Always catch exceptions around `generate_content` calls. Log the traceback via `logger.exception()` but return a friendly, generic fallback message to the user (e.g., `"I hit a snag. Please try again."`) with an `action: "ERROR"` response.
+- **Credit Billing Guard:** If an LLM call fails or raises an error, do not deduct credits from the user's balance. Pass `token_records=[]` to `_save_and_finish` under error conditions.
+- **Safety Blocks:** Explicitly set safety thresholds to `BLOCK_ONLY_HIGH` to prevent false-positive blocks from returning empty responses:
+  ```python
+  safety_settings=[
+      types.SafetySetting(
+          category=c,
+          threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+      ) for c in [...]
+  ]
+  ```

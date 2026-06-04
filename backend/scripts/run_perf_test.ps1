@@ -1,4 +1,5 @@
-# scripts/run_perf_test.ps1
+Set-Location "$PSScriptRoot\.."
+
 # Setup virtual environment and toggle mock parameters for load testing
 $env:MOCK_LLM = "true"
 $env:MOCK_TELEGRAM = "true"
@@ -7,7 +8,7 @@ $env:DISABLE_RATE_LIMIT = "false"
 $env:TELEGRAM_SECRET_TOKEN = "perf_test_secret"
 
 Write-Host "Booting FastAPI local server in MOCK mode..." -ForegroundColor Green
-$serverProcess = Start-Process -FilePath "..\.venv\Scripts\python.exe" -ArgumentList "-m uvicorn agentic_traveler.interfaces.main:app --host 127.0.0.1 --port 8080" -PassThru -NoNewWindow
+$serverProcess = Start-Process -FilePath ".\.venv\Scripts\python.exe" -ArgumentList "-m uvicorn agentic_traveler.interfaces.main:app --host 127.0.0.1 --port 8080" -PassThru -NoNewWindow
 
 # Wait for startup
 Start-Sleep -Seconds 3
@@ -16,7 +17,7 @@ Start-Sleep -Seconds 3
 New-Item -ItemType Directory -Force -Path "tests\performance\reports" | Out-Null
 
 Write-Host "Initializing Locust headless load test (100 Virtual Users, 15s run time, rate limits active)..." -ForegroundColor Green
-..\.venv\Scripts\locust.exe -f tests/performance/locustfile.py --host http://127.0.0.1:8080 --headless -u 100 -r 5 --run-time 15s --html=tests/performance/reports/locust_report.html
+.\.venv\Scripts\locust.exe -f tests/performance/locustfile.py --host http://127.0.0.1:8080 --headless -u 100 -r 5 --run-time 15s --html=tests/performance/reports/locust_report.html
 
 Write-Host "Shutting down FastAPI local server..." -ForegroundColor Red
 Stop-Process -Id $serverProcess.Id
