@@ -144,3 +144,25 @@ Telegram (user is now in the bot chat)
 - Unlink button (resets `telegram_id` to NULL).
 - One-step Tally-link from settings (analogous flow).
 - Multi-channel notification preferences once another channel exists.
+
+---
+
+## 9. Spec deviations from implementation
+
+> Recorded after the fact since this spec predates `task_template_v2.md` and
+> its formal §10.2 deviation slot. See `CLAUDE.md` §5 for the v2 template.
+
+### 9.1 Token storage — Option A (HS256 signed token) was infeasible
+
+§3 above recommended **Option A** (signed HS256 token). At implementation we
+discovered Telegram's `?start=` deep-link parameter is hard-capped at 64
+bytes. An HS256 JWT is ~160 characters and gets silently dropped by the
+Telegram client — the bot receives a bare `/start` with no payload.
+
+We switched to **Option B** (DB row in `public.link_tokens`). A UUID is 36
+chars; with the `link_` prefix the full `start` payload is 41 bytes,
+comfortably under the cap. The trade-off is one extra DB round-trip per
+link, which is acceptable for a once-per-user flow.
+
+This constraint is now embedded as a comment on `public.link_tokens` in
+`supabase/schema_public.sql` so future contributors don't re-litigate it.

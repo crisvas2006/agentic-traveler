@@ -1,7 +1,15 @@
 -- =============================================================================
--- Aletheia Travel — public schema
--- Run in: Supabase → SQL Editor
--- Idempotent: safe to re-run on an existing project.
+-- Aletheia Travel — public schema (reference snapshot)
+--
+-- This file describes the *current* state of the public schema. It is the
+-- canonical reference for column shapes and RPC signatures — NOT a runnable
+-- migration script. Re-running the CREATE TABLE IF NOT EXISTS blocks against
+-- a database that already has the tables is a no-op and will NOT pick up
+-- column additions made after the table was first created.
+--
+-- To change live state (add a column, rename, drop): write a separate
+-- ALTER / migration statement and apply it via the Supabase dashboard or
+-- migration tooling, then update this file so it continues to reflect truth.
 -- =============================================================================
 
 

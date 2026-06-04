@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/service";
 
+// Fail-fast at module load: misconfigured deploys surface here, not in the
+// request path. See @CLAUDE.md §8 — required env vars should be guarded early.
+const TALLY_FORM_URL = process.env.TALLY_FORM_URL;
+if (!TALLY_FORM_URL) {
+  throw new Error("TALLY_FORM_URL environment variable is required");
+}
+
 /**
  * POST /api/account/onboarding-link
  *
@@ -67,11 +74,7 @@ export async function POST(request: Request) {
       idToken = newToken.token;
     }
 
-    const tallyBaseUrl = process.env.TALLY_FORM_URL;
-    if (!tallyBaseUrl) {
-      throw new Error("TALLY_FORM_URL environment variable is not set");
-    }
-    const onboardingUrl = `${tallyBaseUrl}?idToken=${idToken}`;
+    const onboardingUrl = `${TALLY_FORM_URL}?idToken=${idToken}`;
     return NextResponse.json({ url: onboardingUrl });
   } catch (err) {
     console.error("[onboarding-link] unhandled error:", err);

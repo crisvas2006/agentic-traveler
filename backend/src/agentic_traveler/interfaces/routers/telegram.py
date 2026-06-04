@@ -30,6 +30,13 @@ FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "").strip()
 if not FRONTEND_ORIGIN:
     raise RuntimeError("Missing required environment variable: FRONTEND_ORIGIN")
 
+# Base Tally form URL (used for personalized onboarding deep-links sent over
+# Telegram). Fail fast at startup if missing so a misconfigured deploy can't
+# silently send broken links.
+TALLY_FORM_URL = os.getenv("TALLY_FORM_URL", "").strip()
+if not TALLY_FORM_URL:
+    raise RuntimeError("Missing required environment variable: TALLY_FORM_URL")
+
 # ── rate limiting (in-memory, per-user) ──
 
 RATE_LIMIT_PER_MIN = 10
@@ -340,17 +347,17 @@ def _handle_telegram_link(chat_id: int, telegram_id: str, token: str) -> None:
                             break
 
                 if not has_active_token:
-                    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+                    tally_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
                     tally_token_res = db.table("link_tokens").insert({
                         "user_id": web_user_id,
                         "kind": "tally_submission",
-                        "expires_at": expires_at.isoformat()
+                        "expires_at": tally_token_expires_at.isoformat()
                     }).execute()
                     if tally_token_res and tally_token_res.data:
                         id_token = tally_token_res.data[0]["token"]
 
                 if id_token:
-                    onboarding_url = f"https://tally.so/r/ODPGak?idToken={id_token}"
+                    onboarding_url = f"{TALLY_FORM_URL}?idToken={id_token}"
                     invitation_msg = (
                         "💡 *A Thoughtful Recommendation for Your Travels*\n\n"
                         "To help me provide highly personalized recommendations tailored to your traveler style, "

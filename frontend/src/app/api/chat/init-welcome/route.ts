@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/service";
 
+// Fail-fast at module load: a misconfigured deployment surfaces here instead
+// of as a 500 on the first user request.
+const TALLY_FORM_URL = process.env.TALLY_FORM_URL;
+if (!TALLY_FORM_URL) {
+  throw new Error("TALLY_FORM_URL environment variable is required");
+}
+
 /**
  * POST /api/chat/init-welcome
  *
@@ -34,8 +41,6 @@ export async function POST(request: Request) {
     }
 
     const service = createServiceClient();
-
-
 
     // ── 2. Check if the user already has a completed form response ─────────
     const { data: profile, error: profileErr } = await service
@@ -142,12 +147,8 @@ export async function POST(request: Request) {
     }
 
     // ── 6. Insert pre-populated welcome message ────────────────────────────
-    const tallyBaseUrl = process.env.TALLY_FORM_URL;
-    if (!tallyBaseUrl) {
-      throw new Error("TALLY_FORM_URL environment variable is not set");
-    }
-    const onboardingUrl = `${tallyBaseUrl}?idToken=${idToken}`;
-    const welcomeBody = 
+    const onboardingUrl = `${TALLY_FORM_URL}?idToken=${idToken}`;
+    const welcomeBody =
       `👋 Welcome to Aletheia Travel! I'm your AI travel companion, ready to help you plan your next adventure, discover hidden gems, and curate seamless itineraries.\n\n` +
       `💡 *A Thoughtful Recommendation for Your Travels*\n\n` +
       `To help me provide highly personalized recommendations tailored to your traveler style, ` +

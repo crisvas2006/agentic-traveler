@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
+// Fail-fast at module load: misconfigured deploys surface here, not in the
+// request path. The leading "@" is allowed in the env file for clarity but
+// stripped here once at startup.
+const rawBotUsername = process.env.TELEGRAM_BOT_USERNAME;
+if (!rawBotUsername) {
+  throw new Error("TELEGRAM_BOT_USERNAME environment variable is required");
+}
+const BOT_USERNAME = rawBotUsername.startsWith("@")
+  ? rawBotUsername.slice(1)
+  : rawBotUsername;
+
 export async function POST(request: Request) {
   // Origin check
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
@@ -16,19 +27,6 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Resolve and validate bot username from environment
-  let botUsername = process.env.TELEGRAM_BOT_USERNAME || "";
-  if (!botUsername) {
-    console.error("[telegram-link] TELEGRAM_BOT_USERNAME is not configured");
-    return NextResponse.json(
-      { error: "Server Configuration Error: TELEGRAM_BOT_USERNAME is missing." },
-      { status: 500 }
-    );
-  }
-  if (botUsername.startsWith("@")) {
-    botUsername = botUsername.substring(1);
   }
 
   try {
@@ -51,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     const token: string = data.token;
-    const launchUrl = `https://t.me/${botUsername}?start=link_${token}`;
+    const launchUrl = `https://t.me/${BOT_USERNAME}?start=link_${token}`;
 
     return NextResponse.json({ success: true, token, launchUrl });
   } catch (error) {
