@@ -413,11 +413,11 @@ def test_process_background_profiling_has_credits(mock_user_repo, mock_profile_a
     
     _process_background_profiling("user-uuid-123", {"travel_bubble": "Solo"})
     
-    # ProfileAgent should be initialized and build_initial_profile called with user_uuid=None and token_records list
+    # ProfileAgent should be initialized and build_initial_profile called with user_uuid="user-uuid-123" and token_records list
     mock_profile_agent.assert_called_once()
     mock_profile_agent.return_value.build_initial_profile.assert_called_once_with(
         {"form_response": {"travel_bubble": "Solo"}},
-        user_uuid=None,
+        user_uuid="user-uuid-123",
         token_records=ANY
     )
 

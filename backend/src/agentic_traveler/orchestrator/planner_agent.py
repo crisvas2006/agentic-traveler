@@ -92,7 +92,7 @@ class PlannerAgent:
         message: str,
         conversation_context: str,
         current_time: str,
-        preference_updated: Optional[Dict[str, str]] = None,
+        preference_raw: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a structured day-by-day itinerary.
@@ -109,11 +109,11 @@ class PlannerAgent:
         profile_summary = build_profile_summary(user_doc)
 
         pref_note = ""
-        if preference_updated:
+        if preference_raw:
             pref_note = (
                 f"\n<preference_updated>\n"
                 f"The user just revealed a new preference: "
-                f"{preference_updated.get('key')} = {preference_updated.get('value')}\n"
+                f"{preference_raw}\n"
                 f"Acknowledge this naturally in your response.\n"
                 f"</preference_updated>\n"
             )

@@ -69,7 +69,6 @@ def _process_background_profiling(user_uuid: str, form_response: dict) -> None:
     import json
     from agentic_traveler.orchestrator.profile_agent import ProfileAgent
     from agentic_traveler.tools.user_repo import UserRepository
-
     from agentic_traveler.tools.db_client import get_db
 
     logger.info("Executing background traveler DNA profiling for user %s", user_uuid)
@@ -86,8 +85,6 @@ def _process_background_profiling(user_uuid: str, form_response: dict) -> None:
         return
 
     try:
-        from agentic_traveler.economy import credit_manager
-        
         token_records = []
         profile_agent = ProfileAgent()
 
@@ -105,7 +102,7 @@ def _process_background_profiling(user_uuid: str, form_response: dict) -> None:
         safe_form_data = _safe_serialize(form_response)
         structured_data, response, latency_ms = profile_agent.build_initial_profile(
             {"form_response": safe_form_data},
-            user_uuid=None,
+            user_uuid=user_uuid,
             token_records=token_records
         )
 
@@ -164,6 +161,7 @@ def _process_background_profiling(user_uuid: str, form_response: dict) -> None:
     # This runs regardless of whether the second LLM call succeeded, using whatever records we gathered.
     if token_records:
         try:
+            from agentic_traveler.economy import credit_manager
             credit_manager.record_usage_and_bill(
                 user_id=user_uuid,
                 token_records=token_records,

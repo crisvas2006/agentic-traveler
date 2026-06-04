@@ -86,7 +86,7 @@ def test_dispatch_to_trip_agent(mock_user_repo, patched_deps):
     mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
     patched_deps["router"].return_value.classify.return_value = {
         "intent": "TRIP",
-        "preference_updated": None,
+        "preference_raw": None,
         "raw_response": MagicMock(),
         "latency_ms": 100
     }
@@ -110,7 +110,7 @@ def test_dispatch_to_planner_agent(mock_user_repo, patched_deps):
     mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
     patched_deps["router"].return_value.classify.return_value = {
         "intent": "PLAN",
-        "preference_updated": None,
+        "preference_raw": None,
         "raw_response": MagicMock(),
         "latency_ms": 100
     }

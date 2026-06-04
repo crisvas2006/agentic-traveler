@@ -59,7 +59,7 @@ Your job is to read user data (from forms or chat) and output a JSON profile of 
 We measure travel personality across the following 15 dimensions (0.0 to 1.0):
 {", ".join(_DIMENSIONS_LIST)}
 
-Output ONLY valid JSON matching this schema exactly:
+Output ONLY valid JSON matching this schema:
 {{
   "personality_dimensions_scores": {{
     "exploration_tolerance": <float 0.0-1.0>,
@@ -71,6 +71,8 @@ Output ONLY valid JSON matching this schema exactly:
   "summary": "A comprehensive summary of this traveler's style, heavily referencing their specific traits, avoidances, and preferences",
   "short_summary": "A 2-3 sentence condensed, compelling summary capturing the absolute heart and essence of their Traveler DNA. Written in a warm, highly insightful tone, ready to be sent to the user as their onboarding acknowledgment message. Do NOT include any introductory or meta-text."
 }}
+
+The JSON may also include additional keys representing specific categories of travel preferences (e.g., "trip_vibe", "absolute_avoidances", "travel_deal_breakers", "travel_motivations", "typical_trip_lengths", "budget", "diet", etc.). When updating or merging profiles, preserve any such existing keys and update or add them as appropriate.
 
 {_PROFILE_GUIDELINES}
 """
@@ -102,18 +104,65 @@ class ProfileAgent:
         """
         Processes a raw Tally form submission into a structured profile.
         Returns a tuple of (profile_dict, response, latency_ms).
+
+        NOTE on user_uuid:
+        - If user_uuid is provided, this method fetches the user's existing profile from
+          the database and prompts the LLM to intelligently merge the new onboarding
+          data with the existing conversational preferences (resolving conflicts while
+          preserving independent preferences).
+        - Passing user_uuid does NOT trigger credit billing or database writes inside
+          this method. Billing and saving of the returned structured profile are the
+          caller's responsibility.
         """
         if not self._client:
             logger.warning("No Gemini client available for ProfileAgent.")
             return self._build_fallback(), None, 0.0
 
-        prompt = (
-            "Please analyze the following raw form submission and generate a full "
-            "travel personality profile JSON.\n\n"
-            f"FORM DATA:\n{json.dumps(raw_form_data, indent=2)}"
-        )
+        existing_profile = {}
+        if user_uuid:
+            from agentic_traveler.tools.db_client import get_db
+            try:
+                res = get_db().table("user_profiles").select("profile_data, summary").eq("user_id", user_uuid).maybe_single().execute()
+                if res and res.data:
+                    existing_profile = res.data.get("profile_data") or {}
+                    db_summary = res.data.get("summary") or ""
+                    if db_summary and "summary" not in existing_profile:
+                        existing_profile["summary"] = db_summary
+            except Exception:
+                logger.exception("Failed to fetch existing profile for user_uuid=%s inside build_initial_profile", user_uuid)
 
-        return self._call_llm(prompt)
+        fallback_base = {**self._build_fallback(), **existing_profile}
+
+        if existing_profile:
+            prompt = (
+                "You are tasked with intelligently merging a new Tally onboarding form submission "
+                "with the traveler's existing profile preferences.\n\n"
+                "Here is the user's EXISTING PROFILE (which contains conversational/chat-learned preferences):\n"
+                f"{json.dumps(existing_profile, indent=2)}\n\n"
+                "Here is the NEW TALLY FORM SUBMISSION DATA:\n"
+                f"{json.dumps(raw_form_data, indent=2)}\n\n"
+                "INSTRUCTIONS FOR MERGING:\n"
+                "1. If a preference in the existing profile directly conflicts with the new Tally form results "
+                "(e.g., if the existing profile says the user likes a 'packed itinerary' but the new form "
+                "indicates they prefer a 'relaxed/light itinerary', or they chose a different budget tier/vibe), "
+                "the new onboarding form's results MUST override the old conflicting preference.\n"
+                "2. If there are custom keys or specific preferences in the existing profile (like dietary "
+                "restrictions, specific user-constructed preferences, or avoidances) that do NOT conflict "
+                "with and are independent of the new form responses, you MUST preserve them in the final JSON.\n"
+                "3. Re-calculate personality dimensions scores, tags, tone preferences, and update summaries to "
+                "coherently incorporate both the new form data and the preserved existing preferences.\n"
+                "4. Output the complete merged profile JSON. The JSON output must contain all standard fields "
+                "(personality_dimensions_scores, tags, tone_preference, additional_info, summary, short_summary) "
+                "plus any preserved custom keys from the existing profile."
+            )
+        else:
+            prompt = (
+                "Please analyze the following raw form submission and generate a full "
+                "travel personality profile JSON.\n\n"
+                f"FORM DATA:\n{json.dumps(raw_form_data, indent=2)}"
+            )
+
+        return self._call_llm(prompt, fallback_profile=fallback_base)
 
     def update_profile(
         self,
@@ -128,21 +177,21 @@ class ProfileAgent:
             logger.warning("No Gemini client available for ProfileAgent.")
             return current_profile, None, 0.0
 
-        # Ensure we only pass the structured parts to the LLM to save tokens
-        # (Exclude raw form_response if it exists in the dict being passed in)
+        # Exclude internal/database-only fields or large raw responses if they slip in
         context_profile = {
-            "personality_dimensions_scores": current_profile.get("personality_dimensions_scores", {}),
-            "tags": current_profile.get("tags", []),
-            "tone_preference": current_profile.get("tone_preference", ""),
-            "additional_info": current_profile.get("additional_info", ""),
-            "summary": current_profile.get("summary", ""),
-            "short_summary": current_profile.get("short_summary", ""),
+            k: v for k, v in current_profile.items()
+            if k not in ("form_response",)
         }
 
         prompt = (
             "Please update the following existing travel profile based on the new preference "
-            "revealed by the user. Adjust scores if necessary, add relevant tags, and "
-            "update the summary/additional_info to incorporate this fact. Return ONLY JSON with updated profile.\n\n"
+            "revealed by the user.\n"
+            "Analyze the new preference statement and intelligently merge it into the existing profile.\n"
+            "INSTRUCTIONS:\n"
+            "1. Update standard fields (personality_dimensions_scores, tags, tone_preference, additional_info, summary, short_summary) as appropriate.\n"
+            "2. If the preference corresponds to standard custom keys (e.g. 'trip_vibe', 'absolute_avoidances', 'travel_deal_breakers', 'travel_motivations', 'typical_trip_lengths') or specific details like diet, budget, or other preferences, merge or update those keys directly in the profile JSON.\n"
+            "3. If a new preference directly conflicts with an existing preference (e.g. 'User likes to have a packed itinerary' vs 'I want a light itinerary'), overwrite/update the old conflicting preference. Keep independent non-conflicting preferences.\n"
+            "4. Return ONLY valid JSON containing the entire updated profile, preserving all non-conflicting custom and standard keys.\n\n"
             f"{_PROFILE_GUIDELINES}\n\n"
             f"CURRENT PROFILE:\n{json.dumps(context_profile, indent=2)}\n\n"
             f"NEW PREFERENCE LEARNED:\n{new_preference}"
@@ -152,8 +201,7 @@ class ProfileAgent:
 
     def save_preference(
         self,
-        key: str,
-        value: str,
+        preference_raw: str,
         user_doc: Dict[str, Any],
         user_id: str,
         _sync: bool = False,
@@ -162,7 +210,6 @@ class ProfileAgent:
         """
         Persist a preference extracted by the orchestrator by asynchronously
         (or synchronously if token_records is provided) updating the profile in Supabase.
-        Updates key-value directly, then runs update_profile to update summary and scores coherently.
         """
         import threading
         from agentic_traveler.tools.db_client import get_db
@@ -190,30 +237,13 @@ class ProfileAgent:
                             if k not in ("profile_data", "form_response", "summary")
                         }
 
-                # 2. Update/Merge preference locally
-                if key in LIST_FIELDS:
-                    current_val = current_profile.get(key)
-                    if isinstance(current_val, list):
-                        new_list = list(current_val)
-                    elif current_val is not None:
-                        new_list = [current_val]
-                    else:
-                        new_list = []
-
-                    if value not in new_list:
-                        new_list.append(value)
-                    current_profile[key] = new_list
-                else:
-                    current_profile[key] = value
-
                 # Make sure summary is present in current_profile context for LLM prompt
                 if "summary" not in current_profile or not current_profile["summary"]:
                     current_profile["summary"] = db_summary
 
-                # 3. Call update_profile to run LLM
-                new_fact = f"The user indicated their '{key}' preference is: {value}"
+                # 2. Call update_profile to run LLM
                 updated_structured_data, response, latency_ms = self.update_profile(
-                    new_fact, dict(current_profile)
+                    preference_raw, dict(current_profile)
                 )
 
                 # Log and accumulate the usage at the caller boundary!
@@ -235,11 +265,11 @@ class ProfileAgent:
                             "agent_name": "profile_agent",
                         })
 
-                # Merge LLM output into current_profile
+                # Merge LLM output into current_profile (retaining standard and custom keys)
                 current_profile.update(updated_structured_data)
                 updated_summary = current_profile.pop("summary", "")
 
-                # 4. Upsert the updated profile_data and summary into user_profiles
+                # 3. Upsert the updated profile_data and summary into user_profiles
                 get_db().table("user_profiles").upsert(
                     {
                         "user_id": user_id,
@@ -248,7 +278,7 @@ class ProfileAgent:
                     }
                 ).execute()
 
-                # 5. Bill user immediately if token_records is None and response exists
+                # 4. Bill user immediately if token_records is None and response exists
                 if token_records is None and response and usage:
                     from agentic_traveler.economy import credit_manager
                     billing_records = [{
@@ -264,18 +294,12 @@ class ProfileAgent:
                         run_async=False,
                     )
 
-                try:
-                    logger.info(
-                        "Updated profile structure with preference: %s = %s (sync=%s)", key, value, should_sync
-                    )
-                except (ValueError, TypeError):
-                    pass
+                logger.info(
+                    "Updated profile structure with preference: %s (sync=%s)", preference_raw, should_sync
+                )
 
             except Exception:
-                try:
-                    logger.exception("Failed to update user profile structure.")
-                except (ValueError, TypeError):
-                    pass
+                logger.exception("Failed to update user profile structure.")
 
         if should_sync:
             _async_update()
@@ -286,10 +310,13 @@ class ProfileAgent:
     def _call_llm(
         self,
         prompt: str,
+        fallback_profile: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], Any, float]:
         """Calls the LLM and forces JSON output. Returns (result, response, latency_ms)"""
         _max_retries = 2
         _retry_waits = [3, 6]
+        
+        fallback = fallback_profile if fallback_profile is not None else self._build_fallback()
         
         for _attempt in range(_max_retries + 1):
             try:
@@ -329,9 +356,9 @@ class ProfileAgent:
                     time.sleep(wait)
                 else:
                     logger.exception("Failed to generate profile structure: %s", e)
-                    return self._build_fallback(), None, 0.0
+                    return fallback, None, 0.0
         
-        return self._build_fallback(), None, 0.0
+        return fallback, None, 0.0
 
     def _build_fallback(self) -> Dict[str, Any]:
         """Returns a safe default structure if the LLM fails."""

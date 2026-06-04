@@ -199,10 +199,10 @@ class OrchestratorAgent:
                 token_records.append(router_usage)
 
         intent = router_result.get("intent", "CHAT")
-        preference_updated = router_result.get("preference_updated")
+        preference_raw = router_result.get("preference_raw")
         router_response = router_result.get("response")
 
-        logger.info("Intent: %s | Preference update: %s", intent, preference_updated)
+        logger.info("Intent: %s | Preference raw: %s", intent, preference_raw)
 
         # ── 5. Handle intent ────────────────────────────────────────────────
 
@@ -246,7 +246,7 @@ class OrchestratorAgent:
         # ── 5c. Dispatch to specialized agent ───────────────────────────────
         agent_result = _dispatch(
             self, intent, user_doc, message_text, conv_context,
-            current_time, preference_updated, status_callback,
+            current_time, preference_raw, status_callback,
         )
 
         response_text = agent_result.get("text", "")
@@ -335,7 +335,7 @@ def _dispatch(
     message: str,
     conv_context: str,
     current_time: str,
-    preference_updated: Optional[Dict[str, str]],
+    preference_raw: Optional[str],
     status_callback: Optional[Callable[[str], None]],
 ) -> Dict[str, Any]:
     """Dispatch to the correct specialized agent based on intent."""
@@ -347,7 +347,7 @@ def _dispatch(
             message=message,
             conversation_context=conv_context,
             current_time=current_time,
-            preference_updated=preference_updated,
+            preference_raw=preference_raw,
         )
     elif intent == "PLAN":
         if status_callback:
@@ -357,7 +357,7 @@ def _dispatch(
             message=message,
             conversation_context=conv_context,
             current_time=current_time,
-            preference_updated=preference_updated,
+            preference_raw=preference_raw,
         )
     else:  # CHAT (default)
         return coordinator._chat_agent.process_request(
@@ -365,7 +365,7 @@ def _dispatch(
             message=message,
             conversation_context=conv_context,
             current_time=current_time,
-            preference_updated=preference_updated,
+            preference_raw=preference_raw,
         )
 
 

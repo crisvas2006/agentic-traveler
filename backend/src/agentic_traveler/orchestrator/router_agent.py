@@ -63,6 +63,10 @@ INTENTS:
 
 Classify the intent. If the user's message warrants calling a tool, call the appropriate tool AND still classify the intent.
 
+CRITICAL: If the user's message reveals a new personal preference that is not already in the known preferences, call the update_preferences tool with the raw preference statement AND set the "preference_raw" field in the JSON response to the same raw preference statement.
+CRITICAL: Call update_preferences at most once per message.
+CRITICAL: Never extrapolate or speculate on preferences. Only update preferences when they are explicitly stated in the message. Do NOT assume tone preferences (like "concise") just because the user's message is short or brief.
+
 CRITICAL: The record_feedback tool is ONLY for the current message and if the user is explicitly talking ABOUT THE BOT ITSELF (e.g. "you are a great bot", "this app sucks", "add a dark mode").
 Do NOT use it for travel questions, personal statements, frustration with travel, testing, or random gibberish. If you are not 100% sure it is app feedback, DO NOT call it.
 
@@ -72,7 +76,7 @@ Respond ONLY with a JSON object matching this schema:
 {{
   "intent": "TRIP|CHAT|PLAN|OFF_TOPIC",
   "request_summary": "one-sentence description of what the user wants",
-  "preference_updated": {{"key": "...", "value": "..."}} or null,
+  "preference_raw": "raw user statement indicating preference, or null",
   "response": "natural redirection text (OFF_TOPIC) OR credit balance info, else null"
 }}
 
@@ -112,7 +116,7 @@ class RouterAgent:
         Returns a dict with keys:
             intent: str — CHAT | TRIP | PLAN | OFF_TOPIC
             request_summary: str
-            preference_updated: dict | None
+            preference_raw: str | None
             response: str | None  — only set for OFF_TOPIC or get_my_credits
             raw_response: the raw genai response (for token logging)
             latency_ms: float
@@ -120,33 +124,30 @@ class RouterAgent:
 
         # ── tool definitions (closures capture user context safely) ──────────
 
-        def update_preferences(preference_key: str, preference_value: str) -> str:
+        def update_preferences(preference_raw: str) -> str:
             """
-            Persist a NEWLY learned or CHANGED user preference to their profile.
+            Persist a newly learned user preference from the user's current message to their profile.
 
             Call this when the user's CURRENT message reveals a new personal preference
             or changes an existing one (e.g. related to budget, travel style, dietary needs, tone).
             
-            CRITICAL: DO NOT call this tool for preferences that are already known and 
-            listed in your system prompt (e.g. if the prompt says 'Tone preference: intense', 
-            do not call this to record 'intense' again).
-            
+            CRITICAL: Only call this if the user explicitly states a preference. Never speculate
+            or extrapolate tone preferences (like "concise") from brief or short messages.
+
             Args:
-                preference_key: Short identifier for the preference
-                    (e.g. "budget", "avoidances", "diet", "travel_style", "tone_preference").
-                preference_value: The preference value to store.
+                preference_raw: The exact raw user statement containing the preference.
 
             Returns:
                 Confirmation string.
             """
-            logger.info("🔧 Router tool: update_preferences(%s=%s)", preference_key, preference_value)
+            logger.info("🔧 Router tool: update_preferences(%s)", preference_raw)
             if user_id:
                 self._profile_agent.save_preference(
-                    preference_key, preference_value,
+                    preference_raw,
                     user_doc, user_id,
                     # Do not pass token_records so it executes asynchronously
                 )
-            return f"Noted: {preference_key} = {preference_value}"
+            return f"Noted preference: {preference_raw}"
 
         def record_feedback(category: str, text: str) -> str:
             """
@@ -248,46 +249,46 @@ class RouterAgent:
             # raises JSONDecodeError and we lose the entire result.
             # Detect this situation and build the result dict from the parts directly.
             text = raw.text or ""
-            preference_updated_from_tool: dict | None = None
+            preference_raw_from_tool: str | None = None
+
+            # Always try to recover preference_raw from function calls as the primary source or fallback
+            try:
+                for candidate in (getattr(raw, "candidates", None) or []):
+                    for part in (getattr(candidate.content, "parts", None) or []):
+                        fc = getattr(part, "function_call", None)
+                        if fc and getattr(fc, "name", None) == "update_preferences":
+                            args = dict(fc.args or {})
+                            preference_raw_from_tool = args.get("preference_raw")
+            except Exception:
+                pass
 
             if not text:
-                # AFC tool-call path: try to recover intent from any function call parts
-                try:
-                    for candidate in (getattr(raw, "candidates", None) or []):
-                        for part in (getattr(candidate.content, "parts", None) or []):
-                            fc = getattr(part, "function_call", None)
-                            if fc and getattr(fc, "name", None) == "update_preferences":
-                                args = dict(fc.args or {})
-                                preference_updated_from_tool = {
-                                    "key": args.get("preference_key", ""),
-                                    "value": args.get("preference_value", ""),
-                                }
-                except Exception:
-                    pass
-
                 # Cannot determine intent from empty text — default to CHAT so the
-                # user still gets a response.  The preference update already ran via
+                # user still gets a response. The preference update already ran via
                 # AFC side effect.
                 result = {
                     "intent": "CHAT",
                     "request_summary": message,
-                    "preference_updated": preference_updated_from_tool,
+                    "preference_raw": preference_raw_from_tool,
                     "response": None,
                 }
                 logger.info(
                     "Router returned no text (AFC tool-only turn). "
-                    "Defaulting intent=CHAT, preference_updated=%s",
-                    preference_updated_from_tool,
+                    "Defaulting intent=CHAT, preference_raw=%s",
+                    preference_raw_from_tool,
                 )
             else:
                 try:
                     result = json.loads(text)
+                    # Merge JSON preference_raw with tool extraction if JSON lacks it
+                    if not result.get("preference_raw") and preference_raw_from_tool:
+                        result["preference_raw"] = preference_raw_from_tool
                 except json.JSONDecodeError:
                     logger.warning("Router JSON parse failed. Raw text: %s", text)
                     result = {
                         "intent": "CHAT",
                         "request_summary": message,
-                        "preference_updated": None,
+                        "preference_raw": preference_raw_from_tool,
                         "response": None,
                     }
 
@@ -304,7 +305,7 @@ class RouterAgent:
             return {
                 "intent": "CHAT",
                 "request_summary": message,
-                "preference_updated": None,
+                "preference_raw": None,
                 "response": None,
                 "raw_response": None,
                 "latency_ms": (time.time() - t) * 1000,

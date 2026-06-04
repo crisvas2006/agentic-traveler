@@ -20,8 +20,8 @@ def user_doc():
 @patch("agentic_traveler.orchestrator.profile_agent.ProfileAgent.update_profile")
 @patch("agentic_traveler.analytics.usage_tracker.log_and_accumulate")
 @patch("agentic_traveler.economy.credit_manager.record_usage_and_bill")
-def test_save_known_scalar_field(mock_bill, mock_log, mock_update, mock_get_db, user_doc):
-    """Known scalar field -> updates local data, calls LLM update, and bills immediately if token_records is None."""
+def test_save_scalar_field_via_raw_pref(mock_bill, mock_log, mock_update, mock_get_db, user_doc):
+    """Raw preference statement -> calls LLM update with full profile, and bills immediately if token_records is None."""
     mock_db = MagicMock()
     mock_get_db.return_value = mock_db
     
@@ -63,14 +63,14 @@ def test_save_known_scalar_field(mock_bill, mock_log, mock_update, mock_get_db, 
     }
     
     agent = ProfileAgent()
-    agent.save_preference("budget_priority", "luxury", user_doc, "user-uuid-123", _sync=True)
+    agent.save_preference("I prefer luxury budget", user_doc, "user-uuid-123", _sync=True)
 
     # Check update_profile is called with correct context
     mock_update.assert_called_once_with(
-        "The user indicated their 'budget_priority' preference is: luxury",
+        "I prefer luxury budget",
         {
             "trip_vibe": ["Adventure", "Nature"],
-            "budget_priority": "luxury",
+            "budget_priority": "mid-range",
             "summary": "Old summary.",
         }
     )
@@ -104,8 +104,8 @@ def test_save_known_scalar_field(mock_bill, mock_log, mock_update, mock_get_db, 
 @patch("agentic_traveler.orchestrator.profile_agent.ProfileAgent.update_profile")
 @patch("agentic_traveler.analytics.usage_tracker.log_and_accumulate")
 @patch("agentic_traveler.economy.credit_manager.record_usage_and_bill")
-def test_save_known_list_field_merges(mock_bill, mock_log, mock_update, mock_get_db, user_doc):
-    """Known list field -> merges values, calls LLM, and updates database."""
+def test_save_list_field_merges_via_raw_pref(mock_bill, mock_log, mock_update, mock_get_db, user_doc):
+    """Raw preference statement -> calls LLM, and updates database with updated structure."""
     mock_db = MagicMock()
     mock_get_db.return_value = mock_db
     
@@ -145,13 +145,13 @@ def test_save_known_list_field_merges(mock_bill, mock_log, mock_update, mock_get
     }
     
     agent = ProfileAgent()
-    agent.save_preference("trip_vibe", "Beach", user_doc, "user-uuid-123", _sync=True)
+    agent.save_preference("I want Beach vibes", user_doc, "user-uuid-123", _sync=True)
 
-    # Check update_profile is called with correctly merged list
+    # Check update_profile is called with correct context
     mock_update.assert_called_once_with(
-        "The user indicated their 'trip_vibe' preference is: Beach",
+        "I want Beach vibes",
         {
-            "trip_vibe": ["Adventure", "Nature", "Beach"],
+            "trip_vibe": ["Adventure", "Nature"],
             "budget_priority": "mid-range",
             "summary": "Old summary.",
         }
@@ -212,7 +212,7 @@ def test_save_with_token_records_accumulates(mock_bill, mock_log, mock_update, m
     
     agent = ProfileAgent()
     token_records = []
-    agent.save_preference("budget_priority", "luxury", user_doc, "user-uuid-123", _sync=True, token_records=token_records)
+    agent.save_preference("I prefer luxury budget", user_doc, "user-uuid-123", _sync=True, token_records=token_records)
 
     # Check token_records contains the record
     assert len(token_records) == 1
