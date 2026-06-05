@@ -267,8 +267,23 @@ saga / agent / tool change:
   must accept partial entries.
 - **Country / safety / health / money intel are cached world facts, never
   authoritative.** Every render carries a "verify with official sources"
-  disclaimer. TTL refresh on view; never claim authority on visa, medical, or
-  legal matters.
+  disclaimer. Snapshot is captured once on destination-confirmed; refresh
+  is **explicit user request only** (never silent on view, to avoid
+  burning grounded-search credits). Never claim authority on visa, medical,
+  or legal matters.
+- **Conciseness is a product invariant.** Every user-facing agent reply
+  carries an explicit length budget per step. Bake the cap into the saga's
+  system prompt and assert it in tests (`len(SagaResult.text) <= cap`).
+  Defaults: chat ack ≤ 320 chars; slot-fill question ≤ 200 chars (one
+  question per turn); destination suggestions ≤ 1 200 chars / 3 options;
+  country intel summary line ≤ 280 chars (details unfold in card UI);
+  full itinerary ≤ 3 500 chars. User-overridable via
+  `user_profiles.profile_data.reply_length_preference ∈ {terse, default,
+  verbose}`.
+- **Hard overrides cross saga boundaries.** When the user says "never ask
+  me X, it's always Y" the answer is stored in
+  `user_profiles.profile_data.hard_overrides` and **every** saga checks
+  it during slot-fill. Not just the saga that originally heard the rule.
 
 Read `AGENTIC_GUIDELINES.md` before proposing new agents, changing prompts,
 or adding tools.
@@ -309,7 +324,7 @@ Frontend `.env.local`: `NEXT_PUBLIC_SUPABASE_URL`,
 ## 9. Things to NEVER Do in This Repo
 
 - **Never auto-deploy** to Cloud Run or Vercel. Approval required every time.
-- **Never auto-commit.** The user runs `git commit` and `git push`.
+- **Never run modifying git commands** (such as `git add`, `git commit`, `git restore`, `git reset`, `git checkout`). The agent must never modify git state or stage/unstage files; only read-only git operations (e.g., `git status`, `git diff`, `git log`) are allowed.
 - **Never amend commits** — always create a new commit. Never `--no-verify`.
 - **Never apply Supabase migrations manually** in prod. Use `supabase/schema_public.sql`
   + migration tooling. Schema/RLS lives in source control.

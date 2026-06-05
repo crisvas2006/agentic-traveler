@@ -76,3 +76,8 @@ When modifying, designing, or adding agents, tools, or prompts in the `backend/s
       ) for c in [...]
   ]
   ```
+
+---
+
+## 3. Git Operations & Safe Sandbox Guidelines
+- **Strict Read-Only Git Policy:** Gemini agents must never run modifying git commands (including `git add`, `git commit`, `git restore`, `git reset`, `git checkout`). You are limited strictly to read-only git operations (e.g. `git status`, `git diff`, `git log`, `git show`). Any staging, unstaging, or committing of files must be left entirely to the user.

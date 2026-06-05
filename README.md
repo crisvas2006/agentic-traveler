@@ -172,12 +172,12 @@ The system uses a tiered model approach to balance reasoning quality and cost:
 
 | Agent | Model | Rationale |
 | :--- | :--- | :--- |
-| **Router** | `gemini-3.1-flash-lite-preview` | Ultra-fast, low-cost classification. |
-| **Chat** | `gemini-3.1-flash-lite-preview` | Responsive conversational agent. |
-| **Search** | `gemini-3.1-flash-lite-preview` | Lightweight grounding proxy. |
-| **Trip** | `gemini-3-flash-preview` | Richer reasoning for travel advice. |
-| **Planner** | `gemini-3-flash-preview` | Multi-day coherence and structured output. |
-| **Analytics** | `gemini-2.5-flash-lite` | Extremely low-cost summarization of logs. |
+| **Router** | `gemini-3.1-flash-lite` | Ultra-fast, low-cost classification. |
+| **Chat** | `gemini-3.1-flash-lite` | Responsive conversational agent. |
+| **Search** | `gemini-3.1-flash-lite` | Lightweight grounding proxy. |
+| **Profile** | `gemini-3.1-flash-lite` | Renders structured Traveler DNA from Tally onboarding. |
+| **Trip** | `gemini-3.5-flash` | Richer reasoning for destination discovery. |
+| **Planner** | `gemini-3.5-flash` | Multi-day coherence and structured itinerary building. |
 
 The backend is stateless: each request reconstructs context from Supabase and tools, then responds directly to Telegram.
 
@@ -372,7 +372,7 @@ Must have features for the first version:
 
 1.  **Destination discovery**
     
-    *   Input: user profile from Firestore, trip constraints from Telegram chat (rough dates or time window, duration, budget band, desired vibe, energy, willingness for discomfort).
+    *   Input: user profile from Supabase (`user_profiles` table), trip constraints from Telegram chat (rough dates or time window, duration, budget band, desired vibe, energy, willingness for discomfort).
         
     *   Output:
         
@@ -428,7 +428,7 @@ Must have features for the first version:
     
     *   The system uses:
         
-        *   user\_profile from Firestore as long term personalization.
+        *   user_profile from Supabase (`user_profiles` table) as long term personalization.
             
         *   An event log per user and trip (suggestion offered, accepted, rejected), which is used for lightweight preference learning.
             
@@ -606,104 +606,213 @@ isort .
 
 ## Project Structure
 
-The project follows a modular, domain-driven architecture:
+The project is structured as a monorepo containing both the backend agent service and the Next.js web application:
 
 ```text
-src/agentic_traveler/
-├── analytics/         # Metrics tracking & usage logging (flushed to Firestore)
-├── core/              # Foundational logic (sanitization, shared utilities)
-├── economy/           # User credits & promo code management
-├── guards/            # Security layers (off-topic guard)
-├── interfaces/        # Entry points (CLI, Webhook handler)
-├── orchestrator/      # Multi-agent system (Orchestrator, Discovery, Planner, Companion)
-└── tools/             # External tool implementations (Firestore, Weather, Search)
+agentic-traveler/
+├── backend/                    # Python FastAPI + Google GenAI service
+│   ├── src/agentic_traveler/   # Backend core package (modular, layered architecture)
+│   │   ├── analytics/          # Metrics buffering + weekly flush to Supabase
+│   │   ├── core/               # Foundational logic (sanitization, shared utilities)
+│   │   ├── economy/            # User credits & promo code management
+│   │   ├── guards/             # Security layers (off-topic guard)
+│   │   ├── interfaces/         # Entry points (CLI, Webhook handler)
+│   │   ├── orchestrator/       # Multi-agent system (Orchestrator, Chat, Trip, Planner, Profile, Search agents)
+│   │   └── tools/              # External tool implementations (Supabase DB client, Weather, Search)
+│   ├── tests/                  # Unit and integration tests
+│   └── scripts/                # Helper utilities (webhooks, alerts configuration)
+├── frontend/                   # Next.js 16 / React 19 web application
+│   ├── src/
+│   │   ├── app/                # Next.js App Router (dashboard, auth, chat UI)
+│   │   ├── components/         # Shared React components
+│   │   └── lib/                # Database clients & utility functions
+│   └── package.json            # Frontend dependency manager
+├── supabase/                   # Supabase schema definitions, RLS policies, and database hooks
+└── specs/                      # Markdown specifications for the project features and tasks
 ```
 
 ## Setup
 
-### 1. Create and activate the virtual environment
+### Backend Setup
+
+#### 1. Create and activate the virtual environment
+
+All python virtual environment setup, dependencies, and execution live in the `backend/` directory of the repository:
 
 ```powershell
+cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate
 ```
 
-### 2. Install dependencies
+#### 2. Install dependencies
+
+Install pinned runtime and development dependencies inside the activated environment:
 
 ```powershell
-pip install -e ".[dev]"
+pip install -r requirements.txt
+pip install -e .
 ```
 
-### 3. Environment variables
+#### 3. Environment variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the `backend/` directory:
 
 ```env
+# Google GenAI / Vertex AI settings
 GOOGLE_API_KEY=your-gemini-api-key
+GEMINI_REGION=global
 GOOGLE_PROJECT_ID=your-gcp-project-id
 GOOGLE_APPLICATION_CREDENTIALS=path/to/application_default_credentials.json
+
+# Database settings
+SUPABASE_URL=your-supabase-url
+SUPABASE_SERVICE_KEY=your-supabase-service-role-key
+SUPABASE_JWT_SECRET=your-supabase-jwt-secret
+
+# Economy & Channels
+DEFAULT_USER_CREDITS=200
+LINK_TOKEN_SECRET=your-token-signing-secret
+TALLY_WEBHOOK_TOKEN=your-tally-webhook-bearer-token
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_SECRET_TOKEN=your-telegram-webhook-secret-token
+
+# Observability (Optional)
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
+LANGSMITH_API_KEY=your-langsmith-api-key
+LANGSMITH_PROJECT=your-langsmith-project-name
 ```
 
-- **`GOOGLE_API_KEY`** — required for all Gemini LLM calls (orchestrator + sub-agents).
-- **`GOOGLE_PROJECT_ID`** — your GCP project ID (used by the Firestore client).
-- **`GOOGLE_APPLICATION_CREDENTIALS`** — path to the Application Default Credentials JSON file.
-  To generate it, run `gcloud auth application-default login` and copy the path it prints.
+- **`GOOGLE_API_KEY`** — required for Developer API access (used for all Gemini LLM calls).
+- **`GEMINI_REGION` & `GOOGLE_PROJECT_ID`** — regional settings if routing Vertex AI API calls.
+- **`GOOGLE_APPLICATION_CREDENTIALS`** — path to GCP credentials JSON if utilizing Vertex AI.
+- **`SUPABASE_URL` & `SUPABASE_SERVICE_KEY`** — required to connect to the database (service role key is needed to bypass Row Level Security for administration and billing).
+- **`LINK_TOKEN_SECRET`** — secret key for signing secure deep-link tokens.
 
-> **Note (Microsoft Store Python):** If you use the Microsoft Store version of Python,
-> `gcloud` saves credentials under a sandboxed `AppData` path. You **must** set
-> `GOOGLE_APPLICATION_CREDENTIALS` explicitly — see the path printed by the gcloud command.
+### Frontend Setup
+
+#### 1. Install dependencies
+
+Navigate to the `frontend/` directory and install the required npm packages:
+
+```powershell
+cd frontend
+npm install
+```
+
+#### 2. Environment variables
+
+Create a `.env.local` file in the `frontend/` directory:
+
+```env
+# Exposed to browser
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-anon-key
+# NEXT_PUBLIC_TURNSTILE_SITE_KEY=your-cloudflare-turnstile-key
+
+# Server-side secrets
+RESEND_API_KEY=your-resend-api-key
+RESEND_FROM_ADDRESS=noreply@yourdomain.com
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+BACKEND_URL=http://127.0.0.1:8080
+LINK_TOKEN_SECRET=your-token-signing-secret
+DEFAULT_USER_CREDITS=200
+TELEGRAM_BOT_USERNAME=@YourTelegramBot
+TALLY_FORM_URL=your-tally-form-endpoint
+```
+
+- **`NEXT_PUBLIC_SUPABASE_URL` & `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`** — public database URL and anonymous key for frontend Supabase SDK initialization.
+- **`SUPABASE_SERVICE_ROLE_KEY`** — service role key allowing backend API operations to bypass RLS.
+- **`BACKEND_URL`** — local or production URL of the Python FastAPI orchestrator backend.
+
+---
 
 ## Usage
 
-### Interactive CLI
+### Backend: Interactive CLI
 
-Chat with the orchestrator locally by impersonating an existing Firestore user:
-
-```powershell
-.\.venv\Scripts\python -m agentic_traveler.interfaces.cli
-```
-
-This lists all users in Firestore, lets you pick one, then opens an interactive chat loop. You can also pass a Telegram ID directly:
+Chat with the orchestrator locally by impersonating an existing Supabase user:
 
 ```powershell
-.\.venv\Scripts\python -m agentic_traveler.interfaces.cli --telegram-id 12345
+.\backend\.venv\Scripts\python -m agentic_traveler.interfaces.cli
 ```
+
+This lists users in Supabase, lets you pick one, then opens an interactive chat loop. You can also pass a Telegram ID directly:
+
+```powershell
+.\backend\.venv\Scripts\python -m agentic_traveler.interfaces.cli --telegram-id 12345
+```
+
+### Backend: Local FastAPI Server
+
+Start the local Python backend endpoint (runs by default on port `8080`):
+
+```powershell
+# Disables Telegram IP whitelist for local development
+$env:SKIP_IP_CHECK="1"
+.\backend\.venv\Scripts\uvicorn agentic_traveler.interfaces.main:app --reload --port 8080
+```
+
+### Frontend: Next.js Web App
+
+Start the local development server for the user dashboard:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+This runs the next dev server, making the visual spatial dashboard available at `http://localhost:3000`.
+
+---
 
 ## Testing
 
-### Unit tests
+### Backend: Unit tests
 
-Unit tests use mocked Firestore and LLM — no credentials needed:
-
-```powershell
-.\.venv\Scripts\python -m pytest tests/ --ignore=tests/integration -v
-```
-
-### Integration tests
-
-Integration tests use the **real Gemini API** and **real Firestore** database. They require:
-- `GOOGLE_API_KEY` set in `.env`
-- `GOOGLE_APPLICATION_CREDENTIALS` set in `.env`
-- A working GCP project with Firestore enabled
-
-Test data is created with a `_test: True` marker and automatically cleaned up after each test.
+Unit tests use mocked Supabase and LLM — no credentials needed:
 
 ```powershell
-$env:_INTEGRATION_TESTS="1"; .\.venv\Scripts\python -m pytest -m integration -v
+.\backend\.venv\Scripts\python -m pytest backend/tests/ --ignore=backend/tests/integration -v
 ```
 
-> The `_INTEGRATION_TESTS=1` env var tells the test framework to use the real
-> Firestore library instead of the mock used by unit tests.
+### Backend: Integration tests
 
-### Run all tests together
+Integration tests use the **real Gemini API** and **real Supabase** database. They require valid credentials configured in `backend/.env`.
 
 ```powershell
-$env:_INTEGRATION_TESTS="1"; .\.venv\Scripts\python -m pytest -v
+$env:_INTEGRATION_TESTS="1"; .\backend\.venv\Scripts\python -m pytest backend/tests/ -m integration -v
 ```
+
+### Backend: Run all tests together
+
+```powershell
+$env:_INTEGRATION_TESTS="1"; .\backend\.venv\Scripts\python -m pytest backend/tests/ -v
+```
+
+### Frontend: Validation & Linting
+
+Validate that the frontend builds and lints cleanly without Next.js errors or type mismatches:
+
+```powershell
+cd frontend
+
+# Run linting
+npm run lint
+
+# Build production bundle
+npm run build
+```
+
+---
 
 ## Deployment
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for instructions on deploying to Google Cloud.
+- **Backend**: Deployed to Google Cloud Run. Detailed guide at [DEPLOYMENT.md](backend/DEPLOYMENT.md).
+- **Frontend**: Deployed to Vercel (configured with automatic branch preview builds and production deploys).
+
+
 
 
 
