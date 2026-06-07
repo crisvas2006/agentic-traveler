@@ -134,7 +134,11 @@ Core agents (tool-calling architecture):
 2.  **Router Agent** — intent classifier
 
     *   Classifies user messages: CHAT | TRIP | PLAN | OFF_TOPIC.
-    *   Handles lightweight tools directly: `update_preferences()`, `record_feedback()`, `get_my_credits()`.
+    *   Uses **structured output** (a single JSON response), not function calling: the
+        model returns the intent plus any lightweight actions to take — a new preference
+        to save, app feedback, or a credit-balance answer — and deterministic Python runs
+        the side-effects. (Function calling was dropped here because combining it with
+        forced-JSON output on flash-lite caused unstable tool-call loops.)
     *   For OFF_TOPIC: generates a warm, natural redirection response.
 
 3.  **Chat Agent** — conversational companion
@@ -180,6 +184,18 @@ The system uses a tiered model approach to balance reasoning quality and cost:
 | **Planner** | `gemini-3.5-flash` | Multi-day coherence and structured itinerary building. |
 
 The backend is stateless: each request reconstructs context from Supabase and tools, then responds directly to Telegram.
+
+### Third-party data processors
+
+| Processor | Region | What we send | Retention |
+|---|---|---|---|
+| Google Vertex AI / Gemini | configurable, EU-pinnable | chat prompts + replies | per Google Gemini terms |
+| Supabase | eu-central-1 | user rows, trips, messages | until user deletes account |
+| Resend | EU | transactional emails | per Resend retention |
+| Telegram | global | message text on the Telegram channel | per Telegram terms |
+| LangSmith (LangChain Inc.) | EU (Frankfurt) — `eu.api.smith.langchain.com` | chat prompts + replies + tool calls, tagged with an HMAC-hashed user id only (no email, name, phone, telegram handle, or JWT) | 14-day rolling (free tier) |
+
+Kill switch for LangSmith: set `LANGSMITH_TRACING=false` in the runtime env and redeploy; the app continues to function with zero outbound traffic to LangSmith.
 
 ### Security & Safety
 

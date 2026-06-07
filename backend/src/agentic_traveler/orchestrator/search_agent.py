@@ -12,7 +12,8 @@ from typing import Optional, Any
 from google import genai
 from google.genai import types
 
-from agentic_traveler.orchestrator.client_factory import get_client
+from agentic_traveler.orchestrator.client_factory import get_client, gemini_generate
+from agentic_traveler.core.observability import traceable
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +66,14 @@ class SearchAgent:
         text, _, _ = self.search_with_metadata(query, format)
         return text
 
+    @traceable(name="search_agent.search_web")
     def search_with_metadata(self, query: str, format: str = "structured") -> tuple[str, Any, float]:
         """Internal method that returns the text, raw response, and latency."""
         logger.info("🔍 SearchAgent.search(query=%s, format=%s)", query[:80], format)
         t = time.time()
         try:
-            response = self._client.models.generate_content(
+            response = gemini_generate(
+                self._client,
                 model=_MODEL,
                 contents=f"Format: {format}\n\nQuery: {query}",
                 config=types.GenerateContentConfig(

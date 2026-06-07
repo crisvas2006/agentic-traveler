@@ -20,7 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from google import genai
 from google.genai import types
 
-from agentic_traveler.orchestrator.client_factory import get_client
+from agentic_traveler.orchestrator.client_factory import get_client, gemini_generate
+from agentic_traveler.core.observability import traceable
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ class ProfileAgent:
         # Profiling doesn't need huge reasoning, flash is extremely fast and capable of JSON extraction
         self._model_name = "gemini-3.1-flash-lite"
 
+    @traceable(name="profile_agent.build_initial_profile")
     def build_initial_profile(
         self,
         raw_form_data: Dict[str, Any],
@@ -164,6 +166,7 @@ class ProfileAgent:
 
         return self._call_llm(prompt, fallback_profile=fallback_base)
 
+    @traceable(name="profile_agent.update_profile")
     def update_profile(
         self,
         new_preference: str,
@@ -211,6 +214,7 @@ class ProfileAgent:
         Persist a preference extracted by the orchestrator by asynchronously
         (or synchronously if token_records is provided) updating the profile in Supabase.
         """
+        import contextvars
         import threading
         from agentic_traveler.tools.db_client import get_db
 
@@ -304,7 +308,10 @@ class ProfileAgent:
         if should_sync:
             _async_update()
         else:
-            thread = threading.Thread(target=_async_update)
+            # Copy the current contextvars (including LangSmith trace context) so the
+            # background thread appears as a nested child span, not an orphaned root trace.
+            ctx = contextvars.copy_context()
+            thread = threading.Thread(target=lambda: ctx.run(_async_update), daemon=True)
             thread.start()
 
     def _call_llm(
@@ -323,7 +330,8 @@ class ProfileAgent:
                 import time
                 
                 t0 = time.time()
-                response = self._client.models.generate_content(
+                response = gemini_generate(
+                    self._client,
                     model=self._model_name,
                     contents=prompt,
                     config=types.GenerateContentConfig(

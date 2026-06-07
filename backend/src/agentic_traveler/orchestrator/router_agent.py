@@ -1,13 +1,21 @@
 """
-Router Agent — lightweight intent classifier and tool executor.
+Router Agent — lightweight intent classifier and action planner.
 
-Classifies user messages into CHAT | TRIP | PLAN | OFF_TOPIC and handles
-simple tool calls (preference updates, feedback, credits) directly,
-without delegating to a heavier specialized agent.
+Classifies user messages into CHAT | TRIP | PLAN | OFF_TOPIC and decides which
+lightweight side-effects to run (preference save, app feedback, credit answer).
 
-OFF_TOPIC messages: the router generates a natural, warm redirection
-response instead of a static string, while the orchestration layer
-silently increments the off-topic counter.
+Design: structured-output classification, deterministic execution.
+    The model returns a SINGLE JSON object describing the message — the intent
+    plus any actions to take (new_preference, feedback, response). Plain Python
+    then performs the side-effects. We deliberately do NOT use Gemini Automatic
+    Function Calling (AFC) here: combining AFC with response_mime_type="application/json"
+    on flash-lite is unstable — the model spams function calls until the remote-call
+    limit and never emits the JSON. A single structured response is reliable, cheaper
+    (one model turn), and makes each side-effect fire at most once by construction.
+
+OFF_TOPIC messages: the router generates a natural, warm redirection response in
+the "response" field, while the orchestration layer silently increments the
+off-topic counter.
 """
 
 import json
@@ -18,7 +26,8 @@ from typing import Any, Dict, Optional
 from google import genai
 from google.genai import types
 
-from agentic_traveler.orchestrator.client_factory import get_client
+from agentic_traveler.orchestrator.client_factory import get_client, gemini_generate
+from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_agent import ProfileAgent
 from agentic_traveler.tools.feedback_tool import FeedbackTool
 from agentic_traveler.economy import credit_manager
@@ -26,72 +35,117 @@ from agentic_traveler.economy import credit_manager
 logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-3.1-flash-lite"
+
+_VALID_INTENTS = {"CHAT", "TRIP", "PLAN", "OFF_TOPIC"}
+_VALID_FEEDBACK_CATEGORIES = {"positive", "negative", "suggestion"}
+
 _SYSTEM_PROMPT = """\
 You are the intent router for Agentic Traveler, a travel companion chatbot.
 
-Your job: classify the user's message into exactly one intent and extract
-the core request. You do NOT generate the final response EXCEPT for OFF_TOPIC messages, where you provide
-a natural, friendly redirection yourself in the same language as the user.
+Your job: read the LATEST USER MESSAGE and return ONE JSON object describing it.
+You do NOT call any functions — you only fill in the JSON fields below.
 
-INTENTS:
-• CHAT — Greetings, thanks, jokes, banter, personal stories, emotional
-  support, life advice, opinions, "how are you", compliments, or any
-  message that is conversational but not asking for travel-specific help.
-  Examples: "hey!", "thanks that was great", "how's your day?",
-  "tell me a joke", "I'm feeling stressed"
+STEP 1 — Pick the intent:
 
-• TRIP — Any travel-related question, suggestion request, destination
-  exploration, in-trip help, "what to do in X", weather questions,
-  comparisons between destinations, visa/entry questions, or travel advice.
-  This includes both pre-trip research and live in-trip assistance.
-  Examples: "what should I do in Bali?", "I'm tired and it's raining",
-  "is Lombok worth visiting?", "what's the weather in Rome?",
-  "best time to visit Japan?"
+• CHAT — Greetings, thanks, jokes, banter, personal stories, emotional support, life
+  advice, opinions, or any conversational message not asking for travel help.
+  Examples: "hey!", "thanks!", "how are you?", "tell me a joke", "I'm feeling stressed"
 
-• PLAN — An explicit request for a structured, detailed, day-by-day
-  itinerary or trip schedule. The user must be asking for organized
-  planning with specific days/structure, not just casual suggestions.
-  Examples: "plan my 5-day trip to Rome", "make me an itinerary for
-  Lombok", "organize my week in Tokyo", "help me plan day by day"
+• TRIP — Travel questions, destination research, in-trip help, weather, visa questions,
+  or travel advice. Travel questions are TRIP regardless of the language they are
+  written in.
+  Examples: "what should I do in Bali?", "is Lombok worth it?", "best time to visit Japan?",
+  "I'm tired and it's raining", "Qu'est-ce que je peux faire à Paris en décembre?"
 
-• OFF_TOPIC — The last user message is clearly unrelated to travel AND is not
-  casual/fun conversation. Math homework, coding questions, politics, etc.
-  BE LENIENT: jokes, banter, personal stories, and life advice are CHAT,
-  not OFF_TOPIC.
-  When you classify OFF_TOPIC, generate a short, warm, natural redirection
-  in the "response" field. Don't be robotic — redirect like a friend would.
+• PLAN — An explicit request for a structured day-by-day itinerary or trip schedule.
+  Examples: "plan my 5-day trip to Rome", "make me an itinerary for Lombok", "help me plan day by day"
 
-Classify the intent. If the user's message warrants calling a tool, call the appropriate tool AND still classify the intent.
+• OFF_TOPIC — Clearly unrelated to travel AND not casual conversation (math, coding,
+  politics…). Be lenient: jokes, banter, and life advice are CHAT, not OFF_TOPIC.
 
-CRITICAL: Only call update_preferences (at most once) if the user's LATEST message explicitly states a new/changed preference not listed in Known Preferences.
-- Do NOT extract preferences from Conversation Context history.
-- Never speculate or extrapolate preferences (e.g. do NOT assume tone_preference="concise" due to a brief message).
-- If the latest message is a question, greeting, or feedback, do not call it.
-- Always set "preference_raw" in the JSON response to match the exact extracted preference statement, or null.
+STEP 2 — Fill "new_preference" (string) ONLY IF the LATEST USER MESSAGE is a first-person
+preference DECLARATION. Otherwise set it to null.
+  Set it to the verbatim preference text when the message contains a trigger phrase:
+    "I always [X]" · "I prefer [X]" · "I never [X]" · "I only [X]"
+    "I'm [dietary/lifestyle label]" · "I avoid [X]" · "never suggest [X] to me"
+  Set it to null when ANY of these is true:
+    - The message is a question (starts with What/How/Where/When/Why/Which/Is/Are/Can/
+      Could/Would/Do/Does/Did/Will, or ends with "?"). Questions are NEVER declarations.
+    - The message is a greeting, thanks, banter, or emotional venting.
+    - The preference already appears in Known Preferences or Conversation History.
+  CRITICAL: only ever copy text from the LATEST USER MESSAGE. Never reconstruct a
+  preference from Known Preferences or Conversation History — those are READ-ONLY.
 
-CRITICAL: The record_feedback tool is ONLY for the current message and if the user is explicitly talking ABOUT THE BOT ITSELF (e.g. "you are a great bot", "this app sucks", "add a dark mode").
-Do NOT use it for travel questions, personal statements, frustration with travel, testing, or random gibberish. If you are not 100% sure it is app feedback, DO NOT call it.
+STEP 3 — Fill "feedback_category" + "feedback_text" ONLY IF the LATEST USER MESSAGE
+directly addresses THIS app or bot ("you", "this app", "your responses") and evaluates
+it or requests a feature. Otherwise set both to null.
+  feedback_category ∈ {"positive", "negative", "suggestion"}
+  feedback_text = the verbatim feedback from the LATEST USER MESSAGE.
+  Set both to null for real-world complaints (a hotel, the weather, planning fatigue)
+  and for off-topic requests ("Can you help me debug my code?") — those are not feedback.
 
-CRITICAL: Call get_my_credits ONLY when the current message explicitly asks about credits or balance. Do NOT call it proactively or because credits were mentioned earlier.
+STEP 4 — Fill "response" (string) ONLY in these two cases, else null:
+    - OFF_TOPIC: a short, warm redirection back to travel, in the user's language, warning the user that multiple off topic messages will result in suspending the capability to use the chat feature.
+    - The user asks about their credit balance: answer using the Credit Balance shown
+      in the context below (e.g. "You currently have 200 credits left.").
+  For every other message, set "response" to null.
 
-Respond ONLY with a JSON object matching this schema:
-{{
-  "intent": "TRIP|CHAT|PLAN|OFF_TOPIC",
-  "request_summary": "one-sentence description of what the user wants",
-  "preference_raw": "raw user statement indicating preference, or null",
-  "response": "natural redirection text (OFF_TOPIC) OR credit balance info, else null"
-}}
+A single message can legitimately set several fields at once (e.g. a new preference AND
+positive feedback AND a TRIP intent). Each action field is filled at most once.
 
-Current time: {current_time}
-User: {user_name}
-Known Preferences: {known_preferences}
-Conversation Context: {conversation_context}
+EXAMPLES (message → the non-null fields you should set):
+  "hey thanks!" → intent=CHAT
+  "I'm so tired of planning" → intent=CHAT (venting, not a preference)
+  "What's the best neighbourhood to stay in when visiting Lisbon?" → intent=TRIP (question)
+  "Qu'est-ce que je peux faire à Paris?" → intent=TRIP (travel question, any language)
+  "Can you help me debug this Python stack trace?" → intent=OFF_TOPIC, response=<redirect>
+  "What did I tell you about my diet?" → intent=CHAT (recall question, new_preference=null)
+  "What are my travel preferences?" → intent=CHAT (lookup question, new_preference=null)
+  "How many credits do I have left?" → intent=CHAT, response=<balance from context>
+  "This app is amazing!" → intent=CHAT, feedback_category=positive, feedback_text="This app is amazing!"
+  "You should add a dark mode" → intent=CHAT, feedback_category=suggestion, feedback_text="You should add a dark mode"
+  "The hotel was terrible, I'm so annoyed" → intent=CHAT (real-world complaint, no feedback)
+  "I always book Ibis Hotels" → intent=CHAT, new_preference="I always book Ibis Hotels"
+  "I'm vegetarian, plan my Rome trip" → intent=PLAN, new_preference="I'm vegetarian"
+  "I'm vegan and this app is amazing!" → intent=CHAT, new_preference="I'm vegan",
+        feedback_category=positive, feedback_text="this app is amazing!"
+
+Return ONLY the JSON object, nothing else.
 """
+
+
+def _response_schema() -> types.Schema:
+    """Structured-output schema. Enforces field presence; nullable for optional actions."""
+    return types.Schema(
+        type=types.Type.OBJECT,
+        required=["intent", "request_summary"],
+        properties={
+            "intent": types.Schema(
+                type=types.Type.STRING,
+                enum=["CHAT", "TRIP", "PLAN", "OFF_TOPIC"],
+            ),
+            "request_summary": types.Schema(type=types.Type.STRING),
+            "new_preference": types.Schema(type=types.Type.STRING, nullable=True),
+            "feedback_category": types.Schema(type=types.Type.STRING, nullable=True),
+            "feedback_text": types.Schema(type=types.Type.STRING, nullable=True),
+            "response": types.Schema(type=types.Type.STRING, nullable=True),
+        },
+    )
+
+
+def _clean(value: Any) -> Optional[str]:
+    """Normalise a model-emitted optional string: treat null/empty/'null' as None."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"null", "none"}:
+        return None
+    return text
 
 
 class RouterAgent:
     """
-    Thin intent router. Classifies messages and handles lightweight tools.
+    Thin intent router. Classifies messages and runs lightweight side-effects.
 
     Stateless service — initialize once, reuse across parallel requests.
     """
@@ -101,6 +155,7 @@ class RouterAgent:
         self._profile_agent = ProfileAgent()
         self._feedback_tool = FeedbackTool()
 
+    @traceable(name="router.classify")
     def classify(
         self,
         message: str,
@@ -113,96 +168,17 @@ class RouterAgent:
         token_records: Optional[list] = None,
     ) -> Dict[str, Any]:
         """
-        Classify user intent and handle lightweight tool calls.
+        Classify user intent and run any lightweight side-effects the message warrants.
 
         Returns a dict with keys:
             intent: str — CHAT | TRIP | PLAN | OFF_TOPIC
             request_summary: str
-            preference_raw: str | None
-            response: str | None  — only set for OFF_TOPIC or get_my_credits
+            preference_raw: str | None  — the preference that was saved this turn, if any
+            response: str | None        — only set for OFF_TOPIC or a credit-balance answer
             raw_response: the raw genai response (for token logging)
             latency_ms: float
         """
-
-        # ── tool definitions (closures capture user context safely) ──────────
-
-        def update_preferences(preference_raw: str) -> str:
-            """
-            Persist a newly learned user preference from the user's current message to their profile.
-
-            Call this when the user's CURRENT message reveals a new personal preference
-            or changes an existing one (e.g. related to budget, travel style, dietary needs, tone).
-            
-            CRITICAL: Only call this if the user explicitly states a preference. Never speculate
-            or extrapolate tone preferences (like "concise") from brief or short messages.
-
-            Args:
-                preference_raw: The exact raw user statement containing the preference.
-
-            Returns:
-                Confirmation string.
-            """
-            logger.info("🔧 Router tool: update_preferences(%s)", preference_raw)
-            if user_id:
-                self._profile_agent.save_preference(
-                    preference_raw,
-                    user_doc, user_id,
-                    # Do not pass token_records so it executes asynchronously
-                )
-            return f"Noted preference: {preference_raw}"
-
-        def record_feedback(category: str, text: str) -> str:
-            """
-            Record an EXPLICIT user feedback signal ABOUT THIS APP to the analytics backend.
-
-            WARNING: ONLY call this if the user is explicitly praising the bot, 
-            complaining about the bot's behavior, or suggesting an app feature. 
-            DO NOT call this for general conversation, travel frustration, jokes, 
-            testing, or random questions. If you are not 100% sure it is app feedback, 
-            DO NOT CALL THIS TOOL.
-
-            Args:
-                category: EXACTLY one of: positive, negative, suggestion.
-                text:     The exact feedback text provided by the user.
-
-            Returns:
-                Confirmation string.
-            """
-            logger.info("🔧 Router tool: record_feedback(category=%s)", category)
-            self._feedback_tool.record(
-                user_id=user_id,
-                text=text,
-                category=category,
-                user_doc=user_doc,
-                _sync=False,
-            )
-            return "Feedback recorded."
-
-        def get_my_credits() -> str:
-            """
-            Returns the user's current credit balance.
-
-            Call this ONLY when the user's current message explicitly asks about
-            their credits, balance, or remaining uses (e.g. "how many credits do
-            I have?", "what's my balance?"). Do NOT call proactively, and do NOT
-            call just because credits were mentioned in the conversation history.
-
-            Returns:
-                String containing current balance and how credits work.
-            """
-            logger.info("🔧 Router tool: get_my_credits")
-            balance = credit_manager.get_balance(user_doc)
-            return (
-                f"You have *{balance} credits* remaining. "
-                f"Credits are used for AI-powered features like destination discovery, "
-                f"itinerary planning, and weather checks. "
-                f"Each interaction costs 1 or more credits depending on complexity. "
-                f"You can top up with credits or use a promo code in your web app user settings."
-            )
-
-        _ = telegram_user_id  # referenced by outer scope, avoids lint warning
-
-        # ── execution ────────────────────────────────────────────────────────
+        _ = telegram_user_id  # part of the public signature; not needed here
 
         from agentic_traveler.orchestrator.profile_utils import build_profile_summary
         known_prefs = build_profile_summary(user_doc, include_scores=False, include_summary=True)
@@ -211,25 +187,32 @@ class RouterAgent:
         if not known_prefs:
             known_prefs = "None"
 
-        system = _SYSTEM_PROMPT.format(
-            current_time=current_time,
-            user_name=user_name,
-            known_preferences=known_prefs,
-            conversation_context=conversation_context,
-        )
+        balance = credit_manager.get_balance(user_doc)
+
+        user_prompt = f"""\
+Current Time: {current_time}
+User Name: {user_name}
+Credit Balance: {balance} credits
+Known Preferences: {known_prefs}
+
+Conversation History:
+{conversation_context}
+
+LATEST USER MESSAGE:
+{message}
+"""
 
         t = time.time()
         try:
-            raw = self._client.models.generate_content(
+            raw = gemini_generate(
+                self._client,
                 model=_MODEL,
-                contents=message,
+                contents=user_prompt,
                 config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    max_output_tokens=256,
+                    system_instruction=_SYSTEM_PROMPT,
+                    max_output_tokens=400,
                     response_mime_type="application/json",
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=5,
-                    ),
+                    response_schema=_response_schema(),
                     safety_settings=[
                         types.SafetySetting(
                             category=c,
@@ -241,64 +224,44 @@ class RouterAgent:
                             types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
                         ]
                     ],
-                    tools=[update_preferences, record_feedback, get_my_credits],
                 ),
             )
             latency_ms = (time.time() - t) * 1000
 
-            # When AFC executes a tool, the model's last turn is a function_response
-            # part, not a text part.  In that case raw.text is None, so json.loads("")
-            # raises JSONDecodeError and we lose the entire result.
-            # Detect this situation and build the result dict from the parts directly.
-            text = raw.text or ""
-            preference_raw_from_tool: str | None = None
+            parsed = self._parse(raw.text, message)
 
-            # Always try to recover preference_raw from function calls as the primary source or fallback
-            try:
-                for candidate in (getattr(raw, "candidates", None) or []):
-                    for part in (getattr(candidate.content, "parts", None) or []):
-                        fc = getattr(part, "function_call", None)
-                        if fc and getattr(fc, "name", None) == "update_preferences":
-                            args = dict(fc.args or {})
-                            preference_raw_from_tool = args.get("preference_raw")
-            except Exception:
-                pass
+            # ── deterministic side-effects ───────────────────────────────────
+            # Each fires at most once because each is a single field, not a
+            # repeatable function call.
+            new_preference = parsed["new_preference"]
+            if new_preference and user_id:
+                logger.info("🔧 Router action: save_stated_preference(%s)", new_preference)
+                self._profile_agent.save_preference(new_preference, user_doc, user_id)
 
-            if not text:
-                # Cannot determine intent from empty text — default to CHAT so the
-                # user still gets a response. The preference update already ran via
-                # AFC side effect.
-                result = {
-                    "intent": "CHAT",
-                    "request_summary": message,
-                    "preference_raw": preference_raw_from_tool,
-                    "response": None,
-                }
+            if parsed["feedback_category"] and user_id:
                 logger.info(
-                    "Router returned no text (AFC tool-only turn). "
-                    "Defaulting intent=CHAT, preference_raw=%s",
-                    preference_raw_from_tool,
+                    "🔧 Router action: save_app_feedback(category=%s)",
+                    parsed["feedback_category"],
                 )
-            else:
-                try:
-                    result = json.loads(text)
-                    # Merge JSON preference_raw with tool extraction if JSON lacks it
-                    if not result.get("preference_raw") and preference_raw_from_tool:
-                        result["preference_raw"] = preference_raw_from_tool
-                except json.JSONDecodeError:
-                    logger.warning("Router JSON parse failed. Raw text: %s", text)
-                    result = {
-                        "intent": "CHAT",
-                        "request_summary": message,
-                        "preference_raw": preference_raw_from_tool,
-                        "response": None,
-                    }
+                self._feedback_tool.record(
+                    user_id=user_id,
+                    text=parsed["feedback_text"] or message,
+                    category=parsed["feedback_category"],
+                    user_doc=user_doc,
+                    _sync=False,
+                )
 
-            result["raw_response"] = raw
-            result["latency_ms"] = latency_ms
+            result = {
+                "intent": parsed["intent"],
+                "request_summary": parsed["request_summary"],
+                "preference_raw": new_preference,
+                "response": parsed["response"],
+                "raw_response": raw,
+                "latency_ms": latency_ms,
+            }
             logger.info(
                 "Router classified '%s' → %s (%.0fms)",
-                message[:60], result.get("intent"), latency_ms,
+                message[:60], result["intent"], latency_ms,
             )
             return result
 
@@ -312,3 +275,53 @@ class RouterAgent:
                 "raw_response": None,
                 "latency_ms": (time.time() - t) * 1000,
             }
+
+    # ------------------------------------------------------------------
+    # Parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse(text: Optional[str], message: str) -> Dict[str, Any]:
+        """
+        Parse and sanitise the model's JSON. Always returns a complete dict with
+        normalised values, falling back to a safe CHAT classification on any problem.
+        """
+        fallback = {
+            "intent": "CHAT",
+            "request_summary": message,
+            "new_preference": None,
+            "feedback_category": None,
+            "feedback_text": None,
+            "response": None,
+        }
+
+        if not text:
+            logger.warning("Router returned empty text — defaulting to CHAT.")
+            return fallback
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("Router JSON parse failed. Raw text: %s", text[:200])
+            return fallback
+
+        intent = str(data.get("intent", "")).strip().upper()
+        if intent not in _VALID_INTENTS:
+            logger.warning("Router emitted invalid intent %r — defaulting to CHAT.", intent)
+            intent = "CHAT"
+
+        category = _clean(data.get("feedback_category"))
+        if category is not None:
+            category = category.lower()
+            if category not in _VALID_FEEDBACK_CATEGORIES:
+                logger.warning("Router emitted invalid feedback_category %r — ignoring.", category)
+                category = None
+
+        return {
+            "intent": intent,
+            "request_summary": _clean(data.get("request_summary")) or message,
+            "new_preference": _clean(data.get("new_preference")),
+            "feedback_category": category,
+            "feedback_text": _clean(data.get("feedback_text")),
+            "response": _clean(data.get("response")),
+        }

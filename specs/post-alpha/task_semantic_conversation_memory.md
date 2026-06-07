@@ -1,13 +1,19 @@
 # Task Spec: Semantic Conversation Memory & Group Chat Readiness
 
+> **Status:** POST-ALPHA. Re-baselined 2026-06-04 to align with the saga
+> architecture from `specs/proposal_trip_model_and_planning_saga.md`
+> (see §10.7 of that proposal). This task ships **after** the alpha launch
+> (tasks 44–53) — it is NOT a prerequisite for the alpha.
+
 ## Goal
 Evolve the ephemeral conversation history into a persistent, group-chat-ready semantic memory system. This allows the AI agent to accurately recall specific historical details using vector search, while maintaining a high-level summary for general context.
 
 **Key Decisions Made:**
 1. **Model:** Google `gemini-embedding-001` (Matryoshka supported, 768d target).
-2. **Strategy:** Hybrid memory (Keep existing summary + add `search_conversation` sub-agent tool).
+2. **Strategy:** Hybrid memory (Keep existing summary + add `search_conversation` capability exposed as a **side-effect listener saga** — `MemorySearchSaga` — NOT as a tool dangling off every agent).
 3. **Database:** Supabase with `pgvector` (Option B).
 4. **Schema Prep:** Design for multi-user group chats (`conversations`, `conversation_members`, `messages`).
+5. **Trip-scope tagging:** `messages.trip_id` (nullable FK to `trips.id`) is captured at write time so vector search can scope to a single trip — the dominant retrieval pattern at usage time. Already required by `task_45_trips_data_model.md`-shipped trips; this task formalizes the column and backfills.
 
 ---
 
@@ -87,20 +93,71 @@ The `ConversationManager` needs a rewrite to adapt to the new `conversations` an
   3. Update `conversations.summary` with the new value.
   4. Run `UPDATE messages SET is_compacted = TRUE WHERE id IN (...)` for those 4 messages.
 
-### 3. The `search_conversation` Agent Tool
-Equip the `CompanionAgent` (and potentially the `Orchestrator`) with a new function-calling tool:
+### 3. The `MemorySearchSaga` (replaces the per-agent tool from the original spec)
+
+Per `proposal_trip_model_and_planning_saga.md` §10.7, expose semantic
+recall as a **side-effect listener saga** rather than as a tool dangling
+off every agent. This keeps the saga model coherent (every cross-cutting
+capability is a saga) and gives us one place to add reranking, freshness
+boosts, or trip-scope hints later.
+
 ```python
-def search_conversation(self, query: str, conversation_id: str) -> str:
-    """
-    Search past conversation history for specific details.
-    Call this when the user asks about something mentioned previously 
-    that is not in the immediate context.
-    """
+# backend/src/agentic_traveler/orchestrator/sagas/memory_search.py
+class MemorySearchSaga(BaseSaga):
+    name = "MemorySearchSaga"
+
+    def should_activate(self, intent, entities, trip, state):
+        # Activate when the user asks "what did we say about X" / "what hotel
+        # did I book" / any recall-shaped phrasing OR when the owner saga
+        # signals it needs context. Side-effect listener only — never owner.
+        if entities.get("recall_question"):
+            return True, False
+        return False, False
+
+    def run(self, message, user_doc, trip, state, conv, events):
+        events.emit("metric", {"name": "memory_search_started"})
+        query_vec = embed(message)
+        hits = pgvector_search(
+            query=query_vec,
+            conversation_id=state.get("conversation_id"),
+            trip_id=trip and trip["id"],   # trip-scoped retrieval (preferred)
+            k=5,
+        )
+        # Hits go back via state_delta as injected context for the owner.
+        return SagaResult(state_delta={"recall_hits": _format_hits(hits)})
 ```
-**Mechanism:**
-1. Embed the `query`.
-2. Execute a vector similarity search against the `messages` table, filtered by `conversation_id`.
-3. Return the top K (e.g., K=5) matching messages, formatted with speaker and date, so the LLM can answer the user's question accurately.
+
+The orchestrator picks up `recall_hits` from `state_delta` and folds it
+into the owner saga's prompt under `<recalled_context>...</recalled_context>`.
+**No agent ever holds a `search_conversation` tool.** The saga model owns
+retrieval the same way `CountryIntelSaga` owns intel and `BookingInputSaga`
+owns booking parsing.
+
+**Trip-scope first.** When the resolved trip is non-null, the retrieval
+filters on `messages.trip_id = trip.id` to dramatically improve relevance
+(most user recall is *about this trip*, not the user's lifetime history).
+A null `trip_id` filter falls back to whole-conversation search.
+
+**Mechanism details:**
+1. Embed the `query` using `gemini-embedding-001` (768d truncated).
+2. Execute a vector similarity search against the `messages` table,
+   filtered by `conversation_id` and optionally `trip_id`.
+3. Return the top K (e.g., K=5) matching messages, formatted with
+   speaker and date, so the LLM can answer accurately.
+
+### 3a. Schema delta — add `trip_id` to messages
+
+```sql
+ALTER TABLE public.messages
+  ADD COLUMN IF NOT EXISTS trip_id uuid REFERENCES public.trips(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS messages_trip_id_idx ON public.messages (trip_id) WHERE trip_id IS NOT NULL;
+```
+
+The orchestrator (task 47) writes `trip_id` at message-save time using the
+resolved trip. Backfill: leave existing rows NULL — `trip_id`-scoped
+retrieval simply degrades to whole-conversation retrieval for messages
+that pre-date the saga work.
 
 ### 4. Group Chat Context Handling
 To prepare for group chats, the context block injected into the LLM prompt must carefully attribute messages to specific users:

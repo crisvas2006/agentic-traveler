@@ -13,8 +13,11 @@ Add new codes here — they are available immediately at runtime.
 
 PROMO_CODES: dict[str, int] = {
     # Referral / social
-    "FRIEND": 500,           # €5 — standard friend referral
-    "SPECIALFRIEND": 1000,   # €10 — VIP referral
+    "FRIEND5": 500,           # €5 — standard friend referral
+    "FREEDFROMDESIRE": 999,   # €9.99 — VIP referral
+    "CAMINOSOULGANG": 999,    # €9.99 
+    "LSEGMISFITS": 999,       # €9.99 
+
     # Launch & seasonal
     "LAUNCH2026": 300,       # €3 — early adopter launch promo
     "SUMMER2026": 250,       # €2.50 — summer season campaign

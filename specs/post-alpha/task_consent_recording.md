@@ -42,6 +42,9 @@
   - Service role key only used server-side inside the Route Handler.
   - RLS: `SELECT` allowed for `auth.uid() = user_id`; no `INSERT`/`UPDATE`/`DELETE` via RLS (service role bypasses RLS).
   - IP address is personal data under GDPR — document its purpose (fraud prevention / consent proof) in a comment in the migration.
+- **LangSmith Disclosure:**
+  - The consent text on the signup page and in terms must disclose LangSmith as a third-party processor (EU residency).
+  - Include the user-facing line: *"Your chat messages are processed by us, by Google (Gemini), and by LangChain (LangSmith — EU). This allows us to provide and improve our services. Do not paste passwords, credit cards, or other secrets into chat."*
 
 ## 5. Inputs & Resources
 - **Artifacts:**

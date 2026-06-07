@@ -16,7 +16,8 @@ from typing import Any, Dict, Optional
 from google import genai
 from google.genai import types
 
-from agentic_traveler.orchestrator.client_factory import get_client
+from agentic_traveler.orchestrator.client_factory import get_client, gemini_generate
+from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
 from agentic_traveler.orchestrator.search_agent import SearchAgent
 from agentic_traveler.orchestrator.utils import has_grounding, check_weather
@@ -78,6 +79,7 @@ class ChatAgent:
         self._client = client or get_client()
         self._search_agent = SearchAgent(client=self._client)
 
+    @traceable(name="chat_agent.process_request")
     def process_request(
         self,
         user_doc: Dict[str, Any],
@@ -120,7 +122,8 @@ class ChatAgent:
         logger.debug("ChatAgent prompt length: %d chars", len(user_content))
         t = time.time()
         try:
-            response = self._client.models.generate_content(
+            response = gemini_generate(
+                self._client,
                 model=_MODEL,
                 contents=user_content,
                 config=types.GenerateContentConfig(

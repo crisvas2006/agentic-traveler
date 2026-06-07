@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from agentic_traveler.orchestrator.client_factory import gemini_generate
+from agentic_traveler.core.observability import traceable
 
 from agentic_traveler.analytics import usage_tracker
 
@@ -63,22 +65,39 @@ class ConversationManager:
             "summary": history.get("summary", ""),
         }
 
-    def build_context_block(self, user_doc: Dict[str, Any]) -> str:
+    def build_context_block(
+        self,
+        user_doc: Dict[str, Any],
+        max_messages: Optional[int] = None,
+    ) -> str:
         """
         Build a text block suitable for injection into agent prompts.
 
-        Combines the compacted summary with the recent raw messages
-        so the LLM has full conversational context.
+        Args:
+            user_doc:     The assembled user document.
+            max_messages: When set, include only the last N message entries and
+                          omit the compacted summary.  Use this for lightweight
+                          callers (e.g. the router) that only need recent context
+                          for intent classification.
+                          When None (default), include the full summary + all
+                          recent messages for specialized agents that need
+                          complete conversational context.
         """
         history = self.load(user_doc)
         parts: List[str] = []
 
-        if history["summary"]:
-            parts.append(f"Previous conversation summary:\n{history['summary']}")
+        messages = history["recent_messages"]
+        if max_messages is not None:
+            # Slim path: no summary, only the last N entries
+            messages = messages[-max_messages:]
+        else:
+            # Full path: prepend compacted summary
+            if history["summary"]:
+                parts.append(f"Previous conversation summary:\n{history['summary']}")
 
-        if history["recent_messages"]:
+        if messages:
             lines = []
-            for msg in history["recent_messages"]:
+            for msg in messages:
                 role = "User" if msg.get("role") == "user" else "Agent"
                 lines.append(f"{role}: {msg.get('text', '')}")
             parts.append("Recent messages:\n" + "\n".join(lines))
@@ -159,6 +178,7 @@ class ConversationManager:
             "summary": new_summary,
         }
 
+    @traceable(name="conversation_manager.summarise")
     def _summarise(
         self, messages: List[Dict[str, Any]], existing_summary: str
     ) -> str:
@@ -191,7 +211,8 @@ Write ONLY the updated summary, nothing else.
 """
         try:
             t = time.time()
-            response = self.client.models.generate_content(
+            response = gemini_generate(
+                self.client,
                 model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(

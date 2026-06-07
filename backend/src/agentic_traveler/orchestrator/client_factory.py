@@ -2,6 +2,7 @@ import os
 import logging
 from typing import Optional
 from google import genai
+from agentic_traveler.core.observability import traceable
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class MockGenAIClient:
                 MockResponse.text = json.dumps({
                     "intent": "CHAT",
                     "request_summary": "Simulated performance testing query",
-                    "preference_updated": None,
+                    "preference_raw": None,
                     "response": None
                 })
             else:
@@ -75,3 +76,13 @@ def get_client() -> Optional[genai.Client]:
     except Exception as e:
         logger.exception("Failed to initialize genai.Client: %s", e)
         return None
+
+
+
+
+@traceable(name="gemini.generate_content")
+def gemini_generate(client, *, model: str, contents, config):
+    """Single traced wrapper around `client.models.generate_content` — every
+    Gemini call goes through here so prompts appear in LangSmith traces."""
+    return client.models.generate_content(model=model, contents=contents, config=config)
+

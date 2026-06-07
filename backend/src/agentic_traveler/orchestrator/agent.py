@@ -34,6 +34,7 @@ from agentic_traveler.guards import off_topic_guard
 from agentic_traveler.analytics import usage_tracker
 from agentic_traveler.analytics import metrics_tracker
 from agentic_traveler.orchestrator.client_factory import get_client
+from agentic_traveler.core.observability import traceable, attach_run_metadata, hash_user_id
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
 from agentic_traveler.orchestrator.router_agent import RouterAgent
 from agentic_traveler.orchestrator.chat_agent import ChatAgent
@@ -75,6 +76,7 @@ class OrchestratorAgent:
         self._trip_agent = TripAgent(client=self._client)
         self._planner_agent = PlannerAgent(client=self._client)
 
+    @traceable(name="orchestrator.process_request")
     def process_request(
         self,
         telegram_user_id: str,
@@ -86,6 +88,9 @@ class OrchestratorAgent:
 
         Returns {"text": str, "action": str}.
         """
+        attach_run_metadata(
+            user_id_hash=hash_user_id(telegram_user_id), surface="telegram"
+        )
         user_doc, user_id = self.user_tool.get_user_with_ref(telegram_user_id)
         if not user_doc:
             logger.info("New user detected: %s", telegram_user_id)
@@ -107,6 +112,7 @@ class OrchestratorAgent:
             status_callback=status_callback,
         )
 
+    @traceable(name="orchestrator.process_request_for_user")
     def process_request_for_user(
         self,
         user_id: str,
@@ -119,6 +125,7 @@ class OrchestratorAgent:
 
         Returns {"text": str, "action": str}.
         """
+        attach_run_metadata(user_id_hash=hash_user_id(user_id), surface="web")
         user_doc = self.user_tool.get_user_by_id(user_id)
         if not user_doc:
             logger.warning("process_request_for_user: no user row for id=%s", user_id)
@@ -164,8 +171,16 @@ class OrchestratorAgent:
             return {"text": restriction_msg, "action": "RESTRICTED"}
 
         # ── 3. Build conversation context ───────────────────────────────────
+        # Full context (summary + all recent messages) for specialized agents.
+        # Slim context (last 4 entries = 2 exchanges, no summary) for the router:
+        # the router only needs recent turns for intent classification and passing
+        # the full history increases token cost and can cause confusion (e.g. the
+        # router extracting preferences from old messages instead of the current one).
         t = time.time()
         conv_context = self.conversation_manager.build_context_block(user_doc)
+        router_context = self.conversation_manager.build_context_block(
+            user_doc, max_messages=4
+        )
         logger.debug("⏱ Context build: %s", _elapsed(t))
 
         current_time = _current_time_str()
@@ -180,7 +195,7 @@ class OrchestratorAgent:
             telegram_user_id=telegram_user_id,
             user_name=user_name,
             current_time=current_time,
-            conversation_context=conv_context,
+            conversation_context=router_context,
             token_records=token_records,
         )
         logger.info("⏱ Router: %s", _elapsed(t))
@@ -227,7 +242,7 @@ class OrchestratorAgent:
             )
             return {"text": response_text, "action": "RESPONSE"}
 
-        # If the router provided a direct response (e.g., for get_my_credits)
+        # If the router provided a direct response (e.g., a credit-balance answer)
         # Only short-circuit for CHAT intent — TRIP and PLAN must always reach
         # their specialized agents (router_response for those is a bug side-effect).
         elif intent == "CHAT" and router_response:

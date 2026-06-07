@@ -75,6 +75,17 @@ LOG_METRICS = [
         ' textPayload=~"LLM usage"'
         ' textPayload=~"total_tokens="',
     ),
+    (
+        "gemini_quota_exhausted",
+        "Gemini API quota exhausted (429 RESOURCE_EXHAUSTED)",
+        # Catches the ERROR log line emitted by router / agents when Gemini
+        # returns 429. The google-genai SDK surfaces this as ClientError with
+        # status RESOURCE_EXHAUSTED, which our exception handlers log at ERROR.
+        'resource.type="cloud_run_revision"'
+        ' resource.labels.service_name="agentic-traveler"'
+        ' severity="ERROR"'
+        ' textPayload=~"RESOURCE_EXHAUSTED"',
+    ),
 ]
 
 # ── Alert policy definitions ──
@@ -88,6 +99,9 @@ ALERT_POLICIES = [
     ("high_error_rate", "High 5xx error rate", 5, 300, 0),
     ("user_restricted", "Users restricted (off-topic)", 5, 3600, 0),
     ("high_token_usage", "High token consumption", 50, 3600, 0),
+    # Fire as soon as 1 quota exhaustion is observed in a 5-minute window.
+    # Any single RESOURCE_EXHAUSTED means the API is rejecting requests right now.
+    ("gemini_quota_exhausted", "Gemini API quota exhausted (429)", 1, 300, 0),
 ]
 
 # ── Resource alert definitions ──

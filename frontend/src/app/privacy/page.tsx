@@ -67,8 +67,40 @@ export default function PrivacyPage() {
                 </p>
               </section>
 
+              <section>
+                <h2 className="text-xl font-bold text-foreground mb-3">5. Third-Party Processors</h2>
+                <p className="mb-3">
+                  We share data with the following third-party processors to deliver and monitor our services:
+                </p>
+                <ul className="space-y-3">
+                  <li className="flex gap-3">
+                    <span className="font-bold text-foreground shrink-0">• Google Vertex AI / Gemini:</span>
+                    <span>Processes chat prompts and replies.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-bold text-foreground shrink-0">• Supabase:</span>
+                    <span>Stores user accounts, preferences, trips, and message logs in the EU (eu-central-1).</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-bold text-foreground shrink-0">• Resend:</span>
+                    <span>Sends emails within the EU. Only email address is processed, no other user data.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-bold text-foreground shrink-0">• Telegram:</span>
+                    <span>Processes messages sent through the Telegram channel interface, if you choose to use this interface.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-bold text-foreground shrink-0">• LangSmith (LangChain Inc.):</span>
+                    <span>Monitors LLM traces, prompts, replies, and tool calls in the EU (Frankfurt). Data is tagged only with an HMAC-hashed user ID (no email, name, phone, telegram handle, or JWT) and retained for a rolling 14 days.</span>
+                  </li>
+                </ul>
+                <p className="mt-4 text-xs text-muted-foreground leading-relaxed">
+                  <strong>Important Notice:</strong> We share this data specifically to generate personalized travel suggestions, build day-by-day itineraries, and monitor system performance and safety logs in real time. Because your chat prompts and the AI's replies are processed by these services to fulfill your requests, <strong>you must not type or paste passwords, credit cards, or other sensitive secrets into the chat interface.</strong>
+                </p>
+              </section>
+
               <section className="pt-6 border-t border-border">
-                <p className="text-xs">Last updated: May 2026</p>
+                <p className="text-xs">Last updated: June 2026</p>
               </section>
             </div>
           </Reveal>
