@@ -152,7 +152,10 @@ class RouterAgent:
 
     def __init__(self, client: Optional[genai.Client] = None):
         self._client = client or get_client()
-        self._profile_agent = ProfileAgent()
+        # Share the single genai.Client across sub-agents (task_16 invariant).
+        # ProfileAgent otherwise calls get_client() again and spins up a second
+        # Vertex client + connection pool.
+        self._profile_agent = ProfileAgent(client=self._client)
         self._feedback_tool = FeedbackTool()
 
     @traceable(name="router.classify")
@@ -213,6 +216,12 @@ LATEST USER MESSAGE:
                     max_output_tokens=400,
                     response_mime_type="application/json",
                     response_schema=_response_schema(),
+                    # The router uses structured output, not tools. Disable AFC
+                    # explicitly so the SDK never enables it by default (keeps
+                    # logs clean and guarantees a single, loop-free model turn).
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        disable=True,
+                    ),
                     safety_settings=[
                         types.SafetySetting(
                             category=c,

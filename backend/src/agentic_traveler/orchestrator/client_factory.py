@@ -80,7 +80,44 @@ def get_client() -> Optional[genai.Client]:
 
 
 
-@traceable(name="gemini.generate_content")
+def _summarize_config(config) -> Optional[dict]:
+    """Render a GenerateContentConfig into a JSON-serializable summary.
+
+    LangSmith cannot serialize a config that carries Python function tools
+    (``tools=[check_weather, ...]``) — Pydantic raises on the raw function
+    objects and drops the entire input from the trace. We keep the useful,
+    serializable bits and reduce tools to their names.
+    """
+    if config is None:
+        return None
+    summary: dict = {}
+    for attr in ("max_output_tokens", "response_mime_type", "temperature"):
+        val = getattr(config, attr, None)
+        if val is not None:
+            summary[attr] = val
+    thinking = getattr(config, "thinking_config", None)
+    if thinking is not None:
+        budget = getattr(thinking, "thinking_budget", None)
+        if budget is not None:
+            summary["thinking_budget"] = budget
+    tools = getattr(config, "tools", None)
+    if tools:
+        summary["tools"] = [
+            getattr(t, "__name__", None) or type(t).__name__ for t in tools
+        ]
+    return summary
+
+
+def _trace_inputs(inputs: dict) -> dict:
+    """process_inputs hook for the traced wrapper: drop the unserializable
+    client, summarize the config, and keep model + contents (the prompt)."""
+    safe = {k: v for k, v in inputs.items() if k != "client"}
+    if "config" in safe:
+        safe["config"] = _summarize_config(safe["config"])
+    return safe
+
+
+@traceable(name="gemini.generate_content", process_inputs=_trace_inputs)
 def gemini_generate(client, *, model: str, contents, config):
     """Single traced wrapper around `client.models.generate_content` — every
     Gemini call goes through here so prompts appear in LangSmith traces."""

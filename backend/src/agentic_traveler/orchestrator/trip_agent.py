@@ -26,6 +26,35 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-3.5-flash"
 
+# Reply-length guidance injected per request, driven by
+# user_profiles.profile_data.reply_length_preference. Default is "default"
+# (concise) — conciseness is a product invariant (CLAUDE.md §7.1), so an
+# unset preference still yields a tight reply, not the verbose default the
+# model leans toward on its own.
+_LENGTH_GUIDANCE = {
+    "terse": (
+        "Reply length: VERY BRIEF. At most ~3 short sentences or a tight "
+        "bulleted list (~600 characters). Lead with the answer. No preamble, "
+        "no flourish."
+    ),
+    "default": (
+        "Reply length: CONCISE. Lead with the answer, use compact bullets, and "
+        "skip ornamental phrasing and filler. Aim for under ~1500 characters."
+    ),
+    "verbose": (
+        "Reply length: You may give a fuller, well-organized reply when it "
+        "genuinely helps the traveler. Stay within the 3500-character ceiling."
+    ),
+}
+
+
+def _length_guidance(user_doc: Dict[str, Any]) -> str:
+    """Pick the reply-length directive from the user's stored preference,
+    defaulting to the concise 'default' setting when unset/unknown."""
+    profile_data = (user_doc.get("user_profile") or {}).get("profile_data") or {}
+    pref = (profile_data.get("reply_length_preference") or "default").lower()
+    return _LENGTH_GUIDANCE.get(pref, _LENGTH_GUIDANCE["default"])
+
 _SYSTEM_PROMPT = """\
 You are a friendly, deeply knowledgeable travel advisor chatting with
 a traveler you know personally.
@@ -122,6 +151,7 @@ class TripAgent:
             f"<user_profile_summary>\n{profile_summary}\n</user_profile_summary>\n"
             f"<conversation_history>\n{conversation_context}\n</conversation_history>\n"
             f"{pref_note}"
+            f"<response_style>\n{_length_guidance(user_doc)}\n</response_style>\n"
             f"<user_message>\n{message}\n</user_message>"
         )
 
@@ -136,7 +166,10 @@ class TripAgent:
                     system_instruction=_SYSTEM_PROMPT,
                     max_output_tokens=3500,
                     thinking_config=types.ThinkingConfig(
-                        thinking_budget=512,  # tokens
+                        # 256 is enough for TRIP tool-orchestration (decide
+                        # weather/search, then synthesize). 512 was overkill for
+                        # this case and added latency to every trip turn.
+                        thinking_budget=256,  # tokens
                     ),
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
                         maximum_remote_calls=6,  # raised from 3: trip requests routinely need 2 searches + weather + extras
