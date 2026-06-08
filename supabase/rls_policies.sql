@@ -270,3 +270,9 @@ END $$;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.trip_checklist TO authenticated;
 
+
+-- ---------------------------------------------------------------------------
+-- analytics_events, metrics_daily, metrics_rollup_state (Task 35)
+-- ---------------------------------------------------------------------------
+-- These tables have RLS enabled (via schema_public.sql) but NO POLICIES are defined.
+-- This restricts access to the service role only (backend analytics job).

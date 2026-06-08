@@ -568,6 +568,8 @@ Main components:
 
     *   `analytics_weekly`: aggregated weekly metrics flushed in batches from the in-memory analytics buffer.
 
+    *   **Metrics pipeline (Task 35):** `analytics_events` (append-only event log, 7-day rolling window) + `metrics_daily` (daily rollup) + `metrics_rollup_state` (idempotency tracker). A `pg_cron` job (`metrics_daily_rollup`, 03:00 UTC daily) aggregates yesterday's events into `metrics_daily` and deletes events older than 7 days. Six canonical SQL views answer fleet-level queries: `vw_growth_funnel_30d`, `vw_saga_dropoff`, `vw_data_growth_per_user`, `vw_errors_24h`, `vw_capacity_today`, `vw_cost_per_user_30d`. **One-time setup:** enable the `pg_cron` extension (Supabase Dashboard → Database → Extensions → pg_cron), apply the migration, then run `SELECT public.run_metrics_rollup()` once to seed the pipeline. Agent code emits events via `EventEmitter.emit("metric", {...})`; the orchestrator batches and flushes them at end of turn.
+
     *   `link_tokens`: short-lived single-use tokens for `telegram_link` (10-minute TTL) and `tally_submission` (7-day TTL) flows.
 
     *   `off_topic_state`, `waitlist`: off-topic restriction state and landing-page sign-ups.

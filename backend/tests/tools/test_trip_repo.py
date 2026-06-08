@@ -497,8 +497,8 @@ class TestTripRepositoryIntegration:
             # 8. Call derive_saga_state RPC
             rpc_resp = db.rpc("derive_saga_state", {"p_trip_id": trip_id}).execute()
             state = rpc_resp.data
-            # No confirmed destination + no start date → DREAMING
-            assert state == "DREAMING"
+            # Bookings exist → DETAILING
+            assert state == "DETAILING"
 
         finally:
             # 9. Cleanup — delete the test trip (cascades to all children)

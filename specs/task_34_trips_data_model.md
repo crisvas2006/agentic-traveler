@@ -1,7 +1,7 @@
 # Task 34 — Trips data model (Option B: parent + child tables)
 
 > Spec lineage: `specs/proposal_trip_model_and_planning_saga.md` §4, §7.1.
-> Hard prerequisite for tasks 46–53. Ship this before any saga work.
+> Hard prerequisite for tasks 35–53. Ship this before any saga work.
 
 ## 1. Problem Statement
 

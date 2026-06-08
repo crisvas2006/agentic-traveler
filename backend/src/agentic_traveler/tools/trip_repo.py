@@ -213,7 +213,7 @@ class TripRepository:
                 db.table("trips")
                 .select("id, title, status, reference_date, vision_summary, updated_at")
                 .eq("user_id", user_id)
-                .order("reference_date", desc=True, nulls_first=False)
+                .order("reference_date", desc=True, nullsfirst=False)
                 .order("updated_at", desc=True)
                 .execute()
             )
@@ -532,7 +532,7 @@ class TripRepository:
                 get_db().table("trip_bookings")
                 .select("*")
                 .eq("trip_id", trip_id)
-                .order("datetime_local", nulls_first=True)
+                .order("datetime_local", nullsfirst=True)
                 .execute()
             )
             return [TripBooking(**r) for r in (resp.data or [])]

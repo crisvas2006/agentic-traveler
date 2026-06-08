@@ -11,6 +11,7 @@ import pytest
 
 from agentic_traveler.analytics.usage_tracker import log_and_accumulate
 from agentic_traveler.orchestrator.agent import _save_and_finish
+from agentic_traveler.orchestrator.event_emitter import EventEmitter
 
 
 def _mock_response(prompt_tokens=100, candidates_tokens=50):
@@ -193,10 +194,12 @@ def test_save_and_finish_aggregates_usage_and_costs(mock_get_db):
     coordinator = MagicMock()
     user_doc = {"id": "test-uuid-123", "credits": {"balance": 100}}
     
+    events = EventEmitter(user_id="test-uuid-123", trip_id=None)
     with patch("agentic_traveler.analytics.metrics_tracker.record_token_usage") as mock_record, \
          patch("agentic_traveler.analytics.usage_tracker._resolve_user_uuid", return_value="test-uuid-123"), \
-         patch("agentic_traveler.economy.credit_manager.deduct_credits_async") as mock_deduct:
-             
+         patch("agentic_traveler.economy.credit_manager.deduct_credits_async") as mock_deduct, \
+         patch("agentic_traveler.orchestrator.event_emitter.flush_metrics"):
+
         _save_and_finish(
             coordinator=coordinator,
             user_doc=user_doc,
@@ -206,6 +209,8 @@ def test_save_and_finish_aggregates_usage_and_costs(mock_get_db):
             telegram_user_id="user_tg_123",
             token_records=token_records,
             t_total=0.5,
+            events=events,
+            intent="CHAT",
         )
         
         # Verify total turn-level credit deduction is exactly 1 credit

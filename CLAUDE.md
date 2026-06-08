@@ -14,7 +14,7 @@ duplicate their content.
 agentic-traveler/
 ├── backend/                    # Python FastAPI + Google GenAI on Cloud Run
 │   ├── src/agentic_traveler/
-│   │   ├── analytics/          # Metrics buffering + weekly flush to Supabase
+│   │   ├── analytics/          # EventEmitter metric sink → analytics_events (7-day) + metrics_daily rollup
 │   │   ├── core/               # Sanitization, shared utilities
 │   │   ├── economy/            # Credit manager + promo codes
 │   │   ├── guards/             # Off-topic guard, input filters

@@ -40,6 +40,7 @@ from agentic_traveler.orchestrator.router_agent import RouterAgent
 from agentic_traveler.orchestrator.chat_agent import ChatAgent
 from agentic_traveler.orchestrator.trip_agent import TripAgent
 from agentic_traveler.orchestrator.planner_agent import PlannerAgent
+from agentic_traveler.orchestrator.event_emitter import EventEmitter
 from agentic_traveler.tools.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,7 @@ class OrchestratorAgent:
         """
         t_total = time.time()
         token_records: list[Dict[str, Any]] = []
+        events = EventEmitter(user_id=user_id, trip_id=None, on_status=status_callback)
 
         # ── 1b. Credit gate ─────────────────────────────────────────────────
         if not credit_manager.has_credits(user_doc):
@@ -238,7 +240,7 @@ class OrchestratorAgent:
                 )
             _save_and_finish(
                 self, user_doc, user_id, message_text, response_text,
-                telegram_user_id, token_records, t_total,
+                telegram_user_id, token_records, t_total, events, intent,
             )
             return {"text": response_text, "action": "RESPONSE"}
 
@@ -250,7 +252,7 @@ class OrchestratorAgent:
                 off_topic_guard.reset(user_id)
             _save_and_finish(
                 self, user_doc, user_id, message_text, router_response,
-                telegram_user_id, token_records, t_total,
+                telegram_user_id, token_records, t_total, events, intent,
             )
             return {"text": router_response, "action": "RESPONSE"}
 
@@ -261,7 +263,7 @@ class OrchestratorAgent:
         # ── 5c. Dispatch to specialized agent ───────────────────────────────
         agent_result = _dispatch(
             self, intent, user_doc, message_text, conv_context,
-            current_time, preference_raw, status_callback,
+            current_time, preference_raw, status_callback, events,
         )
 
         response_text = agent_result.get("text", "")
@@ -329,7 +331,7 @@ class OrchestratorAgent:
         _save_and_finish(
             self, user_doc, user_id, message_text, response_text,
             telegram_user_id, token_records if not is_error_response else [],
-            t_total,
+            t_total, events, intent,
         )
 
         if is_error_response:
@@ -352,6 +354,7 @@ def _dispatch(
     current_time: str,
     preference_raw: Optional[str],
     status_callback: Optional[Callable[[str], None]],
+    events: EventEmitter,
 ) -> Dict[str, Any]:
     """Dispatch to the correct specialized agent based on intent."""
     if intent == "TRIP":
@@ -393,6 +396,8 @@ def _save_and_finish(
     telegram_user_id: str,
     token_records: list,
     t_total: float,
+    events: EventEmitter,
+    intent: str,
 ) -> None:
     """Save history, record metrics, and deduct credits."""
     if user_id:
@@ -405,15 +410,29 @@ def _save_and_finish(
         is_new_user=False,
     )
 
+    total_cost_credits = 0.0
     if token_records and user_id:
         try:
-            credit_manager.record_usage_and_bill(
+            usage = credit_manager.record_usage_and_bill(
                 user_id=user_id,
                 token_records=token_records,
                 default_agent_name="orchestrator",
                 run_async=True,
             )
+            if hasattr(usage, "total_cost_credits"):
+                total_cost_credits = usage.total_cost_credits
         except Exception:
             logger.exception("Failed to bill and record metrics for turn.")
 
+    latency_ms = int((time.time() - t_total) * 1000)
+    events.emit("metric", {
+        "name": "turn_completed",
+        "intent": intent,
+        "latency_ms": latency_ms,
+        "credits": total_cost_credits,
+        "tokens": sum(r.get("total_tokens", 0) for r in token_records),
+    })
+    events.flush_metrics()
+
     logger.info("⏱ TOTAL: %s", _elapsed(t_total))
+

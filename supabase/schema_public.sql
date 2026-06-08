@@ -544,3 +544,197 @@ BEGIN
     updated_at          = now();
 END;
 $$;
+
+
+-- ---------------------------------------------------------------------------
+-- analytics_events (Task 35)
+-- Append-only events log. 7-day rolling window enforced by pg_cron.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.analytics_events (
+  id           bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  occurred_at  timestamptz NOT NULL DEFAULT now(),
+  event_name   text        NOT NULL,
+  user_id      uuid        REFERENCES public.users(id) ON DELETE SET NULL,
+  trip_id      uuid        REFERENCES public.trips(id) ON DELETE SET NULL,
+  payload      jsonb       NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS analytics_events_occurred_idx
+  ON public.analytics_events (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS analytics_events_name_occurred_idx
+  ON public.analytics_events (event_name, occurred_at DESC);
+
+ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
+-- No policies -> service role only
+
+
+-- ---------------------------------------------------------------------------
+-- metrics_daily (Task 35)
+-- Aggregated daily metrics from analytics_events.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.metrics_daily (
+  day         date    NOT NULL,
+  metric      text    NOT NULL,
+  dimensions  jsonb   NOT NULL DEFAULT '{}'::jsonb,
+  count       bigint  NOT NULL DEFAULT 0,
+  sum_value   numeric,
+  PRIMARY KEY (day, metric, dimensions)
+);
+ALTER TABLE public.metrics_daily ENABLE ROW LEVEL SECURITY;
+-- No policies -> service role only
+
+
+-- ---------------------------------------------------------------------------
+-- metrics_rollup_state (Task 35)
+-- State tracker for the idempotent daily metrics rollup.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.metrics_rollup_state (
+  id              int  PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  last_rolled_day date
+);
+INSERT INTO public.metrics_rollup_state (id, last_rolled_day)
+  VALUES (1, current_date - 1) ON CONFLICT DO NOTHING;
+ALTER TABLE public.metrics_rollup_state ENABLE ROW LEVEL SECURITY;
+-- No policies -> service role only
+
+
+-- ---------------------------------------------------------------------------
+-- run_metrics_rollup (Task 35)
+-- Aggregates yesterday's events and deletes events older than 7 days.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.run_metrics_rollup()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_last  date;
+  v_to    date := current_date - 1;
+  v_day   date;
+BEGIN
+  SELECT last_rolled_day INTO v_last FROM public.metrics_rollup_state WHERE id = 1;
+  v_day := v_last + 1;
+  WHILE v_day <= v_to LOOP
+    INSERT INTO public.metrics_daily (day, metric, dimensions, count, sum_value)
+    SELECT v_day,
+           event_name,
+           coalesce(payload - 'latency_ms' - 'credits' - 'tokens', '{}'::jsonb) AS dims,
+           count(*),
+           sum((payload->>'latency_ms')::numeric)
+    FROM public.analytics_events
+    WHERE occurred_at::date = v_day
+    GROUP BY 1, 2, 3
+    ON CONFLICT (day, metric, dimensions)
+      DO UPDATE SET count = metrics_daily.count + EXCLUDED.count,
+                    sum_value = coalesce(metrics_daily.sum_value, 0)
+                              + coalesce(EXCLUDED.sum_value, 0);
+    v_day := v_day + 1;
+  END LOOP;
+  UPDATE public.metrics_rollup_state SET last_rolled_day = v_to WHERE id = 1;
+  DELETE FROM public.analytics_events WHERE occurred_at < now() - interval '7 days';
+END;
+$$;
+
+-- Schedule daily at 03:00 UTC — idempotent: unschedule first if exists.
+-- NOTE: Requires pg_cron extension to be enabled in Supabase!
+SELECT cron.unschedule(jobid)
+  FROM cron.job
+  WHERE jobname = 'metrics_daily_rollup';
+SELECT cron.schedule(
+  'metrics_daily_rollup',
+  '0 3 * * *',
+  $$ SELECT public.run_metrics_rollup(); $$
+);
+
+
+-- ---------------------------------------------------------------------------
+-- Canonical SQL views for Metrics (Task 35)
+-- ---------------------------------------------------------------------------
+
+-- 12.4.1  Growth funnel — last 30 days
+CREATE OR REPLACE VIEW public.vw_growth_funnel_30d AS
+SELECT
+  count(*) FILTER (WHERE u.created_at >= now() - interval '30 days')
+    AS signups,
+  count(DISTINCT m.sender_user_id) FILTER (
+    WHERE m.created_at >= now() - interval '30 days'
+      AND m.sender_type = 'user') AS first_message_senders,
+  count(DISTINCT t.user_id) FILTER (
+    WHERE t.created_at >= now() - interval '30 days') AS first_trip_creators,
+  count(DISTINCT t.user_id) FILTER (
+    WHERE t.status = 'active'
+      AND t.updated_at >= now() - interval '30 days') AS first_trip_actives
+FROM public.users u
+LEFT JOIN public.messages m ON m.sender_user_id = u.id
+LEFT JOIN public.trips    t ON t.user_id        = u.id;
+
+-- 12.4.2  Saga dropoff — where trips are stalled
+CREATE OR REPLACE VIEW public.vw_saga_dropoff AS
+SELECT saga_state, status, count(*) AS trips,
+       max(updated_at) AS most_recent_activity
+FROM public.trips
+WHERE updated_at < now() - interval '14 days'
+  AND status NOT IN ('active', 'past', 'archived')
+GROUP BY saga_state, status
+ORDER BY trips DESC;
+
+-- 12.4.3  Data growth per user — feeds capacity forecasting
+CREATE OR REPLACE VIEW public.vw_data_growth_per_user AS
+SELECT
+  u.id AS user_id,
+  u.created_at,
+  count(DISTINCT t.id)  AS trips,
+  count(DISTINCT m.id)  AS messages,
+  count(DISTINCT b.id)  AS bookings,
+  count(DISTINCT db.id) AS day_blocks
+FROM public.users u
+LEFT JOIN public.trips           t  ON t.user_id        = u.id
+LEFT JOIN public.messages        m  ON m.sender_user_id = u.id
+LEFT JOIN public.trip_bookings   b  ON b.trip_id        = t.id
+LEFT JOIN public.trip_day_blocks db ON db.trip_id       = t.id
+GROUP BY u.id, u.created_at;
+
+-- 12.4.4  Error rate by saga / tool — last 24 h
+CREATE OR REPLACE VIEW public.vw_errors_24h AS
+SELECT
+  payload->>'scope'       AS scope,
+  payload->>'error_class' AS error_class,
+  count(*)                AS errors
+FROM public.analytics_events
+WHERE event_name = 'error_raised'
+  AND occurred_at >= now() - interval '24 hours'
+GROUP BY 1, 2
+ORDER BY errors DESC;
+
+-- 12.4.5  Capacity vs Supabase free-tier limits
+CREATE OR REPLACE VIEW public.vw_capacity_today AS
+SELECT
+  pg_size_pretty(pg_database_size(current_database()))      AS db_size,
+  pg_size_pretty(pg_total_relation_size('public.messages')) AS messages_size,
+  pg_size_pretty(pg_total_relation_size('public.analytics_events'))
+                                                            AS events_size,
+  (SELECT count(*) FROM public.messages
+     WHERE created_at >= now() - interval '24 hours')       AS messages_24h,
+  (SELECT count(*) FROM public.analytics_events
+     WHERE occurred_at >= date_trunc('month', now()))       AS events_mtd,
+  -- Realtime monthly events ≈ turn_completed × ~1 subscriber per active session.
+  -- Free-tier cap = 2 000 000 / month. Warn at 75%.
+  CASE
+    WHEN (SELECT count(*) FROM public.analytics_events
+            WHERE event_name = 'turn_completed'
+              AND occurred_at >= date_trunc('month', now())) > 1500000
+    THEN 'WARN: approaching Realtime monthly cap'
+    ELSE 'OK'
+  END AS realtime_status;
+
+-- 12.4.6  Cost per active user — last 30 days
+CREATE OR REPLACE VIEW public.vw_cost_per_user_30d AS
+SELECT
+  u.id, u.created_at,
+  coalesce(sum(ut.total_cost_credits), 0) AS cost_credits_30d,
+  count(DISTINCT t.id)                    AS trips
+FROM public.users u
+LEFT JOIN public.usage_tracking ut ON ut.user_id = u.id
+LEFT JOIN public.trips          t  ON t.user_id  = u.id
+WHERE u.created_at >= now() - interval '30 days'
+GROUP BY u.id, u.created_at
+ORDER BY cost_credits_30d DESC;
