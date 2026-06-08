@@ -115,7 +115,7 @@ This keeps the backend focused on agent logic and state, with Telegram handling 
     
     *   `users`: long-term profile, `preference_signals` (JSONB), and `credits`
         
-    *   `trips`: constraints, candidates, chosen destination, itinerary summary, and status
+    *   `trips` + child tables (`trip_destinations`, `trip_bookings`, `trip_days`, `trip_day_blocks`, `trip_checklist`): layered trip documents with JSONB sections for loose-shape state and child tables for per-item collections. The `derive_saga_state()` Postgres function derives the canonical saga phase (DREAMING → LIVING); `vw_trips_growth` tracks creation velocity.
         
     *   `feedback`: user sentiment logs for lightweight learning
         
@@ -571,6 +571,8 @@ Main components:
     *   `link_tokens`: short-lived single-use tokens for `telegram_link` (10-minute TTL) and `tally_submission` (7-day TTL) flows.
 
     *   `off_topic_state`, `waitlist`: off-topic restriction state and landing-page sign-ups.
+
+    *   **Trip data model:** `trips` (parent row with JSONB sections: `discovery`, `travelers`, `preferences`, `country_intel`, `budget`, `live_state`, `scratchpad`, `journal`, `cover`) + 5 child tables: `trip_destinations`, `trip_bookings`, `trip_days`, `trip_day_blocks`, `trip_checklist`. Postgres function `derive_saga_state(trip_id)` returns the canonical saga phase (DREAMING | SHAPING | ANCHORING | DETAILING | READY_TO_GO | LIVING | REMEMBERING) from row content — `trips.saga_state` is a cache only. `vw_trips_growth` provides weekly trip-creation counts by status (free-tier capacity KPI). All tables RLS-enabled; frontend subscribes to the parent row; child writes bump `updated_at` (auto-trigger in task 48). Python `TripRepository` in `backend/src/agentic_traveler/tools/trip_repo.py`.
 
     *   **RLS is enforced** on user-scoped tables; atomic credit operations use Supabase RPCs (`deduct_credits`, `accumulate_user_usage`) invoked with the service key.
 

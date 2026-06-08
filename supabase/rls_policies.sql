@@ -152,3 +152,121 @@ CREATE POLICY "link_tokens_self_delete"
 -- Authenticated users need INSERT + SELECT (and optionally DELETE) on this table.
 -- The backend (service role) bypasses RLS and needs no GRANT.
 GRANT INSERT, SELECT, DELETE ON public.link_tokens TO authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- trips (Task 34)
+-- Owner gets full CRUD. Service-role client bypasses RLS; app layer also
+-- enforces user_id ownership (defense in depth).
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.trips ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'trips' AND policyname = 'trips_owner_all') THEN
+    EXECUTE $p$
+      CREATE POLICY trips_owner_all ON public.trips
+        FOR ALL TO authenticated
+        USING (user_id = auth.uid())
+        WITH CHECK (user_id = auth.uid());
+    $p$;
+  END IF;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.trips TO authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- trip_destinations (Task 34)
+-- Ownership derived through the parent trips row.
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.trip_destinations ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'trip_destinations' AND policyname = 'trip_destinations_owner_all') THEN
+    EXECUTE $p$
+      CREATE POLICY trip_destinations_owner_all ON public.trip_destinations
+        FOR ALL TO authenticated
+        USING (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()))
+        WITH CHECK (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()));
+    $p$;
+  END IF;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.trip_destinations TO authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- trip_bookings (Task 34)
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.trip_bookings ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'trip_bookings' AND policyname = 'trip_bookings_owner_all') THEN
+    EXECUTE $p$
+      CREATE POLICY trip_bookings_owner_all ON public.trip_bookings
+        FOR ALL TO authenticated
+        USING (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()))
+        WITH CHECK (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()));
+    $p$;
+  END IF;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.trip_bookings TO authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- trip_days (Task 34)
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.trip_days ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'trip_days' AND policyname = 'trip_days_owner_all') THEN
+    EXECUTE $p$
+      CREATE POLICY trip_days_owner_all ON public.trip_days
+        FOR ALL TO authenticated
+        USING (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()))
+        WITH CHECK (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()));
+    $p$;
+  END IF;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.trip_days TO authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- trip_day_blocks (Task 34)
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.trip_day_blocks ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'trip_day_blocks' AND policyname = 'trip_day_blocks_owner_all') THEN
+    EXECUTE $p$
+      CREATE POLICY trip_day_blocks_owner_all ON public.trip_day_blocks
+        FOR ALL TO authenticated
+        USING (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()))
+        WITH CHECK (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()));
+    $p$;
+  END IF;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.trip_day_blocks TO authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- trip_checklist (Task 34)
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.trip_checklist ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'trip_checklist' AND policyname = 'trip_checklist_owner_all') THEN
+    EXECUTE $p$
+      CREATE POLICY trip_checklist_owner_all ON public.trip_checklist
+        FOR ALL TO authenticated
+        USING (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()))
+        WITH CHECK (EXISTS (SELECT 1 FROM public.trips t WHERE t.id = trip_id AND t.user_id = auth.uid()));
+    $p$;
+  END IF;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.trip_checklist TO authenticated;
+

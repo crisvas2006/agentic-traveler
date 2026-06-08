@@ -239,6 +239,242 @@ CREATE INDEX IF NOT EXISTS link_tokens_expires_at_idx
 
 
 -- ---------------------------------------------------------------------------
+-- trips (Task 34)
+-- Persistent trip documents. Each authenticated user can have many trips.
+-- Uses Option B layout: JSONB columns for loose-shape sections + child tables
+-- for collections that need per-item edits, ordering, or independent Realtime.
+-- Solo-owned (RLS = user_id = auth.uid()); sharing deferred.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.trips (
+  id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         uuid        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+
+  -- lifecycle
+  status          text        NOT NULL DEFAULT 'dreaming'
+                              CHECK (status IN ('dreaming','planning','ready','active','past','archived')),
+  saga_state      text,       -- cached; derive_saga_state() is the source of truth
+
+  title           text,
+  reference_date  date,       -- for list ordering / index
+  vision_summary  text,
+
+  -- JSONB sections (shape per proposal §4.2)
+  discovery       jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  travelers       jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  preferences     jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  country_intel   jsonb       NOT NULL DEFAULT '[]'::jsonb,
+  budget          jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  live_state      jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  scratchpad      jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  journal         jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  cover           jsonb       NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS trips_user_id_ref_date_idx
+  ON public.trips (user_id, reference_date DESC);
+
+CREATE INDEX IF NOT EXISTS trips_user_id_status_idx
+  ON public.trips (user_id, status);
+
+
+-- ---------------------------------------------------------------------------
+-- trip_destinations (Task 34)
+-- Destinations considered, confirmed, or rejected for a trip.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.trip_destinations (
+  id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id      uuid        NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
+  name         text        NOT NULL,
+  iso_country  text,
+  status       text        NOT NULL DEFAULT 'considering'
+                           CHECK (status IN ('considering','confirmed','rejected')),
+  ord          int         NOT NULL DEFAULT 0,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trip_destinations_trip_idx
+  ON public.trip_destinations (trip_id, ord);
+
+
+-- ---------------------------------------------------------------------------
+-- trip_bookings (Task 34)
+-- User-input bookings (flights, hotels, activities, etc.).
+-- No booking engine — all data is user-pasted; payload is the source of truth.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.trip_bookings (
+  id                  uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id             uuid        NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
+  kind                text        NOT NULL
+                                  CHECK (kind IN ('flight','accommodation','ground','restaurant','activity')),
+  payload             jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  -- duplicated for indexing/sorting; payload is the source of truth on shape
+  datetime_local      timestamp,
+  confirmation_code   text,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trip_bookings_trip_kind_idx
+  ON public.trip_bookings (trip_id, kind, datetime_local);
+
+
+-- ---------------------------------------------------------------------------
+-- trip_days (Task 34)
+-- One row per itinerary day. day number (n) is 1-indexed and unique per trip.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.trip_days (
+  id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id            uuid        NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
+  n                  int         NOT NULL,    -- day number, 1-indexed
+  date               date,
+  title              text,
+  energy_target      int,
+  weather_snapshot   text,
+  ai_note            text,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (trip_id, n)
+);
+
+
+-- ---------------------------------------------------------------------------
+-- trip_day_blocks (Task 34)
+-- Individual activity blocks within a day's itinerary.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.trip_day_blocks (
+  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id       uuid        NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
+  day_id        uuid        NOT NULL REFERENCES public.trip_days(id) ON DELETE CASCADE,
+  ord           int         NOT NULL DEFAULT 0,
+  time_slot     text        CHECK (time_slot IN ('morning','afternoon','evening','night')),
+  title         text        NOT NULL,
+  type          text        CHECK (type IN ('culture','wander','food','nature','rest','transit')),
+  duration_min  int,
+  energy        int,
+  walk          text,
+  why           text,
+  lat           double precision,
+  lng           double precision,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trip_day_blocks_day_ord_idx
+  ON public.trip_day_blocks (day_id, ord);
+
+
+-- ---------------------------------------------------------------------------
+-- trip_checklist (Task 34)
+-- Pre-trip and packing checklist items.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.trip_checklist (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id     uuid        NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
+  scope       text        NOT NULL CHECK (scope IN ('pre_trip','packing')),
+  label       text        NOT NULL,
+  done        boolean     NOT NULL DEFAULT false,
+  ord         int         NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+
+-- ---------------------------------------------------------------------------
+-- derive_saga_state (Task 34)
+-- Derives the canonical saga state from row content; trips.saga_state is
+-- only a cache. Returns one of: DREAMING | SHAPING | ANCHORING | DETAILING
+--                               | READY_TO_GO | LIVING | REMEMBERING | NULL
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.derive_saga_state(p_trip_id uuid)
+RETURNS text
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  v_status              text;
+  v_start               date;
+  v_end                 date;
+  v_today               date := current_date;
+  v_confirmed_dest      int;
+  v_considered_dest     int;
+  v_pace_known          boolean;
+  v_structure_known     boolean;
+  v_budget_known        boolean;
+  v_travelers_known     boolean;
+  v_first_booking_exists boolean;
+BEGIN
+  SELECT status,
+         (discovery->'timeframe'->>'start_date')::date,
+         (discovery->'timeframe'->>'end_date')::date,
+         (preferences ? 'pace'),
+         (preferences ? 'structure'),
+         (preferences ? 'budget_tier'),
+         (travelers ? 'count')
+    INTO v_status, v_start, v_end,
+         v_pace_known, v_structure_known, v_budget_known, v_travelers_known
+  FROM public.trips WHERE id = p_trip_id;
+
+  IF v_status IS NULL THEN RETURN NULL; END IF;
+
+  -- LIVING: today is within [start, end]
+  IF v_start IS NOT NULL AND v_end IS NOT NULL AND v_today BETWEEN v_start AND v_end THEN
+    RETURN 'LIVING';
+  END IF;
+
+  -- REMEMBERING: ended within last 30 days
+  IF v_end IS NOT NULL AND v_today > v_end AND v_today - v_end <= 30 THEN
+    RETURN 'REMEMBERING';
+  END IF;
+
+  -- READY_TO_GO: departure within 7 days
+  IF v_start IS NOT NULL AND v_start - v_today BETWEEN 0 AND 7 THEN
+    RETURN 'READY_TO_GO';
+  END IF;
+
+  SELECT count(*) FILTER (WHERE status = 'confirmed'),
+         count(*) FILTER (WHERE status = 'considering')
+    INTO v_confirmed_dest, v_considered_dest
+  FROM public.trip_destinations WHERE trip_id = p_trip_id;
+
+  SELECT EXISTS (SELECT 1 FROM public.trip_bookings WHERE trip_id = p_trip_id)
+    INTO v_first_booking_exists;
+
+  -- DETAILING: bookings exist OR all planning prerequisites met
+  IF v_first_booking_exists OR
+     (v_confirmed_dest > 0 AND v_pace_known AND v_structure_known
+      AND v_budget_known AND v_travelers_known) THEN
+    RETURN 'DETAILING';
+  END IF;
+
+  -- ANCHORING: destination confirmed + start date firm
+  IF v_confirmed_dest > 0 AND v_start IS NOT NULL THEN
+    RETURN 'ANCHORING';
+  END IF;
+
+  -- SHAPING: at least one destination considered or confirmed
+  IF v_considered_dest > 0 OR v_confirmed_dest > 0 THEN
+    RETURN 'SHAPING';
+  END IF;
+
+  RETURN 'DREAMING';
+END;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- vw_trips_growth (Task 34)
+-- Weekly trip creation counts by status — free-tier capacity KPI.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW public.vw_trips_growth AS
+SELECT
+  date_trunc('week', created_at)::date AS week,
+  status,
+  count(*) AS trips_created
+FROM public.trips
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2;
+
+
+-- ---------------------------------------------------------------------------
 -- deduct_credits  (RPC — called by the Python backend)
 -- Atomically deducts credits, flooring at 0.
 -- Returns the new balance.
