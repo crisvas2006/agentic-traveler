@@ -99,7 +99,7 @@ def test_verify_supabase_jwt_expired():
     mock_signing_key.key = "mock-public-key-content"
 
     with patch("agentic_traveler.interfaces.dependencies.get_jwk_client") as mock_get_client, \
-         patch("jwt.decode", side_effect=jwt.ExpiredSignatureError) as mock_decode, \
+         patch("jwt.decode", side_effect=jwt.ExpiredSignatureError), \
          patch.dict(os.environ, {"SUPABASE_URL": "https://test-project.supabase.co"}):
         
         mock_jwk = MagicMock()

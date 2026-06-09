@@ -12,12 +12,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agentic_traveler.core.logging_config import setup_logging
-from agentic_traveler.orchestrator.agent import OrchestratorAgent
+from agentic_traveler.core.logging_config import setup_logging  # noqa: E402
+from agentic_traveler.orchestrator.agent import OrchestratorAgent  # noqa: E402
 # get_db is safe to import here: db_client reads SUPABASE_URL lazily inside
 # get_db(), not at module load time, so load_dotenv() above always runs first.
-from agentic_traveler.tools.db_client import get_db
-from agentic_traveler.tools.user_repo import UserRepository
+from agentic_traveler.tools.db_client import get_db  # noqa: E402
+from agentic_traveler.tools.user_repo import UserRepository  # noqa: E402
 
 
 def list_users(tool: UserRepository, limit: int = 10):

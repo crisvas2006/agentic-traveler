@@ -87,20 +87,21 @@ def test_metric_unnamed_fallback():
 # Status routing
 # ---------------------------------------------------------------------------
 
-def test_status_emit_calls_on_status_with_message_string():
-    """emit("status", {"message": "..."}) passes the string to on_status."""
+def test_status_emit_calls_on_status_with_payload_dict():
+    """emit("status", payload) passes the full payload dict to on_status (Task 37)."""
     on_status = MagicMock()
     ee = EventEmitter(user_id=None, trip_id=None, on_status=on_status)
-    ee.emit("status", {"message": "Searching the web..."})
-    on_status.assert_called_once_with("Searching the web...")
+    payload = {"phase": "tool", "text": "Searching the web..."}
+    ee.emit("status", payload)
+    on_status.assert_called_once_with(payload)
 
 
-def test_status_emit_missing_message_key_passes_empty_string():
-    """emit("status", {}) passes empty string — never raises."""
+def test_status_emit_empty_payload_is_passed_through():
+    """emit("status", {}) passes the empty dict — never raises."""
     on_status = MagicMock()
     ee = EventEmitter(user_id=None, trip_id=None, on_status=on_status)
     ee.emit("status", {})
-    on_status.assert_called_once_with("")
+    on_status.assert_called_once_with({})
 
 
 def test_status_emit_no_callback_is_silent():
@@ -120,12 +121,13 @@ def test_status_callback_exception_is_swallowed():
 # Delta routing
 # ---------------------------------------------------------------------------
 
-def test_delta_emit_calls_on_delta_with_text_string():
-    """emit("delta", {"text": "token"}) passes the string to on_delta."""
+def test_delta_emit_calls_on_delta_with_payload_dict():
+    """emit("delta", {"text": "token"}) passes the full payload dict to on_delta."""
     on_delta = MagicMock()
     ee = EventEmitter(user_id=None, trip_id=None, on_delta=on_delta)
-    ee.emit("delta", {"text": "partial answer"})
-    on_delta.assert_called_once_with("partial answer")
+    payload = {"text": "partial answer"}
+    ee.emit("delta", payload)
+    on_delta.assert_called_once_with(payload)
 
 
 def test_delta_callback_exception_is_swallowed():

@@ -87,3 +87,25 @@ def attach_run_metadata(**kw: Any) -> None:
             rt.metadata.update(kw)
     except Exception:
         pass  # never let observability errors break the request
+
+
+def record_run_error(message: str) -> None:
+    """
+    Flag the current run as errored in LangSmith without raising.
+
+    The orchestrator catches agent failures and returns a graceful fallback to
+    the user, so nothing propagates as an exception — which means LangSmith
+    would otherwise record the trace as successful. Setting the run tree's
+    ``error`` field surfaces the failure (red run) so it's queryable. Best-effort
+    and a no-op when tracing is off.
+    """
+    if not _TRACING_ENABLED:
+        return
+    try:
+        from langsmith.run_helpers import get_current_run_tree  # type: ignore[import-not-found]
+        rt = get_current_run_tree()
+        if rt is not None:
+            rt.error = message
+            rt.metadata.update({"agent_failed": True})
+    except Exception:
+        pass  # never let observability errors break the request

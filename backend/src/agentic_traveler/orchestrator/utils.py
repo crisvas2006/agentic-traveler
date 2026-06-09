@@ -4,6 +4,7 @@ Shared utilities for orchestrator agents.
 from typing import Any
 import logging
 from agentic_traveler.tools.weather import WeatherService
+from agentic_traveler.orchestrator.tool_events import emit_tool_status
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ def check_weather(location: str, days: int = 7) -> str:
     Returns:
         Formatted weather summary.
     """
+    emit_tool_status("check_weather")
     logger.info("🔧 Shared tool: check_weather(location=%s, days=%d)", location, days)
     coords = WeatherService.get_coordinates(location)
     if not coords:

@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 from google import genai
 from google.genai import types
 
-from agentic_traveler.orchestrator.client_factory import get_client, gemini_generate
+from agentic_traveler.orchestrator.client_factory import get_client, generate_maybe_stream
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
 from agentic_traveler.orchestrator.search_agent import SearchAgent
@@ -124,9 +124,14 @@ class TripAgent:
         conversation_context: str,
         current_time: str,
         preference_raw: Optional[str] = None,
+        events: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Generate a personalized travel suggestion or in-trip response.
+
+        When ``events.is_streaming`` is True the reply is streamed token-by-token
+        through ``events`` (web SSE); otherwise a single synchronous call is made
+        (Telegram / non-streaming web). Tool status fires via ``events`` in both.
 
         Returns dict with keys: text, action, _raw_response, _latency_ms,
         _grounding_used.
@@ -161,40 +166,38 @@ class TripAgent:
         logger.debug("TripAgent prompt length: %d chars", len(user_content))
         t = time.time()
         try:
-            response = gemini_generate(
-                self._client,
-                model=_MODEL,
-                contents=user_content,
-                config=types.GenerateContentConfig(
-                    system_instruction=_SYSTEM_PROMPT,
-                    max_output_tokens=3500,
-                    thinking_config=types.ThinkingConfig(
-                        # 256 is enough for TRIP tool-orchestration (decide
-                        # weather/search, then synthesize). 512 was overkill for
-                        # this case and added latency to every trip turn.
-                        thinking_budget=256,  # tokens
-                    ),
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=6,  # raised from 3: trip requests routinely need 2 searches + weather + extras
-                    ),
-                    safety_settings=[
-                        types.SafetySetting(
-                            category=c,
-                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        ) for c in [
-                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        ]
-                    ],
-                    tools=[check_weather, search_web],
+            config = types.GenerateContentConfig(
+                system_instruction=_SYSTEM_PROMPT,
+                max_output_tokens=3500,
+                thinking_config=types.ThinkingConfig(
+                    # 256 is enough for TRIP tool-orchestration (decide
+                    # weather/search, then synthesize). 512 was overkill for
+                    # this case and added latency to every trip turn.
+                    thinking_budget=256,  # tokens
                 ),
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    maximum_remote_calls=6,  # raised from 3: trip requests routinely need 2 searches + weather + extras
+                ),
+                safety_settings=[
+                    types.SafetySetting(
+                        category=c,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    ) for c in [
+                        types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    ]
+                ],
+                tools=[check_weather, search_web],
+            )
+            response, text = generate_maybe_stream(
+                self._client, _MODEL, user_content, config, events,
             )
             latency_ms = (time.time() - t) * 1000
             grounding_used = has_grounding(response)
             return {
-                "text": response.text or "",
+                "text": text,
                 "action": "TRIP_RESULTS",
                 "_raw_response": response,
                 "_search_responses": search_responses,

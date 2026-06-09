@@ -125,18 +125,18 @@ breaking changes vs. older training data; consult
 
 ## 3. Tech Stack & Conventions
 
-| Layer | Stack |
-|---|---|
-| Backend | Python 3.13, FastAPI, Google GenAI SDK, Pydantic |
-| Agents | Gemini 3.x flash / flash-lite per agent (see README §Current Model Stack) |
-| DB | Supabase (PostgreSQL) — JSONB profiles, RPC for atomic credit ops, RLS enforced |
-| Frontend | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4 |
-| Auth | Supabase Auth (`@supabase/ssr`), Google OAuth (PKCE), Cloudflare Turnstile |
-| Email | React Email templates rendered, sent via Resend |
-| Hosting | Cloud Run (backend), Vercel (frontend) |
-| Channels | Telegram Bot webhook → Cloud Run; Tally form → `/tally-webhook` |
-| Realtime | Supabase Realtime (postgres_changes) on parent tables; child writes bump parent `updated_at` via Postgres trigger |
-| Streaming | Server-Sent Events (FastAPI `StreamingResponse`) for web; debounced `editMessageText` for Telegram |
+| Layer         | Stack                                                                                                                                                 |
+| ---------------| -------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Backend       | Python 3.13, FastAPI, Google GenAI SDK, Pydantic                                                                                                      |
+| Agents        | Gemini 3.x flash / flash-lite per agent (see README §Current Model Stack)                                                                             |
+| DB            | Supabase (PostgreSQL) — JSONB profiles, RPC for atomic credit ops, RLS enforced                                                                       |
+| Frontend      | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4                                                                                        |
+| Auth          | Supabase Auth (`@supabase/ssr`), Google OAuth (PKCE), Cloudflare Turnstile                                                                            |
+| Email         | React Email templates rendered, sent via Resend                                                                                                       |
+| Hosting       | Cloud Run (backend), Vercel (frontend)                                                                                                                |
+| Channels      | Telegram Bot webhook → Cloud Run; Tally form → `/tally-webhook`                                                                                       |
+| Realtime      | Supabase Realtime (postgres_changes) on parent tables; child writes bump parent `updated_at` via Postgres trigger                                     |
+| Streaming     | Server-Sent Events (FastAPI `StreamingResponse`) for web; debounced `editMessageText` for Telegram                                                    |
 | Observability | LangSmith (`@traceable` on orchestrator + sagas + agents); structured metric events into `analytics_events` (7-day window) + `metrics_daily` (rollup) |
 
 **Python:** Target 3.13 (must match `backend/Dockerfile`). Pin versions in

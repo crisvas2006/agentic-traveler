@@ -189,6 +189,8 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
     hasMore,
     pendingReply,
     error,
+    streamStatus,
+    streamingText,
     send,
     retry,
     loadOlder,
@@ -275,6 +277,16 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
+
+  // Keep the streaming reply / status line in view as it grows (only when the
+  // user is already near the bottom, so we never yank them up while scrolling).
+  useEffect(() => {
+    if (!streamingText && !streamStatus) return;
+    const c = scrollRef.current;
+    if (!c) return;
+    const nearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 240;
+    if (nearBottom) bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [streamingText, streamStatus]);
 
   // Infinite scroll up — trigger when within 80px of top.
   const onScroll = useCallback(() => {
@@ -599,23 +611,50 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
           />
         ))}
 
-        {pendingReply && (
+        {/* Streaming reply takes priority; otherwise the paced status line.
+            No generic typing dots — only the real intermediary states show
+            (Task 37). */}
+        {streamingText ? (
           <div className="flex justify-start">
             <div
-              className="px-3.5 py-2.5 rounded-2xl text-muted-foreground"
+              className="chat-bubble-interactive max-w-[78%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed text-foreground"
               style={{
                 background: "color-mix(in oklab, var(--foreground) 5%, transparent)",
                 border: "1px solid var(--border)",
                 borderBottomLeftRadius: 6,
               }}
-              aria-label="Aletheia is typing"
+              aria-live="polite"
             >
-              <span className="chat-typing-dot" />
-              <span className="chat-typing-dot" />
-              <span className="chat-typing-dot" />
+              <div className="chat-md break-words">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+                      <a {...props} target="_blank" rel="noopener noreferrer" />
+                    ),
+                  }}
+                >
+                  {streamingText}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
-        )}
+        ) : streamStatus ? (
+          <div className="flex justify-start">
+            <div
+              className="flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs text-muted-foreground"
+              style={{
+                background: "color-mix(in oklab, var(--foreground) 4%, transparent)",
+                border: "1px solid var(--border)",
+                borderBottomLeftRadius: 6,
+              }}
+              aria-live="polite"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <span className="italic">{streamStatus}</span>
+            </div>
+          </div>
+        ) : null}
 
         <div ref={bottomAnchorRef} />
       </div>

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from flask import Flask, Request
+from flask import Flask
 from agentic_traveler.core.main import telegram_webhook
 
 @pytest.fixture

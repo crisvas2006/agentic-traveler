@@ -18,6 +18,7 @@ export interface UserProfile {
   loading: boolean;
   /** true if the profile query itself failed (e.g. permissions, network) */
   fetchError: boolean;
+  refetchCredits?: () => Promise<void>;
 }
 
 const EMPTY: UserProfile = {
@@ -48,6 +49,28 @@ function deriveInitials(name: string): string {
 
 export function useUserProfile(): UserProfile {
   const [profile, setProfile] = useState<UserProfile>(EMPTY);
+
+  const refetchCredits = async () => {
+    const supabase = createClient();
+    const { data: credits, error } = await supabase
+      .from("credits")
+      .select("balance, initial_grant, welcome_credits_claimed_at")
+      .maybeSingle();
+
+    if (error) {
+      console.error("[useUserProfile] refetch credits failed:", error);
+      return;
+    }
+
+    if (credits) {
+      setProfile((prev) => ({
+        ...prev,
+        balance: credits.balance,
+        initialGrant: credits.initial_grant,
+        welcomeClaimedAt: credits.welcome_credits_claimed_at,
+      }));
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -137,6 +160,7 @@ export function useUserProfile(): UserProfile {
         welcomeClaimedAt,
         loading: false,
         fetchError: usersResult.error != null,
+        refetchCredits,
       });
     }
 

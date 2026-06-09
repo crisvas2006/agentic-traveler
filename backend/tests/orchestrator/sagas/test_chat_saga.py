@@ -1,6 +1,6 @@
 """ChatSaga unit tests."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 import pytest
 
 from agentic_traveler.orchestrator.event_emitter import EventEmitter
@@ -37,6 +37,7 @@ def test_chat_saga_delegates_to_chat_agent(saga):
         conversation_context="",
         current_time="",
         preference_raw=None,
+        events=ANY,
     )
     assert result.text == "Hello, how can I help?"
     

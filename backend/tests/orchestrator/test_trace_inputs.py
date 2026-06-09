@@ -33,7 +33,7 @@ def test_trace_inputs_with_function_tool_is_json_serializable():
     """The exact regression: a config with a function tool must serialize, and
     tools must be reduced to their names."""
     cfg = types.GenerateContentConfig(
-        max_output_tokens=3500,
+        max_output_tokens=800,
         thinking_config=types.ThinkingConfig(thinking_budget=256),
         tools=[_dummy_tool],
     )
@@ -53,7 +53,7 @@ def test_trace_inputs_with_function_tool_is_json_serializable():
 
     # config reduced to a serializable summary; tools are NAME strings
     assert safe["config"]["tools"] == ["_dummy_tool"]
-    assert safe["config"]["max_output_tokens"] == 3500
+    assert safe["config"]["max_output_tokens"] == 800
     assert safe["config"]["thinking_budget"] == 256
 
     # the whole payload must round-trip through JSON (what LangSmith does)

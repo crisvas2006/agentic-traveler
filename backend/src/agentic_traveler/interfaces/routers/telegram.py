@@ -207,11 +207,28 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
             send_telegram_message(chat_id, restriction_msg)
             return
 
-    placeholder_msg_id = send_telegram_message(chat_id, "⏳ Thinking...")
+    # Status events (Task 37) arrive as dict payloads {"phase","text",...}. The
+    # FIRST status becomes the placeholder message (no generic "Thinking…" — we
+    # only show real states from the registry); later statuses edit it, throttled
+    # to ≥1 s so each state is readable and doesn't flicker. on_delta is never
+    # wired for Telegram, so the bot never shows a partial reply — only status,
+    # then one final edit to the complete reply (which preempts any pending state).
+    _ph = {"id": None}
+    _last_status_edit = {"t": 0.0}
 
-    def update_status(msg: str):
-        if placeholder_msg_id:
-            edit_telegram_message(chat_id, placeholder_msg_id, msg)
+    def update_status(payload: dict):
+        text = (payload or {}).get("text") or (payload or {}).get("message") or ""
+        if not text:
+            return
+        now = time.time()
+        if _ph["id"] is None:
+            _ph["id"] = send_telegram_message(chat_id, text)
+            _last_status_edit["t"] = now
+            return
+        if now - _last_status_edit["t"] < 1.0:
+            return
+        _last_status_edit["t"] = now
+        edit_telegram_message(chat_id, _ph["id"], text)
 
     try:
         response = get_orchestrator().process_request(
@@ -240,6 +257,7 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
         except Exception:
             logger.exception("chat_repo append failed for telegram user %s", user_id)
 
+    placeholder_msg_id = _ph["id"]
     if placeholder_msg_id:
         logger.info("Editing placeholder %s for chat %s (reply_len=%d)", placeholder_msg_id, chat_id, len(reply))
         edit_telegram_message(chat_id, placeholder_msg_id, reply)

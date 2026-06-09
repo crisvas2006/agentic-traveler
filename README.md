@@ -170,6 +170,47 @@ Core agents (tool-calling architecture):
 
     *   Stores recent messages + compacted summary in Supabase `conversations` table.
 
+#### Real-time architecture (Task 37)
+
+Three composable layers give the web a live feel, all multiplexed through the
+task-35 `EventEmitter` (phases `status` / `delta` / `metric`):
+
+*   **Realtime subscriptions.** A Postgres trigger `touch_trip_updated_at` bumps
+    `trips.updated_at` on any child-row write (`trip_destinations`,
+    `trip_bookings`, `trip_days`, `trip_day_blocks`, `trip_checklist`), so the
+    frontend reflects agent-driven trip mutations through a **single**
+    subscription on the parent `trips` row (free-tier discipline: ≤1 WebSocket
+    per tab).
+*   **SSE streaming.** `POST /chat/stream` returns `text/event-stream` and emits
+    `status` events (intermediate progress), `delta` events (the reply), and a
+    final `done` carrying the persisted `message_id` (plus the full `text` as a
+    reconciliation fallback). The agent reply is written to `messages` **before**
+    streaming completes, so a dropped connection still recovers the reply via
+    Realtime (de-duplicated by `message_id`). Delta strategy depends on the turn:
+    a **tool-less** turn streams **token-by-token** from Gemini
+    `generate_content_stream` (fastest first token); a **tool-capable** turn runs
+    one reliable **blocking** generation (on Vertex, streaming + automatic
+    function calling drops the post-tool synthesis) and then **paces** the
+    finished reply to the client as `delta` chunks so it still types in smoothly —
+    one generation, no double tool cost. The non-streaming `POST /chat/send`
+    stays for compatibility.
+*   **Status events.** Rendered from a static `event_text_registry` (no LLM):
+    "Understanding what you're asking… / Picking up your trip… / Checking the
+    weather… / Searching the web… / Writing the reply…". Tool status is emitted
+    the moment a tool runs, via a contextvar the tool functions read (so it works
+    on both web and Telegram). On Telegram, the first real status becomes the
+    placeholder message (no generic "Thinking…"); later statuses edit it
+    (throttled ≥1 s so each is readable), then one final edit to the complete
+    reply — never a partial reply.
+
+On the web, the dashboard chat consumes this via `useChatStream` (renders the
+intermediary status lines — no generic typing dots — then the streamed reply,
+pacing each status ≥1 s and letting the reply preempt pending statuses),
+`useChatRealtime` (merges out-of-band rows
+— a recovered turn or a Telegram/other-tab message — de-duplicated against
+SSE-finalized ids), and `useTripRealtime` (one parent subscription → refetches
+the assembled trip on any change, for the trip panel).
+
 #### Current Model Stack
 
 The system uses a tiered model approach to balance reasoning quality and cost:
@@ -214,6 +255,11 @@ The orchestrator includes a custom metrics system designed for Cloud Run:
 *   **Threshold-based Flush**: Weekly metrics are written to Supabase (`analytics_weekly` table) every 50 events or on process shutdown.
 *   **Deduplicated Tracking**: Monitors active users per ISO week.
 *   **Token Accounting**: Tracks input/output tokens per model and per agent call.
+*   **Failure visibility**: When an agent produces no usable response (empty
+    output or an `ERROR` action), the turn is not charged, a `turn_failed`
+    metric is emitted, and the LangSmith run is flagged as errored (it otherwise
+    records as successful, since the user still gets a graceful fallback rather
+    than an exception).
 
 ### The Build
 
@@ -257,9 +303,15 @@ Tools and technologies:
         and collects the missing essentials one question per turn — categorical
         slots (pace/structure/budget) as **multiple-choice** (`SlotRequest.choices`),
         free-form slots parsed by a small extractor — writing structured patches
-        back to the trip via `TripRepository`. State is data, never stored on the
-        saga, so the shape maps 1:1 to a future LangGraph migration. Each saga
-        emits `saga_entered` / `saga_exited` / `slot_filled` metrics by default.
+        back to the trip via `TripRepository`. The user's message dictates which
+        engine answers: the heavy itinerary **PlannerAgent** runs only on an
+        explicit plan request (intent `PLAN`) or when a new planning fact was just
+        supplied; a fully-slotted trip plus a casual question (a weather check,
+        idle chat) drifts to the lighter conversational **TripAgent** instead — the
+        trip stays in focus without being force-fed a fresh itinerary every turn.
+        State is data, never stored on the saga, so the shape maps 1:1 to a future
+        LangGraph migration. Each saga emits `saga_entered` / `saga_exited` /
+        `slot_filled` metrics by default.
             
     *   Planning before acting:
         

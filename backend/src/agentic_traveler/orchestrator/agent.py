@@ -37,10 +37,16 @@ from agentic_traveler.guards import off_topic_guard
 from agentic_traveler.analytics import usage_tracker
 from agentic_traveler.analytics import metrics_tracker
 from agentic_traveler.orchestrator.client_factory import get_client
-from agentic_traveler.core.observability import traceable, attach_run_metadata, hash_user_id
+from agentic_traveler.core.observability import (
+    traceable,
+    attach_run_metadata,
+    hash_user_id,
+    record_run_error,
+)
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
 from agentic_traveler.orchestrator.router_agent import RouterAgent
 from agentic_traveler.orchestrator.event_emitter import EventEmitter
+from agentic_traveler.orchestrator.event_text_registry import text_for
 from agentic_traveler.orchestrator.sagas import SagaDispatcher, SagaState
 from agentic_traveler.orchestrator.sagas.trip_resolver import resolve_active_trip
 from agentic_traveler.tools.user_repo import UserRepository
@@ -58,6 +64,20 @@ def _current_time_str() -> str:
     """Return a human-readable current datetime string."""
     now = datetime.datetime.now().astimezone()
     return now.strftime("%A, %Y-%m-%d %H:%M:%S %Z")
+
+
+def _emit_status(events: "EventEmitter", phase: str, key: Optional[str] = None) -> None:
+    """Emit a user-facing status event from the static registry (Task 37 — no
+    LLM). No-op when the phase/key maps to None (silent phases like ChatSaga),
+    and a no-op overall when no status sink is wired (e.g. the non-streaming
+    web path passes on_status=None)."""
+    text = text_for(phase, key)
+    if not text:
+        return
+    payload: Dict[str, Any] = {"phase": phase, "text": text}
+    if phase == "saga_selected" and key:
+        payload["saga"] = key
+    events.emit("status", payload)
 
 
 class OrchestratorAgent:
@@ -86,7 +106,8 @@ class OrchestratorAgent:
         self,
         telegram_user_id: str,
         message_text: str,
-        status_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Optional[Callable[[dict], None]] = None,
+        delta_callback: Optional[Callable[[dict], None]] = None,
     ) -> Dict[str, Any]:
         """
         Telegram entry point. Resolves the user by Telegram ID, then dispatches.
@@ -115,6 +136,7 @@ class OrchestratorAgent:
             telegram_user_id=telegram_user_id,
             message_text=message_text,
             status_callback=status_callback,
+            delta_callback=delta_callback,
         )
 
     @traceable(name="orchestrator.process_request_for_user")
@@ -122,7 +144,8 @@ class OrchestratorAgent:
         self,
         user_id: str,
         message_text: str,
-        status_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Optional[Callable[[dict], None]] = None,
+        delta_callback: Optional[Callable[[dict], None]] = None,
     ) -> Dict[str, Any]:
         """
         Web entry point. The user is already resolved by Supabase JWT → users.id;
@@ -146,6 +169,7 @@ class OrchestratorAgent:
             telegram_user_id=user_id,
             message_text=message_text,
             status_callback=status_callback,
+            delta_callback=delta_callback,
         )
 
     def _process_user_doc(
@@ -154,7 +178,8 @@ class OrchestratorAgent:
         user_id: str,
         telegram_user_id: str,
         message_text: str,
-        status_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Optional[Callable[[dict], None]] = None,
+        delta_callback: Optional[Callable[[dict], None]] = None,
     ) -> Dict[str, Any]:
         """
         Shared post-lookup pipeline. Used by both the Telegram and web entry
@@ -163,7 +188,10 @@ class OrchestratorAgent:
         """
         t_total = time.time()
         token_records: list[Dict[str, Any]] = []
-        events = EventEmitter(user_id=user_id, trip_id=None, on_status=status_callback)
+        events = EventEmitter(
+            user_id=user_id, trip_id=None,
+            on_status=status_callback, on_delta=delta_callback,
+        )
 
         # ── 1b. Credit gate ─────────────────────────────────────────────────
         if not credit_manager.has_credits(user_doc):
@@ -224,6 +252,9 @@ class OrchestratorAgent:
         router_response = router_result.get("response")
 
         logger.info("Intent: %s | Preference raw: %s", intent, preference_raw)
+
+        # Status event: the router has classified the turn (Task 37).
+        _emit_status(events, "router")
 
         # ── 5. Handle intent ────────────────────────────────────────────────
 
@@ -338,6 +369,21 @@ class OrchestratorAgent:
                         "grounding_cost_credits": grounding_credits,
                     })
 
+        # Surface agent failures before the metrics flush below: flag the run in
+        # LangSmith (otherwise recorded as successful, since we return a graceful
+        # fallback and never raise) and emit a queryable metric.
+        if is_error_response:
+            record_run_error(
+                f"agent produced no usable response "
+                f"(intent={intent}, action={agent_result.get('action')})"
+            )
+            events.emit("metric", {
+                "name": "turn_failed",
+                "intent": intent,
+                "owner_saga": agent_result.get("owner_saga"),
+                "action": agent_result.get("action"),
+            })
+
         # ── 6. Save history + metrics + deduct credits ──────────────────────
         # Skip credit deduction when the agent failed to produce a useful response
         # (AFC limit hit, empty response, or explicit ERROR action). The LLM calls
@@ -407,6 +453,7 @@ class OrchestratorAgent:
 
         # 3. Select owner + listeners (deterministic, no LLM).
         owner, listeners = self._dispatcher.select(intent, entities, trip, state)
+        _emit_status(events, "saga_selected", getattr(owner, "name", None))
 
         # 4. Zero-trip path: create a DREAMING trip for planning/discovery owners.
         if trip is None and user_id and getattr(owner, "name", "") in (
@@ -433,6 +480,7 @@ class OrchestratorAgent:
                     "Listener saga %s failed.", getattr(saga, "name", "?")
                 )
 
+        _emit_status(events, "composing")
         result = owner.run(message_text, user_doc, trip, state, conv_context, events)
         self._apply_side_effects(user_id, result.side_effects)
 

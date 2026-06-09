@@ -461,6 +461,43 @@ $$;
 
 
 -- ---------------------------------------------------------------------------
+-- touch_trip_updated_at (Task 37)
+-- Bumps trips.updated_at whenever any child row changes, so the frontend's
+-- single Realtime subscription on the parent trips row reflects child writes.
+-- Complements TripRepository._touch_parent() (the Task 34 app-layer stopgap);
+-- both set updated_at = now(), so they are safe to coexist.
+-- Not recursive: the trigger fires only on the child tables and issues a
+-- column UPDATE on trips (which has no such trigger), so it cannot re-fire.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.touch_trip_updated_at() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE public.trips
+     SET updated_at = now()
+   WHERE id = COALESCE(NEW.trip_id, OLD.trip_id);
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+-- Idempotent: drop + recreate one AFTER trigger per child table.
+DO $$
+DECLARE child_table text;
+BEGIN
+  FOREACH child_table IN ARRAY ARRAY[
+    'trip_destinations','trip_bookings','trip_days','trip_day_blocks','trip_checklist'
+  ]
+  LOOP
+    EXECUTE format($f$
+      DROP TRIGGER IF EXISTS touch_on_%1$I ON public.%1$I;
+      CREATE TRIGGER touch_on_%1$I
+        AFTER INSERT OR UPDATE OR DELETE ON public.%1$I
+        FOR EACH ROW EXECUTE FUNCTION public.touch_trip_updated_at();
+    $f$, child_table);
+  END LOOP;
+END $$;
+
+
+-- ---------------------------------------------------------------------------
 -- vw_trips_growth (Task 34)
 -- Weekly trip creation counts by status — free-tier capacity KPI.
 -- ---------------------------------------------------------------------------

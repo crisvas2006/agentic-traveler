@@ -1,5 +1,4 @@
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -161,8 +160,19 @@ def test_start_with_unsupported_submission_id(mock_send, client, start_update):
 @patch("agentic_traveler.interfaces.routers.telegram.edit_telegram_message")
 @patch("agentic_traveler.interfaces.routers.telegram.get_orchestrator")
 def test_regular_message(mock_orch, mock_edit, mock_send, client, valid_update):
-    """Regular message → orchestrator → reply."""
-    mock_orch.return_value.process_request.return_value = {"text": "Hello Alice!"}
+    """Regular message → orchestrator → status placeholder → final reply edit.
+
+    Task 37: there is no generic "Thinking…" placeholder; the FIRST status event
+    creates the placeholder, and the final reply edits it once.
+    """
+    from unittest.mock import ANY
+
+    def fake_process(user_id, text, status_callback=None, delta_callback=None):
+        if status_callback:
+            status_callback({"phase": "router", "text": "Understanding…"})
+        return {"text": "Hello Alice!"}
+
+    mock_orch.return_value.process_request.side_effect = fake_process
     mock_send.return_value = 42
 
     resp = client.post(
@@ -171,11 +181,10 @@ def test_regular_message(mock_orch, mock_edit, mock_send, client, valid_update):
         headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
     )
     assert resp.status_code == 200
-    
-    from unittest.mock import ANY
+
     mock_orch.return_value.process_request.assert_called_once_with("67890", "Hello bot!", status_callback=ANY)
-    
-    mock_send.assert_called_once_with(12345, "⏳ Thinking...")
+    # First status becomes the placeholder (no "⏳ Thinking..."), final reply edits it.
+    mock_send.assert_called_once_with(12345, "Understanding…")
     mock_edit.assert_called_once_with(12345, 42, "Hello Alice!")
 
 

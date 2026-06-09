@@ -155,23 +155,37 @@ class PlanningSaga:
                 self._trip_agent, "TripAgent", user_doc, message,
                 conversation_context, state, side_effects, events, t,
             )
-        # Let the user drift. If they're asking a question or exploring (intent
-        # TRIP) rather than answering the open slot, ANSWER them via the content
-        # engine instead of re-asking the slot. Any planning facts they mentioned
-        # were still captured above as side_effects. Without this guard the saga
-        # gets stuck re-asking the last missing slot (e.g. "What's the budget
-        # vibe?") on every turn no matter what the user actually says.
-        if missing is not None and intent == "TRIP" and not made_progress:
+        # Still collecting essentials.
+        if missing is not None:
+            # Let the user drift. If they're asking a question or exploring
+            # (intent TRIP) rather than answering the open slot, ANSWER them via
+            # the content engine instead of re-asking the slot. Any planning
+            # facts they mentioned were still captured above as side_effects.
+            # Without this guard the saga gets stuck re-asking the last missing
+            # slot (e.g. "What's the budget vibe?") no matter what the user says.
+            if intent == "TRIP" and not made_progress:
+                return self._delegate(
+                    self._trip_agent, "TripAgent", user_doc, message,
+                    conversation_context, state, side_effects, events, t,
+                )
+            # Otherwise collect the essentials one question at a time (AC-3/AC-9).
+            return self._ask_slot(missing, side_effects, events, t)
+
+        # All essentials known. The heavy itinerary builder runs ONLY when the
+        # user actually asked to plan/modify — an explicit PLAN turn, or a turn
+        # where they just supplied a new planning fact worth re-planning around.
+        # A fully-slotted trip plus a casual message (a weather check, a question,
+        # idle chat) is NOT a reason to regenerate an itinerary: the user must be
+        # free to drift to anything and be answered by the lighter companion. The
+        # saga's structure still stands — the trip stays in focus — but the user's
+        # message dictates which engine responds.
+        if intent == "PLAN" or made_progress:
             return self._delegate(
-                self._trip_agent, "TripAgent", user_doc, message,
+                self._planner, "PlannerAgent", user_doc, message,
                 conversation_context, state, side_effects, events, t,
             )
-        # Otherwise collect the essentials one question at a time (AC-3 / AC-9).
-        if missing is not None:
-            return self._ask_slot(missing, side_effects, events, t)
-        # All essentials known → build the plan.
         return self._delegate(
-            self._planner, "PlannerAgent", user_doc, message,
+            self._trip_agent, "TripAgent", user_doc, message,
             conversation_context, state, side_effects, events, t,
         )
 
@@ -232,6 +246,7 @@ class PlanningSaga:
                 conversation_context=conversation_context,
                 current_time=state.get("current_time", ""),
                 preference_raw=state.get("preference_raw"),
+                events=events,
             )
         except Exception:
             logger.exception("PlanningSaga delegate to %s failed.", agent_label)

@@ -20,8 +20,8 @@ class EventEmitter:
         *,
         user_id: str | None,
         trip_id: str | None,
-        on_status: Callable[[str], None] | None = None,
-        on_delta: Callable[[str], None] | None = None,
+        on_status: Callable[[dict], None] | None = None,
+        on_delta: Callable[[dict], None] | None = None,
     ):
         self.user_id = user_id
         self.trip_id = trip_id
@@ -29,19 +29,26 @@ class EventEmitter:
         self._on_delta = on_delta
         self._metric_buffer: deque[dict] = deque()
 
+    @property
+    def is_streaming(self) -> bool:
+        """True when a delta sink is wired (web SSE turn) — agents stream token
+        deltas only then; Telegram / non-streaming turns leave it False."""
+        return self._on_delta is not None
+
     def emit(self, phase: str, payload: dict[str, Any]) -> None:
         if phase == "status":
             if self._on_status:
                 try:
-                    # status payloads carry {"message": "<user-facing string>"}
-                    self._on_status(payload.get("message", ""))
+                    # status payloads carry {"phase": <str>, "text": <str>, ...};
+                    # the sink (SSE writer / Telegram editor) reads what it needs.
+                    self._on_status(payload)
                 except Exception:
                     logger.warning("status sink failed.", exc_info=True)
         elif phase == "delta":
             if self._on_delta:
                 try:
                     # delta payloads carry {"text": "<token chunk>"}
-                    self._on_delta(payload.get("text", ""))
+                    self._on_delta(payload)
                 except Exception:
                     logger.warning("delta sink failed.", exc_info=True)
         elif phase == "metric":

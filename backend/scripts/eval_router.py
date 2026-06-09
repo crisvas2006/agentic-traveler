@@ -10,7 +10,6 @@ Usage:
 Requires environment variables: GOOGLE_PROJECT_ID, GEMINI_REGION, etc.
 """
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -21,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from dotenv import load_dotenv
 load_dotenv()
 
-from agentic_traveler.orchestrator.router_agent import RouterAgent
+from agentic_traveler.orchestrator.router_agent import RouterAgent  # noqa: E402
 
 # ── eval set (message, expected_intent) ─────────────────────────────────────
 

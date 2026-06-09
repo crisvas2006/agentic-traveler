@@ -67,6 +67,7 @@ class DiscoverySaga:
                 conversation_context=conversation_context,
                 current_time=state.get("current_time", ""),
                 preference_raw=state.get("preference_raw"),
+                events=events,
             )
         except Exception:
             logger.exception("DiscoverySaga delegate to TripAgent failed.")

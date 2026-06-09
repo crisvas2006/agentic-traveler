@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useChatRealtime } from "./useChatRealtime";
+import { useChatStream } from "./useChatStream";
+
 /* eslint-disable react-hooks/exhaustive-deps */
 
 export type ChatMessage = {
@@ -15,21 +18,20 @@ export type ChatMessage = {
 };
 
 type HistoryResponse = { messages: ChatMessage[]; has_more: boolean };
-type SendResponse = { user_message: ChatMessage; reply: ChatMessage };
 type SearchResponse = { results: ChatMessage[] };
 
 const INITIAL_LIMIT = 30;
 const PAGE_LIMIT = 50;
 
 /**
- * useChat — encapsulates state, pagination and search for the dashboard chat.
+ * useChat — state, pagination, search, streaming send, and realtime merge for
+ * the dashboard chat.
  *
- * Messages are stored in **ascending** order (oldest first) for rendering;
- * the backend returns DESC, we reverse on insert.
- *
- * Optimistic send: appends a temporary message with a negative id; on success
- * replaces it with the server row and appends the agent reply. On failure the
- * temporary row is marked errored (body kept, optional retry).
+ * Messages are stored ascending (oldest first). Sending streams the reply via
+ * `useChatStream` (SSE): the user sees status lines, then the reply types in,
+ * then the finalized rows are appended. `useChatRealtime` merges any rows that
+ * arrive out-of-band (a dropped SSE turn recovered from the DB, or Telegram /
+ * other tabs), de-duplicated against the ids the SSE stream already finalized.
  */
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -38,10 +40,15 @@ export function useChat() {
   const [hasMore, setHasMore] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(null);
+
+  const stream = useChatStream();
 
   // Monotonic counter for optimistic message ids (always negative).
   const tempIdRef = useRef(-1);
   const inflightRef = useRef(false);
+  // Ids already rendered via the SSE stream — drop the Realtime echo of these.
+  const finalizedIdsRef = useRef<Set<number>>(new Set());
 
   // Mirror of `messages` for closures that need a synchronous read.
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -57,7 +64,6 @@ export function useChat() {
         const resp = await fetch(`/api/chat/messages?limit=${INITIAL_LIMIT}`);
         if (!resp.ok) {
           if (resp.status === 403) {
-            // profile_not_provisioned — surface a friendly error
             const body = await resp.json().catch(() => ({}));
             const msg =
               body?.detail?.message ?? "Complete your travel profile to start chatting.";
@@ -70,8 +76,11 @@ export function useChat() {
         const data = (await resp.json()) as HistoryResponse;
         if (!cancelled) {
           // Backend returns DESC; reverse for ascending render order.
-          setMessages([...data.messages].reverse());
+          const asc = [...data.messages].reverse();
+          setMessages(asc);
           setHasMore(data.has_more);
+          const tid = asc.find((m) => m.thread_id)?.thread_id ?? null;
+          if (tid) setThreadId(tid);
         }
       } catch {
         if (!cancelled) setError("Network error.");
@@ -83,6 +92,21 @@ export function useChat() {
       cancelled = true;
     };
   }, []);
+
+  // ── realtime merge (recovery + cross-channel) ─────────────────────────────
+  const onRealtimeInsert = useCallback((m: ChatMessage) => {
+    // While our own SSE turn is in flight, the backend persists this turn's
+    // user (and agent) rows mid-stream, so Realtime echoes them back here
+    // before `onDone` can mark their ids finalized — which briefly double-
+    // rendered the just-sent bubble. Ignore the web-origin echo; `onDone`
+    // reconciles the canonical pair. Telegram / other-tab rows still merge live.
+    if (inflightRef.current && m.source === "web") return;
+    setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+  }, []);
+  useChatRealtime(threadId, {
+    onInsert: onRealtimeInsert,
+    isFinalized: (id) => finalizedIdsRef.current.has(id),
+  });
 
   // ── load older page ─────────────────────────────────────────────────────
   const loadOlder = useCallback(async () => {
@@ -100,7 +124,6 @@ export function useChat() {
         setHasMore(false);
         return;
       }
-      // Prepend in ascending order.
       setMessages((prev) => [...[...data.messages].reverse(), ...prev]);
       setHasMore(data.has_more);
     } finally {
@@ -108,81 +131,82 @@ export function useChat() {
     }
   }, [messages, hasMore, loadingOlder]);
 
-  // ── send ────────────────────────────────────────────────────────────────
+  // ── send (streaming) ──────────────────────────────────────────────────────
   const send = useCallback(
     async (text: string): Promise<void> => {
       const body = text.trim();
       if (!body || inflightRef.current) return;
       inflightRef.current = true;
       setPendingReply(true);
+      setError(null);
 
-      // Optimistic append.
       const tempId = tempIdRef.current--;
-      const optimistic: ChatMessage = {
-        id: tempId,
-        sender_type: "user",
-        body,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, optimistic]);
+      const createdAt = new Date().toISOString();
+      setMessages((prev) => [
+        ...prev,
+        { id: tempId, sender_type: "user", body, created_at: createdAt },
+      ]);
 
-      try {
-        const resp = await fetch("/api/chat/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body }),
-        });
+      await stream.run(body, {
+        onDone: ({ messageId, userMessageId, threadId: tid, text: replyText }) => {
+          if (tid) setThreadId((cur) => cur ?? tid);
+          if (userMessageId != null) finalizedIdsRef.current.add(userMessageId);
+          if (messageId != null) finalizedIdsRef.current.add(messageId);
 
-        if (!resp.ok) {
-          // Mark the optimistic row as errored; keep the body for retry.
+          setMessages((prev) => {
+            // Drop the optimistic row and any rows Realtime may already have
+            // inserted for the same ids, then append the canonical pair.
+            const without = prev.filter(
+              (m) => m.id !== tempId && m.id !== messageId && m.id !== userMessageId,
+            );
+            const userRow: ChatMessage = {
+              id: userMessageId ?? tempId,
+              thread_id: tid ?? undefined,
+              sender_type: "user",
+              body,
+              source: "web",
+              created_at: createdAt,
+            };
+            const out = [...without, userRow];
+            if (replyText) {
+              out.push({
+                id: messageId ?? tempIdRef.current--,
+                thread_id: tid ?? undefined,
+                sender_type: "agent",
+                body: replyText,
+                source: "web",
+                created_at: new Date().toISOString(),
+              });
+            }
+            return out;
+          });
+        },
+        onError: () => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === tempId ? { ...m, metadata: { error: true } } : m,
             ),
           );
           setError("Couldn't send. Please try again.");
-          return;
-        }
+        },
+      });
 
-        const data = (await resp.json()) as SendResponse;
-        // Replace temp with server row, then append reply.
-        setMessages((prev) => {
-          const without = prev.filter((m) => m.id !== tempId);
-          return [...without, data.user_message, data.reply];
-        });
-      } catch {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId ? { ...m, metadata: { error: true } } : m,
-          ),
-        );
-        setError("Network error.");
-      } finally {
-        inflightRef.current = false;
-        setPendingReply(false);
-      }
+      inflightRef.current = false;
+      setPendingReply(false);
     },
-    [],
+    [stream],
   );
 
   // ── retry a failed message ──────────────────────────────────────────────
-  // Removes the failed optimistic row and re-sends its body, reusing send().
-  const retry = useCallback(
-    async (id: number): Promise<void> => {
-      const failed = messagesRef.current.find((m) => m.id === id);
-      if (!failed) return;
-      const errored = !!(failed.metadata as { error?: boolean } | undefined)
-        ?.error;
-      if (!errored) return; // only retry rows we marked as errored
-      // Drop the failed row, then re-send.
-      setMessages((prev) => prev.filter((m) => m.id !== id));
-      setError(null);
-      await send(failed.body);
-    },
-    // send is stable (no deps)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
+  const retry = useCallback(async (id: number): Promise<void> => {
+    const failed = messagesRef.current.find((m) => m.id === id);
+    if (!failed) return;
+    const errored = !!(failed.metadata as { error?: boolean } | undefined)?.error;
+    if (!errored) return;
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+    setError(null);
+    await send(failed.body);
+  }, []);
 
   // ── search ──────────────────────────────────────────────────────────────
   const search = useCallback(async (q: string): Promise<ChatMessage[]> => {
@@ -196,12 +220,10 @@ export function useChat() {
     return data.results ?? [];
   }, []);
 
-  // ── jump to message id ──────────────────────────────────────────────────
-  // Walks loadOlder until the target id is present in the local window.
+  // ── jump to message id ────────────────────────────────────────────────────
   const jumpTo = useCallback(
     async (id: number): Promise<void> => {
       if (messagesRef.current.some((m) => m.id === id)) return;
-      // Walk backwards until we find it. Bounded to avoid infinite loops.
       for (let i = 0; i < 20; i++) {
         if (!hasMore) break;
         await loadOlder();
@@ -218,6 +240,10 @@ export function useChat() {
     hasMore,
     pendingReply,
     error,
+    // streaming surface (Task 37)
+    streamStatus: stream.status,
+    streamingText: stream.streamingText,
+    streaming: stream.streaming,
     send,
     retry,
     loadOlder,

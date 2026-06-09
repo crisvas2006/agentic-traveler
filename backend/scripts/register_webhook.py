@@ -99,7 +99,7 @@ def main():
         sys.exit(1)
 
     if result.get("ok"):
-        print(f"✅ Webhook registered successfully!")
+        print("✅ Webhook registered successfully!")
         print(f"   URL: {webhook_url}")
         print(f"   Secret token: {'set' if secret_token else 'NOT SET'}")
     else:
@@ -111,7 +111,7 @@ def main():
     try:
         resp = requests.get(f"{api_base}/getWebhookInfo", timeout=10)
         info = resp.json().get("result", {})
-        print(f"\n📋 Webhook info from Telegram:")
+        print("\n📋 Webhook info from Telegram:")
         print(f"   URL: {info.get('url')}")
         print(f"   Has secret: {info.get('has_custom_certificate', False)}")
         print(f"   Pending updates: {info.get('pending_update_count', 0)}")

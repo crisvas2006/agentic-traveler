@@ -6,7 +6,6 @@ different: day-by-day blocks with morning/afternoon/evening activities,
 logistics, and alternatives. This requires:
   - A dedicated output format enforced by the prompt
   - Higher reasoning demand for multi-day coherence
-  - A larger output token budget (4500 vs 4000)
 
 Google Search grounding is NOT directly enabled — real-time data is
 fetched via the SearchAgent proxy (opt-in only).
@@ -19,7 +18,7 @@ from typing import Any, Dict, Optional
 from google import genai
 from google.genai import types
 
-from agentic_traveler.orchestrator.client_factory import get_client, gemini_generate
+from agentic_traveler.orchestrator.client_factory import get_client, generate_maybe_stream
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
 from agentic_traveler.orchestrator.search_agent import SearchAgent
@@ -63,14 +62,15 @@ private chauffeurs, book flights, reserve hotels, or buy tickets. You ONLY
 provide recommendations and itineraries. Never promise to "confirm details,"
 "schedule," or "book" something.
 
-WEATHER: Only call check_weather() when the user has confirmed travel within
-the next 10 days (specific date, "leaving Friday", etc.). Vague future plans
-("plan a trip to Kyoto") don't qualify. Adapt activities naturally; no
-day-by-day breakdown.
+WEATHER: For ANY weather question — a direct "how's the weather in X?" or
+travel confirmed within the next 10 days — call check_weather(), never
+search_web(). It's the authoritative, lower-cost source for weather. Vague
+future plans ("plan a trip to Kyoto") don't need it. Adapt activities
+naturally; no day-by-day breakdown.
 
 REAL-TIME DATA: For time-sensitive logistics (entry requirements,
-seasonal closures, public holiday dates, event schedules), call
-search_web() — don't guess. Briefly cite sources.
+seasonal closures, public holiday dates, event schedules) — but NOT weather —
+call search_web(); don't guess. Briefly cite sources.
 
 Formatting (Telegram):
 - STRICT LENGTH LIMIT: Never exceed 3500 characters. If the user asks
@@ -100,9 +100,14 @@ class PlannerAgent:
         conversation_context: str,
         current_time: str,
         preference_raw: Optional[str] = None,
+        events: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Generate a structured day-by-day itinerary.
+
+        Streams token deltas through ``events`` when ``events.is_streaming``
+        (web SSE) — itineraries are long, so this is where streaming helps most;
+        single synchronous call otherwise (Telegram / non-streaming).
 
         Returns dict with keys: text, action, _raw_response, _latency_ms,
         _grounding_used.
@@ -136,34 +141,32 @@ class PlannerAgent:
         logger.debug("PlannerAgent prompt length: %d chars", len(user_content))
         t = time.time()
         try:
-            response = gemini_generate(
-                self._client,
-                model=_MODEL,
-                contents=user_content,
-                config=types.GenerateContentConfig(
-                    system_instruction=_SYSTEM_PROMPT,
-                    max_output_tokens=4500,
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=10,  # raised to 10: complex multi-destination itineraries need more searches + weather
-                    ),
-                    safety_settings=[
-                        types.SafetySetting(
-                            category=c,
-                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        ) for c in [
-                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        ]
-                    ],
-                    tools=[check_weather, search_web],
+            config = types.GenerateContentConfig(
+                system_instruction=_SYSTEM_PROMPT,
+                max_output_tokens=4500,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    maximum_remote_calls=10,  # raised to 10: complex multi-destination itineraries need more searches + weather
                 ),
+                safety_settings=[
+                    types.SafetySetting(
+                        category=c,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    ) for c in [
+                        types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    ]
+                ],
+                tools=[check_weather, search_web],
+            )
+            response, text = generate_maybe_stream(
+                self._client, _MODEL, user_content, config, events,
             )
             latency_ms = (time.time() - t) * 1000
             grounding_used = has_grounding(response)
             return {
-                "text": response.text or "",
+                "text": text,
                 "action": "PLANNER_RESULTS",
                 "_raw_response": response,
                 "_search_responses": search_responses,

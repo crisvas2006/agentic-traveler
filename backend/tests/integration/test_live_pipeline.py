@@ -10,7 +10,6 @@ calling, so all responses come back with action="RESPONSE".
 """
 
 import pytest
-from agentic_traveler.orchestrator.agent import OrchestratorAgent
 
 
 pytestmark = pytest.mark.integration

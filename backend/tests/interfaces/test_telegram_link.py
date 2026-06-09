@@ -1,7 +1,6 @@
 import os
 os.environ["FRONTEND_ORIGIN"] = "http://localhost:3000"
 
-import json
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
 import pytest

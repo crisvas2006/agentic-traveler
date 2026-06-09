@@ -115,15 +115,50 @@ def test_destination_slot_is_free_text(saga):
 # routing
 # ---------------------------------------------------------------------------
 
-def test_all_slots_filled_delegates_to_planner(saga):
-    t = _trip(
+def _trip_fully_slotted():
+    return _trip(
         destinations=[{"name": "Iceland", "status": "considering"}],
         discovery={"timeframe": {"text": "late Jan"}},
         travelers={"count": 2},
         preferences={"pace": "slow", "structure": "loose", "budget_tier": "$$"},
     )
+
+
+def test_plan_intent_on_full_trip_delegates_to_planner(saga):
+    # Explicit PLAN request on a fully-slotted trip → build the itinerary.
     with patch(_EXTRACT, return_value={}):
-        result = saga.run("ok go", {}, t, {}, "", _events())
+        result = saga.run(
+            "build my itinerary", {}, _trip_fully_slotted(),
+            {"intent": "PLAN"}, "", _events(),
+        )
+    saga._planner.process_request.assert_called_once()
+    saga._trip_agent.process_request.assert_not_called()
+    assert result.text == "Here is your day-by-day plan."
+
+
+def test_casual_trip_question_on_full_trip_uses_companion_not_planner(saga):
+    # A fully-slotted trip plus a casual TRIP question (e.g. "how's the weather?")
+    # must NOT trigger the heavy PlannerAgent — the lighter companion answers, so
+    # the user can drift to anything while the trip stays in focus.
+    with patch(_EXTRACT, return_value={}):
+        result = saga.run(
+            "how's the weather in Reykjavik right now?", {},
+            _trip_fully_slotted(), {"intent": "TRIP"}, "", _events(),
+        )
+    saga._trip_agent.process_request.assert_called_once()
+    saga._planner.process_request.assert_not_called()
+    assert result.slot_request is None
+    assert result.text == "Some destination ideas."
+
+
+def test_new_planning_fact_on_full_trip_rebuilds_via_planner(saga):
+    # The user changes a planning fact on a complete trip (made_progress) → it's
+    # a modification worth re-planning around, so the planner runs even on TRIP.
+    with patch(_EXTRACT, return_value={"pace": "fast"}):
+        result = saga.run(
+            "actually make it a fast-paced trip", {},
+            _trip_fully_slotted(), {"intent": "TRIP"}, "", _events(),
+        )
     saga._planner.process_request.assert_called_once()
     assert result.text == "Here is your day-by-day plan."
 

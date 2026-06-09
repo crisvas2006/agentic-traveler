@@ -7,11 +7,14 @@ Endpoints (all require a valid Supabase JWT):
     GET  /chat/search     — full-text search across the user's thread.
 """
 
+import asyncio
+import json
 import logging
 import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from agentic_traveler.core.sanitize import sanitize_user_input
 from agentic_traveler.interfaces.dependencies import WebUserCtx, verify_supabase_jwt
@@ -48,6 +51,13 @@ def _get_orchestrator():
         from agentic_traveler.interfaces.routers.telegram import get_orchestrator
         _orchestrator = get_orchestrator()
     return _orchestrator
+
+
+# ── SSE streaming helpers (Task 37) ────────────────────────────────────────
+
+def _sse(event: str, data: dict) -> str:
+    """Format one Server-Sent Event frame."""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.post("/send", response_model=ChatSendResponse)
@@ -107,6 +117,102 @@ async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_s
     return ChatSendResponse(
         user_message=ChatMessageOut(**user_row),
         reply=ChatMessageOut(**agent_row),
+    )
+
+
+@router.post("/stream")
+async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_supabase_jwt)):
+    """Streaming variant of /send (Task 37).
+
+    Emits Server-Sent Events: `status` (intermediate progress), `delta` (the
+    reply, chunked), and a final `done` carrying the persisted `message_id`.
+    The agent reply is persisted to `messages` BEFORE the deltas stream, so a
+    dropped SSE connection still leaves the reply recoverable via Realtime
+    (AC-6). The non-streaming /send endpoint is unchanged.
+    """
+    body = sanitize_user_input(payload.body)
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    repo = _get_chat_repo()
+    try:
+        user_row = repo.append_user_message(ctx.user_id, body, source="web")
+    except Exception:
+        logger.exception("Failed to persist user message for user %s", ctx.user_id)
+        raise HTTPException(status_code=500, detail="Failed to save message")
+    thread_id = user_row["thread_id"]
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def push(ev_type: str, data: dict) -> None:
+        # Called from the worker thread → marshal back onto the event loop.
+        loop.call_soon_threadsafe(queue.put_nowait, (ev_type, data))
+
+    async def driver() -> None:
+        t = time.time()
+        action = None
+        try:
+            result = await asyncio.to_thread(
+                _get_orchestrator().process_request_for_user,
+                ctx.user_id,
+                body,
+                lambda p: push("status", p),   # status_callback → SSE `status` events
+                lambda p: push("delta", p),    # delta_callback → real token `delta` events
+            )
+            text = result.get("text") or (
+                "I had trouble coming up with a response just now. Please try again."
+            )
+            action = result.get("action")
+        except Exception:
+            logger.exception("Streaming orchestrator failed for user %s", ctx.user_id)
+            push("status", {"phase": "error", "text": "Something glitched. Please try again."})
+            text = "Sorry, I hit an error processing your message. Please try again."
+            action = "ERROR"
+
+        latency_ms = int((time.time() - t) * 1000)
+        message_id = None
+        try:
+            agent_row = repo.append_agent_message(
+                ctx.user_id, text, source="web", thread_id=thread_id,
+                metadata={"action": action, "latency_ms": latency_ms},
+            )
+            message_id = agent_row["id"]
+        except Exception:
+            logger.exception("Failed to persist streamed reply for user %s", ctx.user_id)
+
+        # `text` is included on `done` as a fallback: not every turn streams
+        # deltas (slot questions, off-topic redirects, and the error path return
+        # text directly without an agent call), and the client also uses it to
+        # reconcile against the streamed deltas. `user_message_id` + `thread_id`
+        # let the client finalize its optimistic user bubble and de-duplicate the
+        # Realtime echo of both rows against the SSE stream.
+        push("done", {
+            "message_id": message_id,
+            "user_message_id": user_row["id"],
+            "thread_id": thread_id,
+            "latency_ms": latency_ms,
+            "text": text,
+        })
+
+    driver_task = asyncio.create_task(driver())
+
+    async def gen():
+        try:
+            while True:
+                ev_type, data = await queue.get()
+                yield _sse(ev_type, data)
+                if ev_type == "done":
+                    break
+        finally:
+            # Client disconnected or stream finished — never leave the worker dangling.
+            if not driver_task.done():
+                driver_task.cancel()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

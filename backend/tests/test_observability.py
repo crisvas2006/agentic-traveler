@@ -5,6 +5,7 @@ from unittest.mock import patch
 from agentic_traveler.core.observability import (
     hash_user_id,
     attach_run_metadata,
+    record_run_error,
 )
 
 def test_hash_is_deterministic():
@@ -76,6 +77,26 @@ def test_attach_run_metadata_safe_when_disabled():
     with patch.object(observability, "_TRACING_ENABLED", False):
         # Calling this when tracing is disabled should simply do nothing and not raise.
         attach_run_metadata(user_id_hash="xyz", custom_key="abc")
+
+
+def test_record_run_error_safe_when_disabled():
+    from agentic_traveler.core import observability
+    with patch.object(observability, "_TRACING_ENABLED", False):
+        # No tracing → no run tree → must be a silent no-op, never raise.
+        record_run_error("agent produced no usable response")
+
+
+def test_record_run_error_sets_error_on_run_tree_when_enabled():
+    from agentic_traveler.core import observability
+    from unittest.mock import MagicMock
+
+    rt = MagicMock()
+    rt.metadata = {}
+    with patch.object(observability, "_TRACING_ENABLED", True), \
+         patch("langsmith.run_helpers.get_current_run_tree", return_value=rt):
+        record_run_error("boom")
+    assert rt.error == "boom"
+    assert rt.metadata.get("agent_failed") is True
 
 def test_no_pii_keys_in_metadata():
     from agentic_traveler.orchestrator.agent import OrchestratorAgent

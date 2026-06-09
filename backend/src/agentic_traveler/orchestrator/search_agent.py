@@ -13,6 +13,7 @@ from google import genai
 from google.genai import types
 
 from agentic_traveler.orchestrator.client_factory import get_client, gemini_generate
+from agentic_traveler.orchestrator.tool_events import emit_tool_status
 from agentic_traveler.core.observability import traceable
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 _MODEL = "gemini-3.1-flash-lite"
 
 _SYSTEM_PROMPT = """\
-You are a factual search assistant. Given a query and a desired output
+You are a factual search assistant. Given a list of queries and a desired output
 format, search the web and return results matching that format.
 
 If the caller asks for "comprehensive", provide detailed findings with
@@ -43,7 +44,7 @@ class SearchAgent:
     def __init__(self, client: Optional[genai.Client] = None):
         self._client = client or get_client()
 
-    def search(self, query: str, format: str = "structured") -> str:
+    def search(self, queries: list[str] | str, format: str = "structured") -> str:
         """
         Search the web for current, time-sensitive information.
 
@@ -51,11 +52,13 @@ class SearchAgent:
         general knowledge: visa requirements, travel advisories, event dates,
         current prices, opening hours, or live conditions.
 
+        You can provide multiple queries at once to batch your searches and save time.
+
         Do NOT call for general destination knowledge, cultural context,
         or geography — you already know those.
 
         Args:
-            query: The specific question to search for.
+            queries: A list of specific questions to search for. Provide multiple to run parallel searches.
             format: Desired output format — "headline" (1-line summary),
                     "structured" (key facts as bullet points),
                     or "comprehensive" (detailed analysis with full context).
@@ -63,26 +66,27 @@ class SearchAgent:
         Returns:
             Factual results with source citations.
         """
-        text, _, _ = self.search_with_metadata(query, format)
+        text, _, _ = self.search_with_metadata(queries, format)
         return text
 
     @traceable(name="search_agent.search_web")
-    def search_with_metadata(self, query: str, format: str = "structured") -> tuple[str, Any, float]:
+    def search_with_metadata(self, queries: list[str] | str, format: str = "structured") -> tuple[str, Any, float]:
         """Internal method that returns the text, raw response, and latency."""
-        logger.info("🔍 SearchAgent.search(query=%s, format=%s)", query[:80], format)
+        if isinstance(queries, str):
+            queries = [queries]
+            
+        queries_text = "\n".join(f"- {q}" for q in queries)
+        logger.info("🔍 SearchAgent.search(queries=%d, format=%s)", len(queries), format)
         t = time.time()
         try:
             response = gemini_generate(
                 self._client,
                 model=_MODEL,
-                contents=f"Format: {format}\n\nQuery: {query}",
+                contents=f"Format: {format}\n\nQueries:\n{queries_text}",
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,
-                    max_output_tokens=3500,
+                    max_output_tokens=3000,
                     tools=[types.Tool(google_search=types.GoogleSearch())],
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=3,
-                    ),
                     safety_settings=[
                         types.SafetySetting(
                             category=c,
@@ -108,8 +112,9 @@ class SearchAgent:
         Creates a tool function for the LLM that wraps search_with_metadata
         and appends its usage data to context_list.
         """
-        def search_web(query: str, format: str = "structured") -> str:
-            text, raw, lat = self.search_with_metadata(query, format)
+        def search_web(queries: list[str], format: str = "structured") -> str:
+            emit_tool_status("search_web")
+            text, raw, lat = self.search_with_metadata(queries, format)
             if raw:
                 context_list.append({"raw": raw, "lat": lat})
             return text
