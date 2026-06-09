@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -22,6 +24,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up FastAPI application...")
+    
+    # Unlock Python's thread pool to match Cloud Run's concurrency limits for SSE
+    try:
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=50))
+        logger.info("Set default asyncio ThreadPoolExecutor max_workers to 50.")
+    except Exception as e:
+        logger.warning(f"Failed to set ThreadPoolExecutor: {e}")
+
     yield
     # Shutdown
     logger.info("Shutting down... flushing metrics.")

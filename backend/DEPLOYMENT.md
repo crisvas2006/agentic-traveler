@@ -79,26 +79,38 @@ gcloud config set project YOUR_PROJECT_ID
 
 ### Step 2: Build the Docker image
 
-```bash
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/agentic-traveler
-```
+You can build and push the container image using Artifact Registry.
 
-This builds the image in the cloud (no local Docker required) and pushes it to Container Registry.
+#### Google Cloud Artifact Registry (Specific Region: `europe-west1`)
+Artifact Registry is the successor to GCR and supports specific regions like `europe-west1`.
+1. Enable the Artifact Registry API:
+   ```bash
+   gcloud services enable signup.googleapis.com artifactregistry.googleapis.com
+   ```
+2. Create a Docker repository named `agentic-traveler-repo` in `europe-west1`:
+   ```bash
+   gcloud artifacts repositories create agentic-traveler-repo --repository-format=docker --location=europe-west1 --description="Agentic Traveler Docker Repository"
+   ```
+3. Build and push the image:
+   ```bash
+   gcloud builds submit --tag europe-west1-docker.pkg.dev/YOUR_PROJECT_ID/agentic-traveler-repo/agentic-traveler
+   ```
 
 ### Step 3: Deploy
 
-Once your secrets are created in Secret Manager (see Step 2.5), run the deployment command. 
+Once your secrets are created in Secret Manager (see Step 2.5), run the deployment command. Make sure the `--image` flag matches the option you chose above.
 
 **IMPORTANT:** Cloud Run persists your configuration. You only need to specify `--set-secrets` or `--set-env-vars` when you want to **change** the configuration. Subsequent deployments of new images only need the `--image` flag.
 
+
 ```bash
 gcloud run deploy agentic-traveler \
-  --image gcr.io/YOUR_PROJECT_ID/agentic-traveler \
+  --image europe-west1-docker.pkg.dev/YOUR_PROJECT_ID/agentic-traveler-repo/agentic-traveler \
   --region europe-west1 \
   --platform managed \
   --allow-unauthenticated \
   --max-instances 1 \
-  --concurrency 10 \
+  --concurrency 50 \
   --no-cpu-throttling \
   --memory 512Mi \
   --timeout 120 \
@@ -108,8 +120,8 @@ gcloud run deploy agentic-traveler \
 
 > **Note on `--no-cpu-throttling`:** Required for FastAPI BackgroundTasks processing. Without it, Cloud Run throttles CPU to near-zero after the HTTP `200` is returned, stalling the background task before it completes the LLM call and Telegram reply.
 
-> **Note on Configuration Persistence:** If you are just updating the code, you can simply run:
-> `gcloud run deploy agentic-traveler --image gcr.io/YOUR_PROJECT_ID/agentic-traveler`
+> **Note on Configuration Persistence:** If you are just updating the code, you can simply run (replacing the image URL with whichever option you used):
+> `gcloud run deploy agentic-traveler --image europe-west1-docker.pkg.dev/YOUR_PROJECT_ID/agentic-traveler-repo/agentic-traveler` or `gcloud run deploy agentic-traveler --image eu.gcr.io/YOUR_PROJECT_ID/agentic-traveler`
 > Cloud Run will reuse all existing secret and environment variable mappings.
 
 
@@ -164,11 +176,12 @@ When done, re-register the webhook with your Cloud Run URL.
 
 ## Updating the deployment
 
-After code changes:
+After code changes, you can submit the build and deploy again:
 
+**Artifact Registry:**
 ```bash
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/agentic-traveler
-gcloud run deploy agentic-traveler --image gcr.io/YOUR_PROJECT_ID/agentic-traveler --region europe-west1
+gcloud builds submit --tag europe-west1-docker.pkg.dev/YOUR_PROJECT_ID/agentic-traveler-repo/agentic-traveler
+gcloud run deploy agentic-traveler --image europe-west1-docker.pkg.dev/YOUR_PROJECT_ID/agentic-traveler-repo/agentic-traveler --region europe-west1
 ```
 
 ## Security
