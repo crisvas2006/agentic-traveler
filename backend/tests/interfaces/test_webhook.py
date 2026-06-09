@@ -185,7 +185,91 @@ def test_regular_message(mock_orch, mock_edit, mock_send, client, valid_update):
     mock_orch.return_value.process_request.assert_called_once_with("67890", "Hello bot!", status_callback=ANY)
     # First status becomes the placeholder (no "⏳ Thinking..."), final reply edits it.
     mock_send.assert_called_once_with(12345, "Understanding…")
-    mock_edit.assert_called_once_with(12345, 42, "Hello Alice!")
+    # No slot choices on this reply → keyboard is None (Task 43).
+    mock_edit.assert_called_once_with(12345, 42, "Hello Alice!", reply_markup=None)
+
+
+# ── Inline-keyboard selection (Task 43) ──
+
+
+@patch.dict("os.environ", {"TELEGRAM_SECRET_TOKEN": "test-secret", "SKIP_IP_CHECK": "1"})
+@patch("agentic_traveler.interfaces.routers.telegram.get_chat_repo")
+@patch("agentic_traveler.interfaces.routers.telegram.get_user_tool")
+@patch("agentic_traveler.interfaces.routers.telegram.get_orchestrator")
+@patch("agentic_traveler.interfaces.routers.telegram.send_telegram_message")
+@patch("agentic_traveler.interfaces.routers.telegram.edit_telegram_message")
+@patch("agentic_traveler.interfaces.routers.telegram.answer_callback_query")
+def test_callback_query_applies_selection(
+    mock_answer, mock_edit, mock_send, mock_orch, mock_user_tool, mock_chat_repo, client,
+):
+    """A tapped inline button → answered callback, edited prompt, deterministic
+    selection applied, next prompt sent with its own keyboard (AC-6)."""
+    mock_user_tool.return_value.get_user_by_telegram_id.return_value = {"id": "u-int"}
+    mock_orch.return_value.process_request.return_value = {
+        "text": "How structured do you want it?", "action": "RESPONSE",
+        "slot_request": {
+            "slot": "structure", "prompt": "How structured?", "allow_multi": False,
+            "choices": [
+                {"id": "loose", "label": "Loose", "value": "loose"},
+                {"id": "skip", "label": "Skip", "value": "skip"},
+            ],
+        },
+    }
+
+    payload = {
+        "update_id": 7,
+        "callback_query": {
+            "id": "cb-1",
+            "from": {"id": 67890, "first_name": "Alice"},
+            "message": {
+                "message_id": 5, "chat": {"id": 12345},
+                "text": "What pace feels right?",
+            },
+            "data": "slot|pace|slow",
+        },
+    }
+    resp = client.post(
+        "/webhook/test-secret",
+        json=payload,
+        headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
+    )
+    assert resp.status_code == 200
+
+    # Spinner cleared.
+    mock_answer.assert_called_once()
+    # Selection applied deterministically via the orchestrator.
+    args, kwargs = mock_orch.return_value.process_request.call_args
+    assert kwargs.get("selection") == {"slot": "pace", "values": ["slow"]}
+    # Original prompt edited to show the chosen label, keyboard cleared.
+    edit_args, edit_kwargs = mock_edit.call_args
+    assert "Slow" in edit_args[2]
+    assert edit_kwargs.get("reply_markup") == {"inline_keyboard": []}
+    # Next prompt sent WITH an inline keyboard.
+    assert mock_send.call_args.kwargs.get("reply_markup") is not None
+
+
+@patch.dict("os.environ", {"TELEGRAM_SECRET_TOKEN": "test-secret", "SKIP_IP_CHECK": "1"})
+@patch("agentic_traveler.interfaces.routers.telegram.get_orchestrator")
+@patch("agentic_traveler.interfaces.routers.telegram.answer_callback_query")
+def test_callback_query_malformed_data_is_noop(mock_answer, mock_orch, client):
+    """Malformed callback_data → still answer the callback, never dispatch."""
+    payload = {
+        "update_id": 8,
+        "callback_query": {
+            "id": "cb-2",
+            "from": {"id": 67890},
+            "message": {"message_id": 5, "chat": {"id": 12345}, "text": "x"},
+            "data": "garbage",
+        },
+    }
+    resp = client.post(
+        "/webhook/test-secret",
+        json=payload,
+        headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
+    )
+    assert resp.status_code == 200
+    mock_answer.assert_called_once()
+    mock_orch.return_value.process_request.assert_not_called()
 
 
 # ── Health Check ──

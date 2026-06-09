@@ -48,7 +48,11 @@ from agentic_traveler.orchestrator.router_agent import RouterAgent
 from agentic_traveler.orchestrator.event_emitter import EventEmitter
 from agentic_traveler.orchestrator.event_text_registry import text_for
 from agentic_traveler.orchestrator.sagas import SagaDispatcher, SagaState
-from agentic_traveler.orchestrator.sagas.trip_resolver import resolve_trip_focus
+from agentic_traveler.orchestrator.sagas.planning import slot_values_to_side_effect
+from agentic_traveler.orchestrator.sagas.trip_resolver import (
+    resolve_active_trip,
+    resolve_trip_focus,
+)
 from agentic_traveler.tools.user_repo import UserRepository
 from agentic_traveler.tools.trip_repo import TripRepository
 
@@ -108,11 +112,15 @@ class OrchestratorAgent:
         message_text: str,
         status_callback: Optional[Callable[[dict], None]] = None,
         delta_callback: Optional[Callable[[dict], None]] = None,
+        selection: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Telegram entry point. Resolves the user by Telegram ID, then dispatches.
 
-        Returns {"text": str, "action": str}.
+        When ``selection`` is present (a tapped inline-keyboard choice, Task 43)
+        the deterministic selection pipeline runs instead of the router.
+
+        Returns {"text": str, "action": str, "slot_request": dict | None}.
         """
         attach_run_metadata(
             user_id_hash=hash_user_id(telegram_user_id), surface="telegram"
@@ -130,6 +138,13 @@ class OrchestratorAgent:
                 ),
                 "action": "ONBOARDING_REQUIRED",
             }
+        if selection is not None:
+            return self._process_selection(
+                user_doc=user_doc, user_id=user_id,
+                telegram_user_id=telegram_user_id, selection=selection,
+                channel="telegram",
+                status_callback=status_callback, delta_callback=delta_callback,
+            )
         return self._process_user_doc(
             user_doc=user_doc,
             user_id=user_id,
@@ -146,12 +161,16 @@ class OrchestratorAgent:
         message_text: str,
         status_callback: Optional[Callable[[dict], None]] = None,
         delta_callback: Optional[Callable[[dict], None]] = None,
+        selection: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Web entry point. The user is already resolved by Supabase JWT → users.id;
         we fetch the assembled user_doc and dispatch.
 
-        Returns {"text": str, "action": str}.
+        When ``selection`` is present (a tapped multiple-choice chip, Task 43)
+        the deterministic selection pipeline runs instead of the router.
+
+        Returns {"text": str, "action": str, "slot_request": dict | None}.
         """
         attach_run_metadata(user_id_hash=hash_user_id(user_id), surface="web")
         user_doc = self.user_tool.get_user_by_id(user_id)
@@ -163,6 +182,12 @@ class OrchestratorAgent:
             }
         # For web users we don't have a Telegram ID; use the internal user_id as the
         # analytics/logging key. usage_tracker just needs a stable string identifier.
+        if selection is not None:
+            return self._process_selection(
+                user_doc=user_doc, user_id=user_id,
+                telegram_user_id=user_id, selection=selection, channel="web",
+                status_callback=status_callback, delta_callback=delta_callback,
+            )
         return self._process_user_doc(
             user_doc=user_doc,
             user_id=user_id,
@@ -409,6 +434,150 @@ class OrchestratorAgent:
         slot_wire = (
             slot_request.to_wire()
             if slot_request is not None and not is_error_response
+            else None
+        )
+        return {"text": response_text, "action": "RESPONSE", "slot_request": slot_wire}
+
+    # ── selection (Task 43 — deterministic tapped choice, no router/LLM) ─────
+
+    def _planning_saga(self):
+        """The registered PlanningSaga instance (owns slot routing). The
+        dispatcher always registers exactly one."""
+        for saga in self._dispatcher.sagas:
+            if getattr(saga, "name", "") == "PlanningSaga":
+                return saga
+        raise RuntimeError("PlanningSaga not registered in the dispatcher.")
+
+    def _process_selection(
+        self,
+        *,
+        user_doc: Dict[str, Any],
+        user_id: str,
+        telegram_user_id: str,
+        selection: Dict[str, Any],
+        channel: str,
+        status_callback: Optional[Callable[[dict], None]] = None,
+        delta_callback: Optional[Callable[[dict], None]] = None,
+    ) -> Dict[str, Any]:
+        """Apply a tapped multiple-choice value to the active trip
+        deterministically (no router, no slot_extractor — Task 43), then ask the
+        next missing slot (or build the plan when the trip is complete).
+
+        The chosen ``value`` is re-validated against the slot's legal options
+        before any write (trust-but-verify, §5): an illegal/free-text/unknown
+        slot is ignored (logged WARN) and the same slot is simply re-asked."""
+        t_total = time.time()
+        token_records: list[Dict[str, Any]] = []
+        events = EventEmitter(
+            user_id=user_id, trip_id=None,
+            on_status=status_callback, on_delta=delta_callback,
+        )
+
+        if not credit_manager.has_credits(user_doc):
+            return {"text": credit_manager.CREDITS_EXHAUSTED_MSG,
+                    "action": "NO_CREDITS", "slot_request": None}
+        restriction_msg = off_topic_guard.is_restricted(user_doc)
+        if restriction_msg:
+            return {"text": restriction_msg, "action": "RESTRICTED", "slot_request": None}
+
+        slot = str(selection.get("slot") or "")
+        values = [str(v) for v in (selection.get("values") or [])]
+
+        # 1. Resolve (or create) the trip this slot-fill belongs to.
+        trip: Optional[Dict[str, Any]] = None
+        if user_id:
+            try:
+                summaries = [
+                    s.model_dump() for s in self._trip_repo.list_trip_summaries(user_id)
+                ]
+            except Exception:
+                logger.exception("Selection: failed to list trip summaries for %s", user_id)
+                summaries = []
+            chosen = resolve_active_trip(summaries, "", {})
+            if chosen:
+                try:
+                    trip_model = self._trip_repo.get_trip(chosen["id"])
+                    trip = trip_model.model_dump() if trip_model else None
+                except Exception:
+                    logger.exception("Selection: failed to hydrate trip %s", chosen.get("id"))
+            if trip is None:
+                # No trip to attach to (deleted in another tab, fresh user). The
+                # PlanningSaga's zero-trip path expects a row to exist.
+                try:
+                    trip = self._trip_repo.upsert_trip(user_id, {}).model_dump()
+                except Exception:
+                    logger.exception("Selection: failed to create trip for %s", user_id)
+
+        events.trip_id = trip.get("id") if trip else None
+
+        # 2. Validate + apply the chosen value(s) deterministically as one write
+        #    (multi-select slots like travelers aggregate; 'skip' is exclusive).
+        se = slot_values_to_side_effect(trip, slot, values)
+        if se is None:
+            logger.warning(
+                "Selection rejected (illegal/free-text/no-trip) slot=%s channel=%s",
+                slot, channel,
+            )
+        else:
+            self._apply_side_effects(user_id, [se])
+            events.emit("metric", {
+                "name": "slot_selected", "slot": slot,
+                "value": ",".join(values), "channel": channel,
+            })
+            # Merge locally so the next-step decision sees the write without a
+            # re-read. The side-effect payload already holds the fully-merged
+            # JSONB section (preferences / travelers), so copy those sections.
+            if trip is not None:
+                for key, val in se.payload.items():
+                    if key != "id":
+                        trip[key] = val
+
+        # 3. Decide the next step (no extraction). A label string is passed only
+        #    for trace readability; the saga never parses it on this path.
+        conv_context = self.conversation_manager.build_context_block(user_doc)
+        state: SagaState = {
+            "intent": "PLAN",
+            "entities": {},
+            "current_time": _current_time_str(),
+            "trip_id": trip.get("id") if trip else None,
+            "message_text": "",
+            "trip_directive": "continue",
+        }
+        label = " / ".join(values) if values else slot
+        try:
+            result = self._planning_saga().run_after_selection(
+                label, user_doc, trip, state, conv_context, events,
+            )
+            self._apply_side_effects(user_id, result.side_effects)
+        except Exception:
+            logger.exception("Selection: planning continuation failed for %s", user_id)
+            result = None
+
+        response_text = (result.text if result else "") or (
+            "I had trouble continuing just now. Please try again."
+        )
+
+        # Log delegated-agent usage (a completed trip may have run the planner).
+        if result is not None and getattr(result, "_raw_response", None) is not None:
+            raw_agent = result._raw_response
+            if hasattr(raw_agent, "usage_metadata"):
+                agent_usage = usage_tracker.log_and_accumulate(
+                    agent_name="planner", model_name="gemini-3.5-flash",
+                    user_id=telegram_user_id, response=raw_agent,
+                    latency_ms=getattr(result, "_latency_ms", 0),
+                )
+                if agent_usage.get("total_tokens", 0) > 0:
+                    token_records.append(agent_usage)
+
+        _save_and_finish(
+            self, user_doc, user_id, label, response_text,
+            telegram_user_id, token_records, t_total, events, "PLAN",
+            owner_saga="PlanningSaga",
+        )
+
+        slot_wire = (
+            result.slot_request.to_wire()
+            if result is not None and result.slot_request is not None
             else None
         )
         return {"text": response_text, "action": "RESPONSE", "slot_request": slot_wire}

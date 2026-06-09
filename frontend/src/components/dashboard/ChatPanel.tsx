@@ -15,6 +15,7 @@ import remarkGfm from "remark-gfm";
 import TextareaAutosize from "react-textarea-autosize";
 
 import { useChat, type ChatMessage } from "@/hooks/useChat";
+import type { UiBlock, UiOption } from "@/hooks/useChatStream";
 import {
   SparklesIcon,
   ChatIcon,
@@ -130,6 +131,178 @@ function ChatBubble({
   );
 }
 
+/* ── Tappable slot choices (Task 43) ───────────────────────────────────── */
+
+/** Extract a valid tappable-choice block from an agent message, or null. */
+function getUiBlock(msg: ChatMessage): UiBlock | null {
+  const ui = (msg.metadata as { ui?: UiBlock } | undefined)?.ui;
+  if (!ui || !Array.isArray(ui.options) || ui.options.length === 0) return null;
+  if (ui.kind !== "multi_choice" && ui.kind !== "quick_reply") return null;
+  return ui;
+}
+
+const SKIP_ID = "skip";
+
+function formatTime(createdAt: string): string {
+  try {
+    return new Date(createdAt).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Renders a multiple-choice slot prompt as a single, self-contained agent card:
+ * the question and its tappable options live in one bubble (not a message plus
+ * detached chips). `multi_choice` options fire a deterministic selection —
+ * single tap for single-select, or checkboxes + Confirm when `allow_multi`
+ * (with "Skip for now" mutually exclusive). `quick_reply` options send their
+ * text as a normal message. Once answered (or superseded by a newer prompt) the
+ * options render disabled, with the chosen one(s) marked. Mobile-first: options
+ * stack on phones, inline-wrap from `sm:` up (CLAUDE.md §3).
+ */
+function SlotChoices({
+  ui,
+  time,
+  interactive,
+  answeredLabels,
+  onSelect,
+  onQuickReply,
+}: {
+  ui: UiBlock;
+  time: string;
+  interactive: boolean;
+  /** Chosen labels once answered (comma-joined for multi-select). */
+  answeredLabels: string | null;
+  onSelect: (values: string[], label: string) => void;
+  onQuickReply: (sendText: string, label: string) => void;
+}) {
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const multi = ui.allow_multi && ui.kind === "multi_choice";
+  // Single-select stores exactly one label (which may itself contain a comma);
+  // multi-select joins chosen labels with ", " — only then do we split.
+  const answeredSet = useMemo(() => {
+    if (!answeredLabels) return new Set<string>();
+    return multi
+      ? new Set(answeredLabels.split(", ").filter(Boolean))
+      : new Set([answeredLabels]);
+  }, [answeredLabels, multi]);
+
+  const handleTap = useCallback(
+    (opt: UiOption) => {
+      if (!interactive) return;
+      if (ui.kind === "quick_reply") {
+        onQuickReply(opt.send ?? opt.label, opt.label);
+        return;
+      }
+      if (multi) {
+        setPicked((prev) => {
+          const next = new Set(prev);
+          if (next.has(opt.id)) {
+            next.delete(opt.id);
+            return next;
+          }
+          // "Skip" is exclusive: it clears everything else, and any other pick
+          // clears a pending "Skip".
+          if (opt.id === SKIP_ID) return new Set([SKIP_ID]);
+          next.delete(SKIP_ID);
+          next.add(opt.id);
+          return next;
+        });
+        return;
+      }
+      onSelect([opt.id], opt.label);
+    },
+    [interactive, multi, ui.kind, onSelect, onQuickReply],
+  );
+
+  const handleConfirm = useCallback(() => {
+    if (!interactive) return;
+    const ids = [...picked];
+    const labels = ui.options
+      .filter((o) => picked.has(o.id))
+      .map((o) => o.label)
+      .join(", ");
+    // Zero selections + Confirm → treated as skip (spec §6).
+    onSelect(ids.length ? ids : [SKIP_ID], labels || "Skip for now");
+  }, [interactive, picked, ui.options, onSelect]);
+
+  const canConfirm = multi && interactive;
+
+  return (
+    <div className="flex justify-start">
+      <div
+        className="chat-bubble-interactive max-w-[85%] sm:max-w-[78%] px-3.5 py-3 rounded-2xl text-sm leading-relaxed text-foreground"
+        style={{
+          background: "color-mix(in oklab, var(--foreground) 5%, transparent)",
+          border: "1px solid var(--border)",
+          borderBottomLeftRadius: 6,
+        }}
+      >
+        <div className="whitespace-pre-wrap break-words">{ui.prompt}</div>
+
+        <div
+          className="mt-3 flex flex-col sm:flex-row sm:flex-wrap gap-2"
+          role="group"
+          aria-label={ui.prompt}
+        >
+          {ui.options.map((opt) => {
+            // While interactive only multi-select shows persistent marks (the
+            // user's in-progress picks); once answered, marks come from the
+            // recorded labels (robust if the card remounts).
+            const active = interactive
+              ? multi && picked.has(opt.id)
+              : answeredSet.has(opt.label);
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                disabled={!interactive}
+                onClick={() => handleTap(opt)}
+                aria-pressed={multi ? active : undefined}
+                className={`text-left text-sm px-3.5 py-2 rounded-xl border transition disabled:cursor-default ${
+                  active
+                    ? "text-white border-transparent"
+                    : "border-border bg-background/40 hover:border-primary/50 hover:bg-foreground/5 disabled:opacity-50 disabled:hover:bg-background/40"
+                }`}
+                style={
+                  active
+                    ? { background: "linear-gradient(135deg, var(--primary), #9333ea)" }
+                    : undefined
+                }
+              >
+                {active ? "✓ " : ""}
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {canConfirm ? (
+          <button
+            type="button"
+            onClick={handleConfirm}
+            className="mt-3 self-start text-sm px-4 py-2 rounded-xl text-white transition hover:scale-[1.02]"
+            style={{ background: "linear-gradient(135deg, var(--primary), #9333ea)" }}
+          >
+            {picked.size > 1 ? `${ui.submit_label ?? "Confirm"} (${picked.size})` : ui.submit_label ?? "Confirm"}
+          </button>
+        ) : null}
+
+        <div
+          className="text-[10px] mt-2 font-mono select-none text-muted-foreground"
+          aria-hidden="true"
+        >
+          {time}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Collapsed strip (icon column) — unchanged ─────────────────────────── */
 
 export function ChatStripIcons({ onExpand }: { onExpand: () => void }) {
@@ -192,6 +365,7 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
     streamStatus,
     streamingText,
     send,
+    sendSelection,
     retry,
     loadOlder,
     search,
@@ -199,6 +373,9 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
   } = useChat();
 
   const [draft, setDraft] = useState("");
+  // Slot prompts the user has answered this session (id → chosen label), so the
+  // tapped chips immediately render as answered before the next reply lands.
+  const [answered, setAnswered] = useState<Map<number, string>>(() => new Map());
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ChatMessage[]>([]);
@@ -314,6 +491,32 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
       }
     },
     [handleSend],
+  );
+
+  // ── slot-choice handlers (Task 43) ──────────────────────────────────────
+  // Only the latest agent prompt is interactive; older ones (and ones already
+  // answered) render disabled.
+  const lastAgentId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].sender_type === "agent") return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
+  const handleSelect = useCallback(
+    (msgId: number, slot: string, values: string[], label: string) => {
+      setAnswered((prev) => new Map(prev).set(msgId, label));
+      void sendSelection(slot, values, label);
+    },
+    [sendSelection],
+  );
+
+  const handleQuickReply = useCallback(
+    (msgId: number, sendText: string, label: string) => {
+      setAnswered((prev) => new Map(prev).set(msgId, label));
+      void send(sendText);
+    },
+    [send],
   );
 
   // ── search handlers ────────────────────────────────────────────────────
@@ -601,15 +804,35 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
           </div>
         )}
 
-        {messages.map((m) => (
-          <ChatBubble
-            key={m.id}
-            msg={m}
-            highlight={flashId === m.id}
-            registerRef={registerRef}
-            onContextMenu={openContextMenu}
-          />
-        ))}
+        {messages.map((m) => {
+          const ui = m.sender_type === "agent" ? getUiBlock(m) : null;
+          // A choice prompt renders as ONE self-contained card (prompt + chips),
+          // so the plain bubble is suppressed to avoid showing the question twice.
+          if (ui) {
+            const interactive =
+              m.id === lastAgentId && !answered.has(m.id) && !pendingReply;
+            return (
+              <SlotChoices
+                key={m.id}
+                ui={ui}
+                time={formatTime(m.created_at)}
+                interactive={interactive}
+                answeredLabels={answered.get(m.id) ?? null}
+                onSelect={(values, label) => handleSelect(m.id, ui.slot, values, label)}
+                onQuickReply={(sendText, label) => handleQuickReply(m.id, sendText, label)}
+              />
+            );
+          }
+          return (
+            <ChatBubble
+              key={m.id}
+              msg={m}
+              highlight={flashId === m.id}
+              registerRef={registerRef}
+              onContextMenu={openContextMenu}
+            />
+          );
+        })}
 
         {/* Streaming reply takes priority; otherwise the paced status line.
             No generic typing dots — only the real intermediary states show

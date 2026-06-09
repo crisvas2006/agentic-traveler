@@ -16,6 +16,10 @@ from agentic_traveler.interfaces.dependencies import (
 )
 from agentic_traveler.interfaces.schemas import TelegramWebhookPayload
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
+from agentic_traveler.orchestrator.sagas.planning import (
+    _SLOT_CHOICES,
+    ui_block_from_wire,
+)
 from agentic_traveler.tools.chat_repo import ChatRepository
 from agentic_traveler.tools.user_repo import UserRepository
 
@@ -99,30 +103,46 @@ MOCK_TELEGRAM = os.getenv("MOCK_TELEGRAM", "").lower() in ("1", "true")
 if MOCK_TELEGRAM:
     logger.info("⚡ MOCK_TELEGRAM mode active: Outgoing Telegram API calls will be bypassed")
 
-    def send_telegram_message(chat_id: int | str, text: str) -> int | None:
+    def send_telegram_message(
+        chat_id: int | str, text: str, reply_markup: dict | None = None,
+    ) -> int | None:
         """Mock message sender that bypasses external HTTP requests."""
         logger.debug("MOCK_TELEGRAM: sent message to %s: %s", chat_id, text[:60])
         return 888888  # Synthetic message ID
 
-    def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> None:
+    def edit_telegram_message(
+        chat_id: int | str, message_id: int, text: str,
+        reply_markup: dict | None = None,
+    ) -> None:
         """Mock message editor that bypasses external HTTP requests."""
         logger.debug("MOCK_TELEGRAM: edited message %s to %s", message_id, text[:60])
         return
+
+    def answer_callback_query(callback_query_id: str, text: str | None = None) -> None:
+        """Mock callback-query acknowledger."""
+        logger.debug("MOCK_TELEGRAM: answered callback %s", callback_query_id)
+        return
 else:
-    def send_telegram_message(chat_id: int | str, text: str) -> int | None:
-        """Send a message via the Telegram API with Markdown formatting."""
+    def send_telegram_message(
+        chat_id: int | str, text: str, reply_markup: dict | None = None,
+    ) -> int | None:
+        """Send a message via the Telegram API with Markdown formatting.
+
+        ``reply_markup`` (e.g. an inline keyboard) is attached only to the final
+        chunk so a multi-part message keeps its buttons at the bottom (Task 43)."""
         text = sanitize_telegram_markdown(text)
         last_message_id = None
-        for i in range(0, len(text), 4096):
+        chunk_starts = list(range(0, len(text) or 1, 4096))
+        for i in chunk_starts:
             chunk = text[i: i + 4096]
+            is_last = i == chunk_starts[-1]
+            payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"}
+            if reply_markup is not None and is_last:
+                payload["reply_markup"] = reply_markup
             try:
                 resp = http_requests.post(
                     f"{TELEGRAM_API}/sendMessage",
-                    json={
-                        "chat_id": chat_id,
-                        "text": chunk,
-                        "parse_mode": "Markdown",
-                    },
+                    json=payload,
                     timeout=10,
                 )
                 if not resp.ok:
@@ -151,8 +171,13 @@ else:
 
         return last_message_id
 
-    def edit_telegram_message(chat_id: int | str, message_id: int, text: str) -> None:
-        """Edit an existing Telegram message with new Markdown text."""
+    def edit_telegram_message(
+        chat_id: int | str, message_id: int, text: str,
+        reply_markup: dict | None = None,
+    ) -> None:
+        """Edit an existing Telegram message with new Markdown text.
+
+        ``reply_markup`` attaches/refreshes an inline keyboard (Task 43)."""
         if not text:
             text = "Sorry, I had trouble coming up with a response."
 
@@ -162,15 +187,18 @@ else:
             text = str(text)
 
         text = sanitize_telegram_markdown(text)
+        payload: dict = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "Markdown",
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         try:
             resp = http_requests.post(
                 f"{TELEGRAM_API}/editMessageText",
-                json={
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": text,
-                    "parse_mode": "Markdown",
-                },
+                json=payload,
                 timeout=10,
             )
             if not resp.ok:
@@ -178,13 +206,16 @@ else:
                     "Telegram editMessageText failed (%s): %s. Retrying plain text.",
                     resp.status_code, resp.text,
                 )
+                retry_payload: dict = {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                }
+                if reply_markup is not None:
+                    retry_payload["reply_markup"] = reply_markup
                 resp2 = http_requests.post(
                     f"{TELEGRAM_API}/editMessageText",
-                    json={
-                        "chat_id": chat_id,
-                        "message_id": message_id,
-                        "text": text,
-                    },
+                    json=retry_payload,
                     timeout=10,
                 )
                 if not resp2.ok:
@@ -194,6 +225,50 @@ else:
                     )
         except Exception:
             logger.exception("Failed to edit Telegram message %s", message_id)
+
+    def answer_callback_query(callback_query_id: str, text: str | None = None) -> None:
+        """Acknowledge an inline-keyboard tap so the client stops its spinner
+        (Task 43). Best-effort — a failed ack never blocks the reply."""
+        payload: dict = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        try:
+            http_requests.post(
+                f"{TELEGRAM_API}/answerCallbackQuery", json=payload, timeout=10,
+            )
+        except Exception:
+            logger.exception("Failed to answer callback query %s", callback_query_id)
+
+# ── inline keyboard (Task 43) ──
+
+def _inline_keyboard(slot_request: dict | None) -> dict | None:
+    """Build a one-button-per-option inline keyboard from a slot_request wire
+    dict, or None when there's nothing tappable. Only categorical preference
+    slots (``multi_choice``) become buttons; the task-44 direction confirmation
+    (``quick_reply``) stays plain text on Telegram (inline buttons can't send a
+    free-text message, which is what that flow needs)."""
+    ui = ui_block_from_wire(slot_request)
+    if not ui or ui.get("kind") != "multi_choice" or not slot_request:
+        return None
+    slot = slot_request["slot"]
+    rows = []
+    for c in slot_request.get("choices") or []:
+        # callback_data hard cap is 64 bytes (Telegram). slot + value are short
+        # enums, but guard defensively and drop any option that wouldn't fit.
+        cb = f"slot|{slot}|{c['value']}"
+        if len(cb.encode("utf-8")) > 64:
+            continue
+        rows.append([{"text": c["label"], "callback_data": cb}])
+    return {"inline_keyboard": rows} if rows else None
+
+
+def _choice_label(slot: str, value: str) -> str:
+    """Human label for a chosen (slot, value), for the edited confirmation text."""
+    for c in _SLOT_CHOICES.get(slot, []):
+        if str(c.value) == str(value):
+            return c.label
+    return value
+
 
 # ── background processing functions ──
 
@@ -241,6 +316,9 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
         reply = "Sorry, I hit an error processing your message. Please try again."
         response = {"action": "ERROR"}
 
+    # Tappable slot choices (Task 43) → inline keyboard on the reply message.
+    keyboard = _inline_keyboard(response.get("slot_request"))
+
     # Mirror the exchange into the web-visible messages table so Telegram users
     # see their full history when they sign in on the web. Best-effort: never
     # block the Telegram reply on a persistence failure.
@@ -260,12 +338,74 @@ def _process_message_bg(chat_id: int, user_id: str, text: str) -> None:
     placeholder_msg_id = _ph["id"]
     if placeholder_msg_id:
         logger.info("Editing placeholder %s for chat %s (reply_len=%d)", placeholder_msg_id, chat_id, len(reply))
-        edit_telegram_message(chat_id, placeholder_msg_id, reply)
+        edit_telegram_message(chat_id, placeholder_msg_id, reply, reply_markup=keyboard)
         if len(reply) > 4000:
             send_telegram_message(chat_id, reply[4000:])
     else:
         logger.info("No placeholder — sending fresh reply to chat %s", chat_id)
-        send_telegram_message(chat_id, reply)
+        send_telegram_message(chat_id, reply, reply_markup=keyboard)
+
+
+def _process_callback_bg(callback_query: dict) -> None:
+    """Handle an inline-keyboard tap (Task 43). Parses ``slot|<slot>|<value>``,
+    applies the selection deterministically via the orchestrator, edits the
+    original prompt to show the chosen answer, and sends the next prompt.
+
+    Always answers the callback first so the client spinner clears even on the
+    no-op / malformed paths (AC-6, §6)."""
+    cq_id = str(callback_query.get("id") or "")
+    if cq_id:
+        answer_callback_query(cq_id)
+
+    data = str(callback_query.get("data") or "")
+    message = callback_query.get("message") or {}
+    chat_id = (message.get("chat") or {}).get("id")
+    message_id = message.get("id") or message.get("message_id")
+    from_user = callback_query.get("from") or {}
+    user_id = str(from_user.get("id") or "")
+
+    parts = data.split("|")
+    if len(parts) != 3 or parts[0] != "slot" or not chat_id or not user_id:
+        logger.warning("Ignoring malformed/expired callback_data=%r", data[:64])
+        return
+    _, slot, value = parts
+
+    user_doc = get_user_tool().get_user_by_telegram_id(user_id)
+    if not user_doc:
+        logger.warning("Callback from unknown telegram user %s", user_id)
+        return
+
+    label = _choice_label(slot, value)
+
+    # Disable the original keyboard and show the chosen answer.
+    if message_id:
+        orig = (message.get("text") or "").strip()
+        edited = f"{orig}\n\n✅ {label}" if orig else f"✅ {label}"
+        edit_telegram_message(chat_id, message_id, edited, reply_markup={"inline_keyboard": []})
+
+    try:
+        response = get_orchestrator().process_request(
+            user_id, label, selection={"slot": slot, "values": [value]},
+        )
+        reply = response.get("text", "Something went wrong.")
+    except Exception:
+        logger.exception("Callback selection failed for user %s", user_id)
+        reply = "Sorry, I hit an error applying that choice. Please try again."
+        response = {"action": "ERROR"}
+
+    keyboard = _inline_keyboard(response.get("slot_request"))
+    send_telegram_message(chat_id, reply, reply_markup=keyboard)
+
+    # Mirror the exchange into the web-visible thread (chosen label + next prompt).
+    internal_user_id = user_doc.get("id")
+    if internal_user_id:
+        try:
+            get_chat_repo().append_pair(
+                user_id=internal_user_id, user_body=label, agent_body=reply,
+                source="telegram", agent_metadata={"action": response.get("action")},
+            )
+        except Exception:
+            logger.exception("chat_repo append failed for telegram callback user %s", user_id)
 
 
 def _handle_telegram_link(chat_id: int, telegram_id: str, token: str) -> None:
@@ -438,6 +578,19 @@ async def telegram_webhook(
     if secret != os.getenv("TELEGRAM_SECRET_TOKEN", ""):
         logger.warning("Rejected: wrong URL path secret")
         raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Inline-keyboard taps (Task 43) arrive as callback_query, not message.
+    callback_query = payload.callback_query
+    if callback_query:
+        cb_user_id = str((callback_query.get("from") or {}).get("id") or "")
+        if cb_user_id and _is_rate_limited(cb_user_id):
+            # Still answer so the client spinner clears; just don't process.
+            cq_id = str(callback_query.get("id") or "")
+            if cq_id:
+                background_tasks.add_task(answer_callback_query, cq_id, None)
+            return {"ok": True}
+        background_tasks.add_task(_process_callback_bg, callback_query)
+        return {"ok": True}
 
     # FastAPI handles empty JSON gracefully with BaseModel, but let's check message
     message = payload.message

@@ -51,6 +51,13 @@ _SLOT_QUESTIONS = {
 
 # Categorical slots answered by selection (deterministic → no extraction cost).
 _SLOT_CHOICES: dict[str, list[ChoiceOption]] = {
+    "travelers": [
+        ChoiceOption("solo", "Just me", "solo"),
+        ChoiceOption("couple", "With my partner", "couple"),
+        ChoiceOption("friends", "With friends", "friends"),
+        ChoiceOption("family", "With family", "family"),
+        ChoiceOption("skip", "Skip for now", "skip"),
+    ],
     "pace": [
         ChoiceOption("slow", "Slow — room to breathe", "slow"),
         ChoiceOption("medium", "Medium — a good rhythm", "medium"),
@@ -71,18 +78,40 @@ _SLOT_CHOICES: dict[str, list[ChoiceOption]] = {
     ],
 }
 
-# Canonical set of values a categorical-slot button can send back. Used to
-# intercept button taps the RouterAgent classifies as CHAT (the payload is a
-# bare choice value like "slow" or "$$", not a travel question). Derived from
-# _SLOT_CHOICES so the intercept vocab can never drift from the rendered options.
-_CHOICE_VALUES = frozenset(
-    str(option.value).lower()
-    for options in _SLOT_CHOICES.values()
-    for option in options
-)
-
 # Categorical slots whose chosen value writes straight into trip.preferences.
 _PREFERENCE_SLOTS = ("pace", "structure", "budget_tier")
+
+# Canonical set of values a categorical-slot button can send back. Used to
+# intercept button taps the RouterAgent classifies as CHAT (the payload is a
+# bare choice value like "slow" or "$$", not a travel question). Restricted to
+# the preference slots: their values are unambiguous tokens, whereas travelers
+# options ("friends", "family") are common words a real chat message might be.
+_CHOICE_VALUES = frozenset(
+    str(option.value).lower()
+    for slot in _PREFERENCE_SLOTS
+    for option in _SLOT_CHOICES[slot]
+)
+
+# Travelers is categorical too, but its chosen value writes into trip.travelers
+# (not preferences). These presets give a count where it's unambiguous; friends/
+# family leave count open (the user can refine it in free text later). The
+# free-text extractor remains the fallback for typed answers.
+_TRAVELER_PRESETS: dict[str, dict[str, Any]] = {
+    "solo": {"count": 1, "composition": "solo"},
+    "couple": {"count": 2, "composition": "couple"},
+    "friends": {"composition": "friends"},
+    "family": {"composition": "family"},
+    "skip": {"composition": "skip"},
+}
+
+# Slots that accept more than one choice at once (e.g. "partner + family"). The
+# client renders these as checkboxes + a Confirm button; "skip" stays exclusive.
+_MULTI_SELECT_SLOTS = frozenset({"travelers"})
+
+# The task-44 direction confirmation rides the same SlotRequest contract but is
+# a "quick reply", not a deterministic write: its slot name is reserved and never
+# maps to a trip field (see ``slot_selection_to_side_effect`` / ``ui_block_from_wire``).
+_DIRECTION_SLOT = "trip_direction"
 
 
 def _legal_values(slot: str) -> frozenset[str]:
@@ -90,31 +119,105 @@ def _legal_values(slot: str) -> frozenset[str]:
     return frozenset(str(o.value).lower() for o in _SLOT_CHOICES.get(slot, []))
 
 
-def slot_selection_to_side_effect(
-    trip: Optional[dict[str, Any]], slot: str, value: str
+def ui_block_from_wire(wire: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Shape a ``SlotRequest.to_wire()`` dict into the channel-facing
+    ``messages.metadata.ui`` block (Task 43), or ``None`` when there's nothing
+    tappable (free-text slot / no slot question).
+
+    The ``kind`` discriminator is a *rendering* decision made here, in the
+    channel-shaping layer, so the frozen ``SlotRequest`` dataclass (§5) needs no
+    new field:
+      * a known categorical slot (anything in ``_SLOT_CHOICES``) → ``multi_choice``:
+        tapping sends a structured ``selection`` and writes deterministically
+        (no LLM).
+      * anything else with choices (the direction confirmation) → ``quick_reply``:
+        tapping sends ``send`` back as a NORMAL message (router re-classifies it).
+    """
+    if not wire or not wire.get("choices"):
+        return None
+    slot = wire["slot"]
+    is_choice_slot = slot in _SLOT_CHOICES
+    block: dict[str, Any] = {
+        "kind": "multi_choice" if is_choice_slot else "quick_reply",
+        "slot": slot,
+        "prompt": wire["prompt"],
+        "allow_multi": bool(wire.get("allow_multi")),
+    }
+    if is_choice_slot:
+        # Deterministic slot: the client echoes the option id back as the value;
+        # the backend re-validates it. The raw value never needs to leave here.
+        block["options"] = [
+            {"id": c["id"], "label": c["label"]} for c in wire["choices"]
+        ]
+    else:
+        # Quick reply: the client sends `send` as a normal chat message.
+        block["options"] = [
+            {"id": c["id"], "label": c["label"], "send": c["value"]}
+            for c in wire["choices"]
+        ]
+    if block["allow_multi"]:
+        block["submit_label"] = "Confirm"
+    return block
+
+
+def slot_values_to_side_effect(
+    trip: Optional[dict[str, Any]], slot: str, values: list[str]
 ) -> Optional[SideEffect]:
-    """Map a tapped/selected slot value onto a deterministic trip write (Task 43 —
-    no LLM). Returns ``None`` for an illegal ``(slot, value)`` pair or a free-text
-    slot (destination/timeframe/travelers are not choice-driven). ``'skip'`` is a
-    legal categorical value: it writes the literal ``"skip"`` sentinel so
-    key-presence marks the slot satisfied and the saga never re-asks it.
+    """Map one or more tapped values for a categorical slot onto a single
+    deterministic trip write (Task 43 — no LLM). Returns ``None`` when nothing
+    legal was chosen, for a free-text slot, or when there's no trip.
+
+    Multi-select (``travelers``) combines the chosen presets; single-select slots
+    use the first legal value. ``'skip'`` is **exclusive**: if present it wins and
+    clears the rest, writing a ``"skip"`` sentinel so key-presence marks the slot
+    satisfied and the saga never re-asks it.
 
     Takes the hydrated ``trip`` (not just its id) because ``upsert_trip`` REPLACES
-    the ``preferences`` JSONB column — we must merge the new value into the
-    existing preferences here, exactly like ``_slots_to_side_effects`` does, so a
-    selection never clobbers sibling slots."""
+    the JSONB column — we merge into the existing section here so a selection
+    never clobbers sibling keys."""
     trip_id = (trip or {}).get("id")
     if not trip_id:
         return None
-    if str(value).strip().lower() not in _legal_values(slot):
+    legal = _legal_values(slot)
+    chosen: list[str] = []
+    for v in values:
+        n = str(v).strip().lower()
+        if n in legal and n not in chosen:
+            chosen.append(n)
+    if not chosen:
         return None
+    if "skip" in chosen:
+        chosen = ["skip"]  # exclusive
+
     if slot in _PREFERENCE_SLOTS:
-        merged = {**((trip or {}).get("preferences") or {}), slot: value}
-        return SideEffect(
-            kind="trip_patch",
-            payload={"id": trip_id, "preferences": merged},
-        )
+        # Single-select: take the first chosen value.
+        merged = {**((trip or {}).get("preferences") or {}), slot: chosen[0]}
+        return SideEffect(kind="trip_patch", payload={"id": trip_id, "preferences": merged})
+
+    if slot == "travelers":
+        merged = dict((trip or {}).get("travelers") or {})
+        if chosen == ["skip"]:
+            merged["composition"] = "skip"
+            merged.pop("count", None)
+        else:
+            merged["composition"] = ", ".join(
+                _TRAVELER_PRESETS[c]["composition"] for c in chosen
+            )
+            # A count only when a single, unambiguous preset was picked.
+            if len(chosen) == 1 and "count" in _TRAVELER_PRESETS[chosen[0]]:
+                merged["count"] = _TRAVELER_PRESETS[chosen[0]]["count"]
+            else:
+                merged.pop("count", None)
+        return SideEffect(kind="trip_patch", payload={"id": trip_id, "travelers": merged})
+
     return None
+
+
+def slot_selection_to_side_effect(
+    trip: Optional[dict[str, Any]], slot: str, value: str
+) -> Optional[SideEffect]:
+    """Single-value convenience wrapper around :func:`slot_values_to_side_effect`."""
+    return slot_values_to_side_effect(trip, slot, [value])
 
 
 class PlanningSaga:
@@ -178,10 +281,58 @@ class PlanningSaga:
         except Exception:
             logger.warning("PlanningSaga slot extraction failed.", exc_info=True)
 
+        return self._decide(
+            message, user_doc, trip, state, conversation_context, events,
+            side_effects=side_effects, made_progress=bool(side_effects),
+            overrides=overrides, t=t,
+        )
+
+    @traceable(name="saga.planning.run_after_selection")
+    def run_after_selection(
+        self,
+        message: str,
+        user_doc: dict[str, Any],
+        trip: Optional[dict[str, Any]],
+        state: SagaState,
+        conversation_context: str,
+        events: Any,
+    ) -> SagaResult:
+        """Continue a planning turn after a deterministic choice was tapped
+        (Task 43). The chosen value has ALREADY been written to ``trip`` (and
+        persisted) by the orchestrator's selection entrypoint, so we skip
+        extraction entirely — no LLM call — and just decide the next step.
+
+        ``made_progress=True`` because the tap is real progress: a now-complete
+        trip proceeds to the itinerary, an incomplete one asks the next missing
+        slot (never drifts to the companion)."""
+        t = time.time()
+        events.emit("metric", {"name": "saga_entered", "saga": self.name})
+        overrides = _hard_overrides(user_doc)
+        return self._decide(
+            message, user_doc, trip, state, conversation_context, events,
+            side_effects=[], made_progress=True, overrides=overrides, t=t,
+        )
+
+    def _decide(
+        self,
+        message: str,
+        user_doc: dict[str, Any],
+        trip: Optional[dict[str, Any]],
+        state: SagaState,
+        conversation_context: str,
+        events: Any,
+        *,
+        side_effects: list[SideEffect],
+        made_progress: bool,
+        overrides: dict[str, Any],
+        t: float,
+    ) -> SagaResult:
+        """Route a planning turn once the trip reflects any writes staged this
+        turn. Shared by ``run`` (after extraction) and ``run_after_selection``
+        (deterministic tap, no extraction)."""
         phase = derive_saga_state_local(trip)
         missing = self._first_missing_slot(trip, overrides)
         intent = state.get("intent", "")
-        made_progress = bool(side_effects)
         directive = state.get("trip_directive", "unspecified")
         superseded = state.get("superseded_trip_title")
 
@@ -285,15 +436,24 @@ class PlanningSaga:
         })
         return SagaResult(
             text=text,
-            slot_request=SlotRequest(slot=slot, prompt=question, choices=choices),
+            slot_request=SlotRequest(
+                slot=slot, prompt=question, choices=choices,
+                allow_multi=slot in _MULTI_SELECT_SLOTS,
+            ),
             side_effects=side_effects,
             state_delta={"pending_slot": slot},
         )
 
     def _confirm_switch(self, trip: dict[str, Any], events: Any, t: float) -> SagaResult:
         """Ask the user whether to keep refining the in-focus trip or start a new
-        one (task 44). Text only — no plan, no slot mutation. The reply next turn
-        (router → continue/new) decides; nothing is persisted."""
+        one (task 44). No plan, no slot mutation. The reply next turn
+        (router → continue/new) decides; nothing is persisted.
+
+        Carries a ``quick_reply`` SlotRequest (task 43) so channels can render
+        two tappable chips. Unlike a categorical slot, these don't write to the
+        trip: each chip's ``value`` is a short phrase sent back as a NORMAL
+        message, which the router re-classifies into a ``trip_directive`` —
+        keeping the confirmation stateless (no persisted "awaiting" flag)."""
         title = _trip_title(trip)
         text = (
             f"We're partway through planning {title}. Want to keep refining "
@@ -303,7 +463,19 @@ class PlanningSaga:
             "name": "saga_exited", "saga": self.name, "outcome": "confirm_switch",
             "latency_ms": (time.time() - t) * 1000,
         })
-        return SagaResult(text=text)
+        return SagaResult(
+            text=text,
+            slot_request=SlotRequest(
+                slot=_DIRECTION_SLOT,
+                prompt=text,
+                choices=[
+                    ChoiceOption("continue", "Keep refining this trip",
+                                 "Let's keep refining this trip."),
+                    ChoiceOption("new", "Start a new trip",
+                                 "Let's start planning a brand-new trip."),
+                ],
+            ),
+        )
 
     # ------------------------------------------------------------------
     # delegation to content engines
@@ -393,7 +565,9 @@ def _slot_values(trip: dict[str, Any]) -> dict[str, Any]:
     return {
         "destination": bool(destinations),
         "timeframe": bool(timeframe.get("start_date") or timeframe.get("text")),
-        "travelers": bool(travelers.get("count")),
+        # A tapped travelers choice may set only ``composition`` (friends/family,
+        # no exact count) — presence of either marks the slot satisfied.
+        "travelers": bool(travelers.get("count") or travelers.get("composition")),
         "pace": "pace" in prefs,
         "structure": "structure" in prefs,
         "budget_tier": "budget_tier" in prefs,

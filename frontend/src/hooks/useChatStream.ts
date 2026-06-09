@@ -20,11 +20,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const MIN_STATUS_MS = 1000;
 
+/** A tappable-choice block (Task 43) attached to an agent reply's metadata. */
+export type UiOption = { id: string; label: string; send?: string };
+export type UiBlock = {
+  kind: "multi_choice" | "quick_reply";
+  slot: string;
+  prompt: string;
+  allow_multi: boolean;
+  submit_label?: string;
+  options: UiOption[];
+};
+
 export type StreamDone = {
   messageId: number | null;
   userMessageId: number | null;
   threadId: string | null;
   text: string;
+  ui: UiBlock | null;
 };
 
 type RunHandlers = {
@@ -183,6 +195,7 @@ export function useChatStream() {
                 userMessageId: (data?.user_message_id as number | null) ?? null,
                 threadId: (data?.thread_id as string | null) ?? null,
                 text: (data?.text as string | undefined) ?? acc,
+                ui: (data?.ui as UiBlock | null) ?? null,
               });
             }
           }

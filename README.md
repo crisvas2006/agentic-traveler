@@ -301,9 +301,10 @@ Tools and technologies:
         then hydrates one), derives the trip's phase from data
         (`derive_saga_state_local`, mirroring the Postgres `derive_saga_state`),
         and collects the missing essentials one question per turn — categorical
-        slots (pace/structure/budget) as **multiple-choice** (`SlotRequest.choices`),
-        free-form slots parsed by a small extractor — writing structured patches
-        back to the trip via `TripRepository`. The user's message dictates which
+        slots (travelers/pace/structure/budget) as **multiple-choice**
+        (`SlotRequest.choices`), free-form slots (destination, timeframe) parsed
+        by a small extractor — writing structured patches back to the trip via
+        `TripRepository`. The user's message dictates which
         engine answers and which trip is in focus. The Router emits a
         `trip_directive` (`continue` / `new` / `unspecified`): `new` sets the
         current trip aside and starts a fresh one ("Putting **Japan** on hold —
@@ -319,6 +320,25 @@ Tools and technologies:
         1:1 to a future LangGraph migration. Each saga emits
         `saga_entered` / `saga_exited` /
         `slot_filled` metrics by default.
+
+    *   **Tappable slot prompts (web + Telegram):** categorical questions render
+        as one self-contained card — the question and its option chips in a single
+        agent bubble — on the web chat, and as an inline keyboard on Telegram.
+        Most slots are single-select (one tap fires); **travelers** is
+        multi-select (e.g. partner + family) with checkboxes, a Confirm button,
+        and a mutually-exclusive **Skip**. Tapping a
+        choice applies the value **deterministically** — no extraction LLM call:
+        the answer rides a structured `selection` (`{slot, values}`) on
+        `/chat/send` (or a `slot|<slot>|<value>` `callback_query` on Telegram),
+        is re-validated against the slot's legal options server-side
+        (trust-but-verify), and is merged into `trips.preferences` via a shared
+        `slot_selection_to_side_effect` mapper. A **Skip** option writes a `skip`
+        sentinel so the slot is never re-asked. Typing the answer instead still
+        works (the free-text extractor is the graceful fallback), and a
+        `slot_selected {slot, value, channel}` metric is emitted on every tap.
+        The task-44 direction confirmation renders as two **quick-reply** chips
+        (web) whose taps send a normal message the Router re-classifies into a
+        `trip_directive` — keeping the confirmation stateless.
             
     *   Planning before acting:
         

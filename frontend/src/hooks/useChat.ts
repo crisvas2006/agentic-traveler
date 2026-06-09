@@ -148,7 +148,7 @@ export function useChat() {
       ]);
 
       await stream.run(body, {
-        onDone: ({ messageId, userMessageId, threadId: tid, text: replyText }) => {
+        onDone: ({ messageId, userMessageId, threadId: tid, text: replyText, ui }) => {
           if (tid) setThreadId((cur) => cur ?? tid);
           if (userMessageId != null) finalizedIdsRef.current.add(userMessageId);
           if (messageId != null) finalizedIdsRef.current.add(messageId);
@@ -175,6 +175,9 @@ export function useChat() {
                 sender_type: "agent",
                 body: replyText,
                 source: "web",
+                // Carry any tappable-choice block so the chips render on the
+                // just-streamed reply (Task 43).
+                metadata: ui ? { ui } : undefined,
                 created_at: new Date().toISOString(),
               });
             }
@@ -195,6 +198,66 @@ export function useChat() {
       setPendingReply(false);
     },
     [stream],
+  );
+
+  // ── send a tapped multiple-choice selection (Task 43) ─────────────────────
+  // Deterministic slot fills go through the non-streaming /chat/send: the reply
+  // is a quick next prompt (or the itinerary), not heavy token streaming. The
+  // chosen `label` is shown as the user bubble; the reply carries the next
+  // prompt's `metadata.ui` so the following chips render immediately.
+  const sendSelection = useCallback(
+    async (slot: string, values: string[], label: string): Promise<void> => {
+      if (inflightRef.current || values.length === 0) return;
+      inflightRef.current = true;
+      setPendingReply(true);
+      setError(null);
+
+      const tempId = tempIdRef.current--;
+      const createdAt = new Date().toISOString();
+      setMessages((prev) => [
+        ...prev,
+        { id: tempId, sender_type: "user", body: label, source: "web", created_at: createdAt },
+      ]);
+
+      try {
+        const resp = await fetch("/api/chat/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body: label, selection: { slot, values } }),
+        });
+        if (!resp.ok) throw new Error("send failed");
+        const data = (await resp.json()) as {
+          user_message: ChatMessage;
+          reply: ChatMessage;
+        };
+        const tid = data.user_message?.thread_id ?? null;
+        if (tid) setThreadId((cur) => cur ?? tid);
+        if (data.user_message?.id != null) finalizedIdsRef.current.add(data.user_message.id);
+        if (data.reply?.id != null) finalizedIdsRef.current.add(data.reply.id);
+
+        setMessages((prev) => {
+          const without = prev.filter(
+            (m) =>
+              m.id !== tempId &&
+              m.id !== data.user_message?.id &&
+              m.id !== data.reply?.id,
+          );
+          const out = [...without];
+          if (data.user_message) out.push(data.user_message);
+          if (data.reply) out.push(data.reply);
+          return out;
+        });
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, metadata: { error: true } } : m)),
+        );
+        setError("Couldn't send. Please try again.");
+      } finally {
+        inflightRef.current = false;
+        setPendingReply(false);
+      }
+    },
+    [],
   );
 
   // ── retry a failed message ──────────────────────────────────────────────
@@ -245,6 +308,7 @@ export function useChat() {
     streamingText: stream.streamingText,
     streaming: stream.streaming,
     send,
+    sendSelection,
     retry,
     loadOlder,
     search,

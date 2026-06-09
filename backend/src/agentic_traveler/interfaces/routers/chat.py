@@ -25,6 +25,7 @@ from agentic_traveler.interfaces.schemas import (
     ChatSendRequest,
     ChatSendResponse,
 )
+from agentic_traveler.orchestrator.sagas.planning import ui_block_from_wire
 from agentic_traveler.tools.chat_repo import ChatRepository
 
 logger = logging.getLogger(__name__)
@@ -60,12 +61,28 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _reply_metadata(action, latency_ms: int, slot_request) -> dict:
+    """Build the agent message's ``metadata``: always the action + latency, plus
+    a ``ui`` block (multiple-choice / quick-reply chips, Task 43) when the reply
+    carries tappable choices. Replies without choices leave ``ui`` unset."""
+    metadata: dict = {"action": action, "latency_ms": latency_ms}
+    ui = ui_block_from_wire(slot_request)
+    if ui:
+        metadata["ui"] = ui
+    return metadata
+
+
 @router.post("/send", response_model=ChatSendResponse)
 async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_supabase_jwt)):
-    """Persist the user message, run the orchestrator, persist the reply."""
+    """Persist the user message, run the orchestrator, persist the reply.
+
+    When ``payload.selection`` is present the message is a tapped chip: ``body``
+    is the chosen label (shown in the bubble) and the structured selection is
+    applied deterministically (no slot_extractor LLM call — Task 43)."""
     body = sanitize_user_input(payload.body)
     if not body:
         raise HTTPException(status_code=400, detail="Empty message")
+    selection = payload.selection.model_dump() if payload.selection else None
 
     repo = _get_chat_repo()
 
@@ -82,6 +99,7 @@ async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_s
         agent_result = _get_orchestrator().process_request_for_user(
             user_id=ctx.user_id,
             message_text=body,
+            selection=selection,
         )
     except Exception:
         logger.exception("Orchestrator failed for web user %s", ctx.user_id)
@@ -96,19 +114,17 @@ async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_s
     if not reply_text:
         reply_text = "I had trouble coming up with a response just now. Please try again."
 
-
-
-    # 3. Persist the agent reply.
+    # 3. Persist the agent reply (with a ui block when it carries choices).
     try:
         agent_row = repo.append_agent_message(
             ctx.user_id,
             reply_text,
             source="web",
             thread_id=user_row["thread_id"],
-            metadata={
-                "action": agent_result.get("action"),
-                "latency_ms": latency_ms,
-            },
+            metadata=_reply_metadata(
+                agent_result.get("action"), latency_ms,
+                agent_result.get("slot_request"),
+            ),
         )
     except Exception:
         logger.exception("Failed to persist agent reply for user %s", ctx.user_id)
@@ -152,6 +168,7 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
     async def driver() -> None:
         t = time.time()
         action = None
+        slot_request = None
         try:
             result = await asyncio.to_thread(
                 _get_orchestrator().process_request_for_user,
@@ -164,6 +181,7 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
                 "I had trouble coming up with a response just now. Please try again."
             )
             action = result.get("action")
+            slot_request = result.get("slot_request")
         except Exception:
             logger.exception("Streaming orchestrator failed for user %s", ctx.user_id)
             push("status", {"phase": "error", "text": "Something glitched. Please try again."})
@@ -171,11 +189,12 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
             action = "ERROR"
 
         latency_ms = int((time.time() - t) * 1000)
+        ui = ui_block_from_wire(slot_request)
         message_id = None
         try:
             agent_row = repo.append_agent_message(
                 ctx.user_id, text, source="web", thread_id=thread_id,
-                metadata={"action": action, "latency_ms": latency_ms},
+                metadata=_reply_metadata(action, latency_ms, slot_request),
             )
             message_id = agent_row["id"]
         except Exception:
@@ -184,15 +203,18 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
         # `text` is included on `done` as a fallback: not every turn streams
         # deltas (slot questions, off-topic redirects, and the error path return
         # text directly without an agent call), and the client also uses it to
-        # reconcile against the streamed deltas. `user_message_id` + `thread_id`
-        # let the client finalize its optimistic user bubble and de-duplicate the
-        # Realtime echo of both rows against the SSE stream.
+        # reconcile against the streamed deltas. `ui` carries any tappable choice
+        # block (Task 43) so the client renders chips on the just-streamed reply
+        # without waiting for a Realtime round-trip. `user_message_id` +
+        # `thread_id` let the client finalize its optimistic user bubble and
+        # de-duplicate the Realtime echo of both rows against the SSE stream.
         push("done", {
             "message_id": message_id,
             "user_message_id": user_row["id"],
             "thread_id": thread_id,
             "latency_ms": latency_ms,
             "text": text,
+            "ui": ui,
         })
 
     driver_task = asyncio.create_task(driver())

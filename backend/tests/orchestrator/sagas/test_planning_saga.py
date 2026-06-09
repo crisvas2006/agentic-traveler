@@ -14,6 +14,8 @@ from agentic_traveler.orchestrator.sagas.planning import (
     _SLOT_QUESTIONS,
     PlanningSaga,
     slot_selection_to_side_effect,
+    slot_values_to_side_effect,
+    ui_block_from_wire,
 )
 
 _EXTRACT = "agentic_traveler.orchestrator.sagas.planning.extract_trip_slots"
@@ -152,10 +154,15 @@ def test_generic_plan_on_complete_trip_confirms_direction(saga):
         )
     saga._planner.process_request.assert_not_called()
     saga._trip_agent.process_request.assert_not_called()
-    assert result.slot_request is None
     assert result.side_effects == []
     assert "new" in result.text.lower()           # offers starting fresh
     assert len(result.text) <= 320                 # conciseness invariant (§7.1)
+    # task 43: the confirmation renders as two quick-reply chips (continue/new).
+    # These don't write to the trip — each chip's value is a phrase the router
+    # re-classifies into a trip_directive (kept stateless).
+    assert result.slot_request is not None
+    assert result.slot_request.slot == "trip_direction"
+    assert [c.id for c in result.slot_request.choices] == ["continue", "new"]
     outcomes = [r["payload"].get("outcome") for r in events._metric_buffer
                 if r["event_name"] == "trip_focus_resolved"]
     assert "confirm_switch" in outcomes
@@ -407,6 +414,104 @@ def test_selection_skip_writes_sentinel():
     assert se.payload["preferences"]["pace"] == "skip"
 
 
+def test_selection_travelers_writes_into_travelers_section():
+    # "couple" → trip.travelers (NOT preferences), with a count preset.
+    se = slot_selection_to_side_effect({"id": "t1", "travelers": {}}, "travelers", "couple")
+    assert se is not None and se.kind == "trip_patch"
+    assert se.payload["travelers"] == {"count": 2, "composition": "couple"}
+    assert "preferences" not in se.payload
+
+
+def test_selection_travelers_friends_has_no_count_but_marks_filled():
+    se = slot_selection_to_side_effect({"id": "t1"}, "travelers", "friends")
+    assert se.payload["travelers"] == {"composition": "friends"}
+
+
+def test_travelers_slot_is_multiple_choice(saga):
+    # The trip has a destination + timeframe → next missing slot is travelers,
+    # which now renders as choices (Just me / partner / friends / family / skip).
+    t = _trip(
+        destinations=[{"name": "Iceland", "status": "considering"}],
+        discovery={"timeframe": {"text": "late Jan"}},
+    )
+    with patch(_EXTRACT, return_value={}):
+        result = saga.run("help me plan", {}, t, {}, "", _events())
+    assert result.slot_request.slot == "travelers"
+    assert result.slot_request.choices is not None
+    assert [c.id for c in result.slot_request.choices] == [
+        "solo", "couple", "friends", "family", "skip",
+    ]
+
+
+def test_ui_block_multi_choice_for_travelers():
+    wire = SlotRequest(
+        slot="travelers", prompt="Who's going?",
+        choices=[ChoiceOption("solo", "Just me", "solo")],
+    ).to_wire()
+    assert ui_block_from_wire(wire)["kind"] == "multi_choice"
+
+
+def test_travelers_slot_request_is_allow_multi(saga):
+    t = _trip(
+        destinations=[{"name": "Iceland", "status": "considering"}],
+        discovery={"timeframe": {"text": "late Jan"}},
+    )
+    with patch(_EXTRACT, return_value={}):
+        result = saga.run("plan", {}, t, {}, "", _events())
+    assert result.slot_request.slot == "travelers"
+    assert result.slot_request.allow_multi is True
+    # ...and the ui block advertises a Confirm button for the multi-select.
+    assert ui_block_from_wire(result.slot_request.to_wire())["submit_label"] == "Confirm"
+
+
+def test_pace_slot_request_is_single_select(saga):
+    t = _trip(
+        destinations=[{"name": "Iceland", "status": "considering"}],
+        discovery={"timeframe": {"text": "late Jan"}},
+        travelers={"count": 2},
+    )
+    with patch(_EXTRACT, return_value={}):
+        result = saga.run("plan", {}, t, {}, "", _events())
+    assert result.slot_request.slot == "pace"
+    assert result.slot_request.allow_multi is False
+
+
+# ---------------------------------------------------------------------------
+# task 43 — multi-select aggregation (slot_values_to_side_effect)
+# ---------------------------------------------------------------------------
+
+def test_multi_select_travelers_combines_compositions():
+    se = slot_values_to_side_effect(
+        {"id": "t1", "travelers": {}}, "travelers", ["couple", "family"],
+    )
+    assert se.payload["travelers"]["composition"] == "couple, family"
+    # An ambiguous combo leaves count open.
+    assert "count" not in se.payload["travelers"]
+
+
+def test_multi_select_single_value_keeps_count():
+    se = slot_values_to_side_effect({"id": "t1"}, "travelers", ["couple"])
+    assert se.payload["travelers"] == {"composition": "couple", "count": 2}
+
+
+def test_skip_is_exclusive_and_clears_others():
+    # "couple" + "skip" → skip wins, others cleared, no stray count.
+    se = slot_values_to_side_effect(
+        {"id": "t1", "travelers": {"count": 9}}, "travelers", ["couple", "skip"],
+    )
+    assert se.payload["travelers"]["composition"] == "skip"
+    assert "count" not in se.payload["travelers"]
+
+
+def test_multi_select_drops_illegal_values():
+    se = slot_values_to_side_effect({"id": "t1"}, "travelers", ["family", "bogus"])
+    assert se.payload["travelers"]["composition"] == "family"
+
+
+def test_multi_select_all_illegal_returns_none():
+    assert slot_values_to_side_effect({"id": "t1"}, "travelers", ["bogus"]) is None
+
+
 def test_selection_illegal_value_returns_none():
     assert slot_selection_to_side_effect({"id": "t1"}, "pace", "zoomy") is None
 
@@ -419,3 +524,86 @@ def test_selection_free_text_slot_returns_none():
 def test_selection_no_trip_returns_none():
     assert slot_selection_to_side_effect(None, "pace", "slow") is None
     assert slot_selection_to_side_effect({}, "pace", "slow") is None
+
+
+# ---------------------------------------------------------------------------
+# task 43 — ui_block_from_wire (channel-facing metadata.ui shaping)
+# ---------------------------------------------------------------------------
+
+def test_ui_block_multi_choice_for_preference_slot():
+    wire = SlotRequest(
+        slot="pace", prompt="What pace?",
+        choices=[ChoiceOption("slow", "Slow", "slow"), ChoiceOption("skip", "Skip", "skip")],
+    ).to_wire()
+    block = ui_block_from_wire(wire)
+    assert block["kind"] == "multi_choice"
+    assert block["slot"] == "pace"
+    assert block["allow_multi"] is False
+    # value is NOT leaked for deterministic slots — client echoes the id back.
+    assert block["options"] == [
+        {"id": "slow", "label": "Slow"},
+        {"id": "skip", "label": "Skip"},
+    ]
+    assert "submit_label" not in block
+
+
+def test_ui_block_quick_reply_for_direction_confirm():
+    wire = SlotRequest(
+        slot="trip_direction", prompt="Keep or new?",
+        choices=[
+            ChoiceOption("continue", "Keep refining", "Let's keep refining this trip."),
+            ChoiceOption("new", "Start new", "Let's start a brand-new trip."),
+        ],
+    ).to_wire()
+    block = ui_block_from_wire(wire)
+    assert block["kind"] == "quick_reply"
+    # quick replies carry the message to send back as plain text.
+    assert block["options"][0] == {
+        "id": "continue", "label": "Keep refining",
+        "send": "Let's keep refining this trip.",
+    }
+
+
+def test_ui_block_none_for_free_text_or_missing():
+    assert ui_block_from_wire(None) is None
+    assert ui_block_from_wire(
+        SlotRequest(slot="destination", prompt="Where?").to_wire()
+    ) is None
+
+
+def test_ui_block_adds_submit_label_when_multi():
+    wire = SlotRequest(
+        slot="pace", prompt="Pick", allow_multi=True,
+        choices=[ChoiceOption("slow", "Slow", "slow")],
+    ).to_wire()
+    assert ui_block_from_wire(wire)["submit_label"] == "Confirm"
+
+
+# ---------------------------------------------------------------------------
+# task 43 — run_after_selection (deterministic continuation, no extraction)
+# ---------------------------------------------------------------------------
+
+def test_run_after_selection_asks_next_missing_slot(saga):
+    # pace just written → next prompt is structure; extraction never runs.
+    t = _trip(
+        destinations=[{"name": "Iceland", "status": "considering"}],
+        discovery={"timeframe": {"text": "late Jan"}},
+        travelers={"count": 2},
+        preferences={"pace": "slow"},
+    )
+    with patch(_EXTRACT) as extract:
+        result = saga.run_after_selection("slow", {}, t, {}, "", _events())
+    extract.assert_not_called()
+    assert result.slot_request is not None
+    assert result.slot_request.slot == "structure"
+
+
+def test_run_after_selection_complete_trip_builds_plan(saga):
+    # last slot tapped → trip complete → planner runs (no extraction).
+    with patch(_EXTRACT) as extract:
+        result = saga.run_after_selection(
+            "$$", {}, _trip_fully_slotted(), {}, "", _events(),
+        )
+    extract.assert_not_called()
+    saga._planner.process_request.assert_called_once()
+    assert result.text == "Here is your day-by-day plan."
