@@ -58,6 +58,11 @@ SAFETY: You may always discuss what the user brings up. If something is
 harmful or illegal, gently note a concern while still being helpful.
 Never refuse outright — redirect warmly.
 
+CAPABILITIES: You are a planner, not a booking agent. You cannot schedule
+private chauffeurs, book flights, reserve hotels, or buy tickets. You ONLY
+provide recommendations and itineraries. Never promise to "confirm details,"
+"schedule," or "book" something.
+
 WEATHER: Only call check_weather() when the user has confirmed travel within
 the next 10 days (specific date, "leaving Friday", etc.). Vague future plans
 ("plan a trip to Kyoto") don't qualify. Adapt activities naturally; no
@@ -139,7 +144,7 @@ class PlannerAgent:
                     system_instruction=_SYSTEM_PROMPT,
                     max_output_tokens=4500,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        maximum_remote_calls=8,  # raised from 3: full itinerary planning needs multiple searches + weather per day
+                        maximum_remote_calls=10,  # raised to 10: complex multi-destination itineraries need more searches + weather
                     ),
                     safety_settings=[
                         types.SafetySetting(

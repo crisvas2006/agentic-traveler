@@ -423,15 +423,47 @@ class TestTripRepositoryIntegration:
         python -m pytest backend/tests -m integration -v
     """
 
-    def test_full_round_trip(self):
-        """
-        Create a trip, upsert destination + booking + day + two day blocks,
-        read back via get_trip, assert round-trip, call derive_saga_state.
+    @pytest.fixture
+    def integration_user_id(self):
+        """Provision a throwaway ``public.users`` row for the test and delete it
+        afterwards (the delete cascades to any trips created during the test).
+
+        No hardcoded user is required. If ``_TEST_USER_ID`` is set in the env it
+        is used as-is (create/cleanup skipped) for backwards compatibility;
+        otherwise the row is self-provisioned. ``public.users.id`` is a plain
+        ``gen_random_uuid()`` PK with no FK to ``auth.users`` (Telegram users
+        exist without auth accounts), so a standalone insert is valid.
         """
         import os
         if not os.getenv("_INTEGRATION_TESTS"):
             pytest.skip("Integration tests require _INTEGRATION_TESTS=1")
 
+        existing = os.getenv("_TEST_USER_ID")
+        if existing:
+            yield existing
+            return
+
+        from agentic_traveler.tools.db_client import get_db
+        db = get_db()
+        resp = db.table("users").insert({
+            "name": "Integration Test User — DELETE ME",
+            "source": "test",
+        }).execute()
+        user_id = resp.data[0]["id"]
+        try:
+            yield user_id
+        finally:
+            # Cascades to trips/children via FK ON DELETE CASCADE.
+            try:
+                db.table("users").delete().eq("id", user_id).execute()
+            except Exception:
+                pass
+
+    def test_full_round_trip(self, integration_user_id):
+        """
+        Create a trip, upsert destination + booking + day + two day blocks,
+        read back via get_trip, assert round-trip, call derive_saga_state.
+        """
         # Import real client (env must have SUPABASE_URL + SUPABASE_SERVICE_KEY)
         from agentic_traveler.tools.db_client import get_db
         from agentic_traveler.tools.trip_repo import TripRepository
@@ -439,8 +471,7 @@ class TestTripRepositoryIntegration:
         repo = TripRepository()
         db = get_db()
 
-        # 1. Create a test user (use a real existing user_id from your project)
-        user_id = os.environ["_TEST_USER_ID"]
+        user_id = integration_user_id
 
         # 2. Create trip
         trip = repo.upsert_trip(user_id, {

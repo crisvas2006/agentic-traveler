@@ -1,4 +1,4 @@
-# Task 36: Use auth.uid() directly as users.id
+# Task 27: Use auth.uid() directly as users.id
 
 **Status: 🔲 COMPLETED**
 

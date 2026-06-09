@@ -1,7 +1,7 @@
 """EventEmitter — single sink interface, three phases (status, delta, metric).
 
 Sagas and tools call `events.emit(phase, payload)`. The orchestrator routes
-each phase to its concrete sink. Task 48 wires `status` and `delta` to SSE
+each phase to its concrete sink. Task 37 wires `status` and `delta` to SSE
 and Telegram; this task wires `metric` to analytics_events.
 """
 

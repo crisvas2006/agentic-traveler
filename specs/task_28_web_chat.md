@@ -16,7 +16,7 @@
 - **Background:**
   - The Python backend already has a working orchestrator (`backend/src/agentic_traveler/orchestrator/agent.py`) that returns `{"text": str, "action": str}` for any user message. Today only `interfaces/routers/telegram.py` exercises it.
   - Conversation context for agents lives in `public.conversations` (one row per user, JSONB `recent_messages` + summary, compacted by `ConversationManager`). This is an internal context window — it intentionally throws away the bulk of history. **It stays as-is. It is NOT the source of truth for the user-facing history.**
-  - The web dashboard already has authenticated routes (`/dashboard`), a Supabase session, a `useUserProfile` hook, and `auth.uid()` maps to `public.users` (via `users.auth_id`, soon to be merged per Task 36 — this task must work with the **current** layout: `users.auth_id` indirection).
+  - The web dashboard already has authenticated routes (`/dashboard`), a Supabase session, a `useUserProfile` hook, and `auth.uid()` maps to `public.users` (via `users.auth_id`, soon to be merged per Task 27 — this task must work with the **current** layout: `users.auth_id` indirection).
   - Telegram users with no Supabase Auth account still send messages via Telegram; those messages must appear in the web `messages` table under the same `public.users.id` so that when a Telegram user later signs up on the web with a linked account, they see their Telegram history seamlessly.
 - **Primary Owner:** Cristian
 
@@ -230,7 +230,7 @@ GRANT SELECT ON public.chat_threads TO authenticated;
 GRANT SELECT ON public.messages     TO authenticated;
 ```
 
-**Note on Task 36:** As of 2026-05-28 Task 36 lands first (`migrations/000_merge_auth_id.sql`). The chat policies use direct equality (`owner_user_id = auth.uid()`) — see `migrations/001_chat_tables.sql` for the actual SQL.
+**Note on Task 27:** As of 2026-05-28 Task 27 lands first (`migrations/000_merge_auth_id.sql`). The chat policies use direct equality (`owner_user_id = auth.uid()`) — see `migrations/001_chat_tables.sql` for the actual SQL.
 
 ### 5.2 Backend — `tools/chat_repo.py`
 
@@ -472,7 +472,7 @@ Replace the mock-driven body. Keep the existing visual styling (gradient bubbles
 ## 7. Risk Management
 
 - **Risk (removed):** ~~Web user sends a message but `users` row missing.~~ After
-  Task 36, the `on_auth_user_created` trigger guarantees `users`,
+  Task 27, the `on_auth_user_created` trigger guarantees `users`,
   `user_profiles`, and `credits` rows exist for every authenticated user.
   No "profile not provisioned" path remains.
 
@@ -534,7 +534,7 @@ Captured in `specs/task_41_chat_future_extensions.md`:
   - 2026-05-28 — Initial draft.
   - 2026-05-28 — Added §5.10 (library choices), composer details (emoji picker, autosize textarea, Markdown rendering, typing indicator), text-only scope clarification.
   - 2026-05-28 — Implementation pass:
-    - Task 36 (`auth_id` merge) landed first; RLS simplified to direct equality.
+    - Task 27 (`auth_id` merge) landed first; RLS simplified to direct equality.
     - Risk #1 removed (no "profile not provisioned" path anymore).
     - Risk #3 hardened with `_retry` exponential-backoff in `chat_repo`.
     - Swapped `@emoji-mart/react` (no React 19 peer-dep) for `emoji-picker-react`.

@@ -30,12 +30,29 @@ def build_profile_summary(
     tone_pref = profile_data.get("tone_preference")
     add_info = profile_data.get("additional_info")
     scores = profile_data.get("personality_dimensions_scores", {})
+    hard_overrides = profile_data.get("hard_overrides") or []
+    reply_length_pref = profile_data.get("reply_length_preference")
 
     parts = [f"Name: {name}"]
 
     # 1. Profile Summary
     if include_summary and summary:
         parts.append(f"Profile Summary: {summary}")
+
+    # 1b. Hard overrides — slots the saga layer must NEVER ask about (Task 36).
+    override_labels = []
+    for o in hard_overrides:
+        if isinstance(o, dict):
+            slot = (o.get("slot") or "").removeprefix("ask.")
+            value = o.get("value")
+            if slot:
+                override_labels.append(f"{slot}={value}" if value is not None else slot)
+    if override_labels:
+        parts.append(f"Never ask about (fixed): {', '.join(override_labels)}")
+
+    # 1c. Reply length preference.
+    if reply_length_pref:
+        parts.append(f"Reply length preference: {reply_length_pref}")
 
     # 2. Tags
     if tags:
@@ -72,7 +89,8 @@ def build_profile_summary(
     # 6. Gather all other key-value preferences stored in profile_data
     known_keys = {
         "summary", "tags", "tone_preference", "additional_info",
-        "personality_dimensions_scores", "short_summary"
+        "personality_dimensions_scores", "short_summary",
+        "hard_overrides", "reply_length_preference",
     }
     extra_prefs = {
         k: v for k, v in profile_data.items()

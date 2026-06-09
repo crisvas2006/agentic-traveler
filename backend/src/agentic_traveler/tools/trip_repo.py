@@ -7,7 +7,7 @@ Architecture notes (Task 34):
   full table access, so the app is the last line of defense besides RLS on
   the authenticated client.
 - All mutating child-table methods set updated_at = now() on the parent trips
-  row until Task 48 wires the auto-trigger that does this automatically.
+  row until Task 37 wires the auto-trigger that does this automatically.
 - get_trip() loads the full trip shape (parent + all 5 child tables) in 6
   separate queries; total latency is well under 50 ms for typical trip sizes.
 - JSONB columns accept any dict; Python layer logs at DEBUG which patch keys
@@ -439,6 +439,43 @@ class TripRepository:
             raise
 
     # ------------------------------------------------------------------
+    # Side-effect dispatcher (Task 36)
+    # ------------------------------------------------------------------
+
+    def apply_side_effect(self, user_id: str, side_effect: Any) -> None:
+        """Apply a saga ``SideEffect`` by routing ``kind`` to the matching typed
+        method. Duck-typed (``.kind`` + ``.payload``) to avoid importing the
+        orchestrator's saga types here.
+
+        Child kinds carry ``trip_id`` in their payload; ``trip_patch`` carries
+        the parent ``id`` (and JSONB sections to merge-replace).
+        """
+        kind = getattr(side_effect, "kind", None)
+        payload = dict(getattr(side_effect, "payload", {}) or {})
+
+        if kind == "trip_patch":
+            self.upsert_trip(user_id, payload)
+            return
+
+        trip_id = payload.pop("trip_id", None)
+        if not trip_id:
+            logger.warning("apply_side_effect: %s missing trip_id; skipping.", kind)
+            return
+
+        child_methods = {
+            "destination_upsert": self.upsert_destination,
+            "booking_upsert": self.upsert_booking,
+            "day_upsert": self.upsert_day,
+            "day_block_upsert": self.upsert_day_block,
+            "checklist_upsert": self.upsert_checklist_item,
+        }
+        method = child_methods.get(kind)
+        if method is None:
+            logger.warning("apply_side_effect: unknown kind %r; skipping.", kind)
+            return
+        method(trip_id, user_id, payload)
+
+    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
@@ -497,7 +534,7 @@ class TripRepository:
     def _touch_parent(self, trip_id: str) -> None:
         """
         Bump trips.updated_at = now() after a child-table write.
-        Task 48 will replace this with a Postgres trigger; until then
+        Task 37 will replace this with a Postgres trigger; until then
         child-table mutations must call this manually.
         """
         try:

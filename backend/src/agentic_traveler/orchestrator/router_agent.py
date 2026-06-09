@@ -90,6 +90,14 @@ STEP 4 — Fill "response" (string) ONLY in these two cases, else null:
       in the context below (e.g. "You currently have 200 credits left.").
   For every other message, set "response" to null.
 
+STEP 5 — Fill "entities" with travel facts mentioned in the LATEST USER MESSAGE,
+for the planning layer. Extract verbatim; never invent. Use null / empty array
+when absent.
+  entities.destinations = array of place names the user mentions, e.g. ["Iceland"].
+  entities.season = "winter"|"spring"|"summer"|"autumn"|null.
+  entities.month = a month name if stated, else null.
+  entities.named_trip = the name of an existing trip the user refers to, else null.
+
 A single message can legitimately set several fields at once (e.g. a new preference AND
 positive feedback AND a TRIP intent). Each action field is filled at most once.
 
@@ -129,6 +137,19 @@ def _response_schema() -> types.Schema:
             "feedback_category": types.Schema(type=types.Type.STRING, nullable=True),
             "feedback_text": types.Schema(type=types.Type.STRING, nullable=True),
             "response": types.Schema(type=types.Type.STRING, nullable=True),
+            "entities": types.Schema(
+                type=types.Type.OBJECT,
+                nullable=True,
+                properties={
+                    "destinations": types.Schema(
+                        type=types.Type.ARRAY,
+                        items=types.Schema(type=types.Type.STRING),
+                    ),
+                    "season": types.Schema(type=types.Type.STRING, nullable=True),
+                    "month": types.Schema(type=types.Type.STRING, nullable=True),
+                    "named_trip": types.Schema(type=types.Type.STRING, nullable=True),
+                },
+            ),
         },
     )
 
@@ -141,6 +162,25 @@ def _clean(value: Any) -> Optional[str]:
     if not text or text.lower() in {"null", "none"}:
         return None
     return text
+
+
+def _clean_entities(value: Any) -> Dict[str, Any]:
+    """Normalise the optional entities object into a plain dict, dropping nulls
+    and empties. Always returns a dict (possibly empty)."""
+    if not isinstance(value, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    destinations = value.get("destinations") or []
+    destinations = [
+        d.strip() for d in destinations if isinstance(d, str) and d.strip()
+    ]
+    if destinations:
+        out["destinations"] = destinations
+    for key in ("season", "month", "named_trip"):
+        cleaned = _clean(value.get(key))
+        if cleaned:
+            out[key] = cleaned
+    return out
 
 
 class RouterAgent:
@@ -265,6 +305,7 @@ LATEST USER MESSAGE:
                 "request_summary": parsed["request_summary"],
                 "preference_raw": new_preference,
                 "response": parsed["response"],
+                "entities": parsed["entities"],
                 "raw_response": raw,
                 "latency_ms": latency_ms,
             }
@@ -281,6 +322,7 @@ LATEST USER MESSAGE:
                 "request_summary": message,
                 "preference_raw": None,
                 "response": None,
+                "entities": {},
                 "raw_response": None,
                 "latency_ms": (time.time() - t) * 1000,
             }
@@ -302,6 +344,7 @@ LATEST USER MESSAGE:
             "feedback_category": None,
             "feedback_text": None,
             "response": None,
+            "entities": {},
         }
 
         if not text:
@@ -333,4 +376,5 @@ LATEST USER MESSAGE:
             "feedback_category": category,
             "feedback_text": _clean(data.get("feedback_text")),
             "response": _clean(data.get("response")),
+            "entities": _clean_entities(data.get("entities")),
         }

@@ -5,15 +5,18 @@ Architecture (v2 — Thin Router + Specialized Agents):
     1. Fetch user profile + credit gate.
     2. Check off-topic restriction.
     3. Build conversation context.
-    4. RouterAgent classifies intent (CHAT | TRIP | PLAN | OFF_TOPIC)
-       and handles lightweight tools (preferences, feedback, credits).
-    5. Dispatch to the appropriate specialized agent:
-       - CHAT      → ChatAgent   (gemini-3.1-flash-lite)
-       - TRIP      → TripAgent   (gemini-3.5-flash)
-       - PLAN      → PlannerAgent (gemini-3.5-flash)
-       - OFF_TOPIC → router's natural redirection; off_topic_guard
-                     increments counter silently.
-    6. Log token usage for router + agent separately.
+    4. RouterAgent classifies intent (CHAT | TRIP | PLAN | OFF_TOPIC),
+       extracts trip entities, and handles lightweight tools (preferences,
+       feedback, credits).
+    5. Resolve the active trip, then the SagaDispatcher (Task 36 — deterministic,
+       no LLM) selects the owner saga for the turn and runs it:
+       - PLAN / TRIP(with trip) → PlanningSaga (slot-fill → PlannerAgent/TripAgent)
+       - TRIP(no trip)          → DiscoverySaga (→ TripAgent)
+       - CHAT                   → ChatSaga (→ ChatAgent)
+       - OFF_TOPIC              → handled inline; off_topic_guard increments
+                                  the counter silently (OffTopicSaga mirrors it).
+       Saga side-effects are persisted via TripRepository.
+    6. Log token usage for router + delegated agent separately.
     7. Deduct credits asynchronously.
     8. Save conversation history.
 
@@ -37,11 +40,11 @@ from agentic_traveler.orchestrator.client_factory import get_client
 from agentic_traveler.core.observability import traceable, attach_run_metadata, hash_user_id
 from agentic_traveler.orchestrator.conversation_manager import ConversationManager
 from agentic_traveler.orchestrator.router_agent import RouterAgent
-from agentic_traveler.orchestrator.chat_agent import ChatAgent
-from agentic_traveler.orchestrator.trip_agent import TripAgent
-from agentic_traveler.orchestrator.planner_agent import PlannerAgent
 from agentic_traveler.orchestrator.event_emitter import EventEmitter
+from agentic_traveler.orchestrator.sagas import SagaDispatcher, SagaState
+from agentic_traveler.orchestrator.sagas.trip_resolver import resolve_active_trip
 from agentic_traveler.tools.user_repo import UserRepository
+from agentic_traveler.tools.trip_repo import TripRepository
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +76,10 @@ class OrchestratorAgent:
 
         # Specialized agents (stateless, shared instances)
         self._router_agent = RouterAgent(client=self._client)
-        self._chat_agent = ChatAgent(client=self._client)
-        self._trip_agent = TripAgent(client=self._client)
-        self._planner_agent = PlannerAgent(client=self._client)
+        # The saga dispatcher owns the Chat/Trip/Planner content engines and
+        # selects which saga handles each turn (Task 36 — replaces _dispatch).
+        self._dispatcher = SagaDispatcher(client=self._client)
+        self._trip_repo = TripRepository()
 
     @traceable(name="orchestrator.process_request")
     def process_request(
@@ -241,6 +245,7 @@ class OrchestratorAgent:
             _save_and_finish(
                 self, user_doc, user_id, message_text, response_text,
                 telegram_user_id, token_records, t_total, events, intent,
+                owner_saga="OffTopicSaga",
             )
             return {"text": response_text, "action": "RESPONSE"}
 
@@ -253,6 +258,7 @@ class OrchestratorAgent:
             _save_and_finish(
                 self, user_doc, user_id, message_text, router_response,
                 telegram_user_id, token_records, t_total, events, intent,
+                owner_saga="ChatSaga",
             )
             return {"text": router_response, "action": "RESPONSE"}
 
@@ -260,10 +266,18 @@ class OrchestratorAgent:
         if user_id:
             off_topic_guard.reset(user_id)
 
-        # ── 5c. Dispatch to specialized agent ───────────────────────────────
-        agent_result = _dispatch(
-            self, intent, user_doc, message_text, conv_context,
-            current_time, preference_raw, status_callback, events,
+        # ── 5c. Resolve the active trip + dispatch via the saga dispatcher ──
+        agent_result = self._dispatch_sagas(
+            intent=intent,
+            user_doc=user_doc,
+            user_id=user_id,
+            message_text=message_text,
+            conv_context=conv_context,
+            current_time=current_time,
+            preference_raw=preference_raw,
+            router_response=router_response,
+            entities=router_result.get("entities", {}) or {},
+            events=events,
         )
 
         response_text = agent_result.get("text", "")
@@ -332,6 +346,7 @@ class OrchestratorAgent:
             self, user_doc, user_id, message_text, response_text,
             telegram_user_id, token_records if not is_error_response else [],
             t_total, events, intent,
+            owner_saga=agent_result.get("owner_saga"),
         )
 
         if is_error_response:
@@ -342,50 +357,110 @@ class OrchestratorAgent:
         logger.info("\n=== FINAL OUTPUT ===\n%s\n===================", response_text)
         return {"text": response_text, "action": "RESPONSE"}
 
+    # ── saga dispatch ───────────────────────────────────────────────────────
+
+    def _dispatch_sagas(
+        self,
+        *,
+        intent: str,
+        user_doc: Dict[str, Any],
+        user_id: Optional[str],
+        message_text: str,
+        conv_context: str,
+        current_time: str,
+        preference_raw: Optional[str],
+        router_response: Optional[str],
+        entities: Dict[str, Any],
+        events: EventEmitter,
+    ) -> Dict[str, Any]:
+        """Resolve the active trip, select the owner saga (+ listeners), run
+        them, apply their side effects, and return an agent_result dict shaped
+        like the old `_dispatch` so downstream token logging is unchanged."""
+        # 1. Resolve which trip this turn is about, from cheap summaries.
+        trip: Optional[Dict[str, Any]] = None
+        if user_id:
+            try:
+                summaries = [
+                    s.model_dump() for s in self._trip_repo.list_trip_summaries(user_id)
+                ]
+            except Exception:
+                logger.exception("Failed to list trip summaries for user %s", user_id)
+                summaries = []
+            chosen = resolve_active_trip(summaries, message_text, entities)
+            if chosen:
+                try:
+                    trip_model = self._trip_repo.get_trip(chosen["id"])
+                    trip = trip_model.model_dump() if trip_model else None
+                except Exception:
+                    logger.exception("Failed to hydrate trip %s", chosen.get("id"))
+
+        # 2. Per-turn state (NOT persisted — task 36 §4.1 #2).
+        state: SagaState = {
+            "intent": intent,
+            "entities": entities,
+            "current_time": current_time,
+            "preference_raw": preference_raw,
+            "router_response": router_response,
+            "trip_id": trip.get("id") if trip else None,
+            "message_text": message_text,
+        }
+
+        # 3. Select owner + listeners (deterministic, no LLM).
+        owner, listeners = self._dispatcher.select(intent, entities, trip, state)
+
+        # 4. Zero-trip path: create a DREAMING trip for planning/discovery owners.
+        if trip is None and user_id and getattr(owner, "name", "") in (
+            "PlanningSaga", "DiscoverySaga"
+        ):
+            try:
+                trip = self._trip_repo.upsert_trip(user_id, {}).model_dump()
+                state["trip_id"] = trip.get("id")
+            except Exception:
+                logger.exception("Failed to create initial trip for user %s", user_id)
+
+        # 5. Bind trip_id so every metric row this turn carries it.
+        events.trip_id = state.get("trip_id")
+
+        # 6. Listeners first (idempotent side effects), then the owner.
+        for saga in listeners:
+            try:
+                listener_result = saga.run(
+                    message_text, user_doc, trip, state, conv_context, events
+                )
+                self._apply_side_effects(user_id, listener_result.side_effects)
+            except Exception:
+                logger.exception(
+                    "Listener saga %s failed.", getattr(saga, "name", "?")
+                )
+
+        result = owner.run(message_text, user_doc, trip, state, conv_context, events)
+        self._apply_side_effects(user_id, result.side_effects)
+
+        return {
+            "text": result.text or "",
+            "action": "RESPONSE" if result.text else "ERROR",
+            "_raw_response": result._raw_response,
+            "_latency_ms": result._latency_ms,
+            "_search_responses": result._search_responses,
+            "owner_saga": getattr(owner, "name", ""),
+        }
+
+    def _apply_side_effects(self, user_id: Optional[str], side_effects: list) -> None:
+        """Persist a saga's side effects via the TripRepository. Best-effort:
+        one failed write never aborts the turn."""
+        if not user_id:
+            return
+        for se in side_effects:
+            try:
+                self._trip_repo.apply_side_effect(user_id, se)
+            except Exception:
+                logger.exception(
+                    "apply_side_effect failed for kind=%s",
+                    getattr(se, "kind", "?"),
+                )
+
 
 # ── private helpers ──────────────────────────────────────────────────────────
-
-def _dispatch(
-    coordinator: OrchestratorAgent,
-    intent: str,
-    user_doc: Dict[str, Any],
-    message: str,
-    conv_context: str,
-    current_time: str,
-    preference_raw: Optional[str],
-    status_callback: Optional[Callable[[str], None]],
-    events: EventEmitter,
-) -> Dict[str, Any]:
-    """Dispatch to the correct specialized agent based on intent."""
-    if intent == "TRIP":
-        if status_callback:
-            status_callback("I'm scouting the globe for the perfect spots for you! Just a moment... 🌍")
-        return coordinator._trip_agent.process_request(
-            user_doc=user_doc,
-            message=message,
-            conversation_context=conv_context,
-            current_time=current_time,
-            preference_raw=preference_raw,
-        )
-    elif intent == "PLAN":
-        if status_callback:
-            status_callback("I'm putting together a detailed day-by-day plan for you! Give me a few seconds... 🗺️")
-        return coordinator._planner_agent.process_request(
-            user_doc=user_doc,
-            message=message,
-            conversation_context=conv_context,
-            current_time=current_time,
-            preference_raw=preference_raw,
-        )
-    else:  # CHAT (default)
-        return coordinator._chat_agent.process_request(
-            user_doc=user_doc,
-            message=message,
-            conversation_context=conv_context,
-            current_time=current_time,
-            preference_raw=preference_raw,
-        )
-
 
 def _save_and_finish(
     coordinator: OrchestratorAgent,
@@ -398,6 +473,7 @@ def _save_and_finish(
     t_total: float,
     events: EventEmitter,
     intent: str,
+    owner_saga: Optional[str] = None,
 ) -> None:
     """Save history, record metrics, and deduct credits."""
     if user_id:
@@ -428,6 +504,7 @@ def _save_and_finish(
     events.emit("metric", {
         "name": "turn_completed",
         "intent": intent,
+        "owner_saga": owner_saga,
         "latency_ms": latency_ms,
         "credits": total_cost_credits,
         "tokens": sum(r.get("total_tokens", 0) for r in token_records),

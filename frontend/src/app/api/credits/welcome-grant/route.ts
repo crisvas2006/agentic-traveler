@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     }
 
     // ── 2. Service-role client (writes bypass RLS) ────────────────────────
-    // After Task 36, user.id IS the public.users.id — no separate lookup needed.
+    // After Task 27, user.id IS the public.users.id — no separate lookup needed.
     const service = createServiceClient();
 
     // ── 3. Read grant amount (server-side env only — no NEXT_PUBLIC_) ──────

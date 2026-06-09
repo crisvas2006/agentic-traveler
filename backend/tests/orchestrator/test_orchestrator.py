@@ -1,39 +1,67 @@
 import pytest
 from unittest.mock import MagicMock, patch
+
 from agentic_traveler.orchestrator.agent import OrchestratorAgent
+from agentic_traveler.orchestrator.sagas.base import SagaResult
 from agentic_traveler.tools.user_repo import UserRepository
+
 
 @pytest.fixture
 def mock_user_repo():
     return MagicMock(spec=UserRepository)
 
+
 @pytest.fixture
 def patched_deps():
+    """Patch the orchestrator's collaborators. After Task 36 the Chat/Trip/
+    Planner agents live inside the SagaDispatcher, so we patch the dispatcher
+    and the TripRepository here instead of the individual agents."""
     with patch("agentic_traveler.orchestrator.agent.RouterAgent") as mock_router, \
-         patch("agentic_traveler.orchestrator.agent.ChatAgent") as mock_chat, \
-         patch("agentic_traveler.orchestrator.agent.TripAgent") as mock_trip, \
-         patch("agentic_traveler.orchestrator.agent.PlannerAgent") as mock_planner, \
+         patch("agentic_traveler.orchestrator.agent.SagaDispatcher") as mock_dispatcher, \
+         patch("agentic_traveler.orchestrator.agent.TripRepository") as mock_trip_repo, \
          patch("agentic_traveler.orchestrator.agent.ConversationManager") as mock_conv, \
          patch("agentic_traveler.orchestrator.agent.credit_manager") as mock_credits, \
          patch("agentic_traveler.orchestrator.agent.off_topic_guard") as mock_guard, \
          patch("agentic_traveler.orchestrator.agent.get_client") as mock_get_client:
-        
+
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
         mock_credits.has_credits.return_value = True
         mock_guard.is_restricted.return_value = None
         mock_conv.return_value.build_context_block.return_value = "Mock history"
-        
+        # No trips by default → resolver returns None.
+        mock_trip_repo.return_value.list_trip_summaries.return_value = []
+        mock_trip_repo.return_value.upsert_trip.return_value.model_dump.return_value = {
+            "id": "trip-1"
+        }
+
         yield {
             "router": mock_router,
-            "chat": mock_chat,
-            "trip": mock_trip,
-            "planner": mock_planner,
+            "dispatcher": mock_dispatcher,
+            "trip_repo": mock_trip_repo,
             "conv": mock_conv,
             "credits": mock_credits,
             "guard": mock_guard,
             "client": mock_client,
         }
+
+
+def _route(deps, **fields):
+    base = {
+        "intent": "CHAT", "preference_raw": None, "response": None,
+        "entities": {}, "raw_response": MagicMock(), "latency_ms": 100,
+    }
+    base.update(fields)
+    deps["router"].return_value.classify.return_value = base
+
+
+def _owner(deps, name, text):
+    owner = MagicMock()
+    owner.name = name
+    owner.run.return_value = SagaResult(text=text)
+    deps["dispatcher"].return_value.select.return_value = (owner, [])
+    return owner
+
 
 def test_new_user_onboarding(mock_user_repo, patched_deps):
     """Unknown Telegram ID → onboarding link."""
@@ -43,88 +71,56 @@ def test_new_user_onboarding(mock_user_repo, patched_deps):
     assert response["action"] == "ONBOARDING_REQUIRED"
     assert "tally.so" in response["text"]
 
+
 def test_credit_exhausted(mock_user_repo, patched_deps):
-    """If user has no credits, return credits exhausted message."""
     mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
     patched_deps["credits"].has_credits.return_value = False
-    
     agent = OrchestratorAgent(user_repo=mock_user_repo)
     response = agent.process_request("123", "Hello")
     assert response["action"] == "NO_CREDITS"
     assert response["text"] == patched_deps["credits"].CREDITS_EXHAUSTED_MSG
 
+
 def test_user_restricted(mock_user_repo, patched_deps):
-    """If user is restricted, return off-topic restriction message."""
     mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
     patched_deps["guard"].is_restricted.return_value = "You are restricted"
-    
     agent = OrchestratorAgent(user_repo=mock_user_repo)
     response = agent.process_request("123", "Hello")
     assert response["action"] == "RESTRICTED"
     assert "restricted" in response["text"].lower()
 
+
 def test_off_topic_intent(mock_user_repo, patched_deps):
-    """If router returns OFF_TOPIC, record off-topic and return redirect text."""
+    """OFF_TOPIC is handled inline (before saga dispatch) and records the counter."""
     mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
-    patched_deps["router"].return_value.classify.return_value = {
-        "intent": "OFF_TOPIC",
-        "response": "Please ask travel questions",
-        "raw_response": MagicMock(),
-        "latency_ms": 100
-    }
+    _route(patched_deps, intent="OFF_TOPIC", response="Please ask travel questions")
     patched_deps["guard"].record_off_topic.return_value = {"restricted": False}
-    
     agent = OrchestratorAgent(user_repo=mock_user_repo)
     response = agent.process_request("123", "Help with math")
-    
     assert response["action"] == "RESPONSE"
     assert "travel" in response["text"]
     patched_deps["guard"].record_off_topic.assert_called_once()
 
-def test_dispatch_to_trip_agent(mock_user_repo, patched_deps):
-    """TRIP intent should dispatch to TripAgent."""
+
+def test_trip_intent_dispatches_via_saga(mock_user_repo, patched_deps):
+    """TRIP intent → saga dispatcher's owner produces the reply."""
     mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
-    patched_deps["router"].return_value.classify.return_value = {
-        "intent": "TRIP",
-        "preference_raw": None,
-        "raw_response": MagicMock(),
-        "latency_ms": 100
-    }
-    mock_trip_instance = patched_deps["trip"].return_value
-    mock_trip_instance.process_request.return_value = {
-        "text": "Check out Paris!",
-        "action": "TRIP_RESULTS",
-        "_raw_response": MagicMock(),
-        "_latency_ms": 200
-    }
-    
+    _route(patched_deps, intent="TRIP")
+    owner = _owner(patched_deps, "DiscoverySaga", "Check out Paris!")
     agent = OrchestratorAgent(user_repo=mock_user_repo)
     response = agent.process_request("123", "Where should I go?")
-    
     assert response["action"] == "RESPONSE"
     assert "Paris" in response["text"]
-    mock_trip_instance.process_request.assert_called_once()
+    owner.run.assert_called_once()
 
-def test_dispatch_to_planner_agent(mock_user_repo, patched_deps):
-    """PLAN intent should dispatch to PlannerAgent."""
+
+def test_plan_intent_dispatches_via_saga(mock_user_repo, patched_deps):
+    """PLAN intent → saga dispatcher's owner produces the reply."""
     mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
-    patched_deps["router"].return_value.classify.return_value = {
-        "intent": "PLAN",
-        "preference_raw": None,
-        "raw_response": MagicMock(),
-        "latency_ms": 100
-    }
-    mock_planner_instance = patched_deps["planner"].return_value
-    mock_planner_instance.process_request.return_value = {
-        "text": "Day 1: Rome",
-        "action": "PLANNER_RESULTS",
-        "_raw_response": MagicMock(),
-        "_latency_ms": 200
-    }
-    
+    _route(patched_deps, intent="PLAN")
+    owner = _owner(patched_deps, "PlanningSaga", "Day 1: Rome")
     agent = OrchestratorAgent(user_repo=mock_user_repo)
     response = agent.process_request("123", "Plan me 3 days in Rome")
-    
     assert response["action"] == "RESPONSE"
     assert "Rome" in response["text"]
-    mock_planner_instance.process_request.assert_called_once()
+    owner.run.assert_called_once()

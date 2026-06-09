@@ -1300,7 +1300,7 @@ export function AccountSettings({ botUsername }: { botUsername: string }) {
   // Name save — UPDATE users table
   const handleNameSave = useCallback(async (newName: string) => {
     const supabase = createClient();
-    // After Task 36: users.id IS the auth UUID — direct equality, no auth_id column.
+    // After Task 27: users.id IS the auth UUID — direct equality, no auth_id column.
     const { error } = await supabase.from("users").update({ name: newName }).eq("id", (await supabase.auth.getUser()).data.user?.id ?? "");
     if (!error) setData((d) => ({ ...d, name: newName, initials: deriveInitials(newName) }));
   }, []);

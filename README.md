@@ -247,6 +247,20 @@ Tools and technologies:
         
         *   Orchestrator, Router, Chat, Trip, Planner, Search, Profile, Conversation Manager
             
+    *   **Saga dispatcher:** after the Router classifies intent, a
+        deterministic (no-LLM) `SagaDispatcher` selects the owner *saga* for the
+        turn — `PlanningSaga`, `DiscoverySaga`, `ChatSaga`, or `OffTopicSaga`
+        (in `orchestrator/sagas/`). The PlanningSaga is a slot-filling skill: it
+        resolves the active trip (`resolve_active_trip` over cheap summaries,
+        then hydrates one), derives the trip's phase from data
+        (`derive_saga_state_local`, mirroring the Postgres `derive_saga_state`),
+        and collects the missing essentials one question per turn — categorical
+        slots (pace/structure/budget) as **multiple-choice** (`SlotRequest.choices`),
+        free-form slots parsed by a small extractor — writing structured patches
+        back to the trip via `TripRepository`. State is data, never stored on the
+        saga, so the shape maps 1:1 to a future LangGraph migration. Each saga
+        emits `saga_entered` / `saga_exited` / `slot_filled` metrics by default.
+            
     *   Planning before acting:
         
         *   For complex tasks (itinerary building), agents first sketch a plan then execute tool calls
@@ -574,7 +588,7 @@ Main components:
 
     *   `off_topic_state`, `waitlist`: off-topic restriction state and landing-page sign-ups.
 
-    *   **Trip data model:** `trips` (parent row with JSONB sections: `discovery`, `travelers`, `preferences`, `country_intel`, `budget`, `live_state`, `scratchpad`, `journal`, `cover`) + 5 child tables: `trip_destinations`, `trip_bookings`, `trip_days`, `trip_day_blocks`, `trip_checklist`. Postgres function `derive_saga_state(trip_id)` returns the canonical saga phase (DREAMING | SHAPING | ANCHORING | DETAILING | READY_TO_GO | LIVING | REMEMBERING) from row content — `trips.saga_state` is a cache only. `vw_trips_growth` provides weekly trip-creation counts by status (free-tier capacity KPI). All tables RLS-enabled; frontend subscribes to the parent row; child writes bump `updated_at` (auto-trigger in task 48). Python `TripRepository` in `backend/src/agentic_traveler/tools/trip_repo.py`.
+    *   **Trip data model:** `trips` (parent row with JSONB sections: `discovery`, `travelers`, `preferences`, `country_intel`, `budget`, `live_state`, `scratchpad`, `journal`, `cover`) + 5 child tables: `trip_destinations`, `trip_bookings`, `trip_days`, `trip_day_blocks`, `trip_checklist`. Postgres function `derive_saga_state(trip_id)` returns the canonical saga phase (DREAMING | SHAPING | ANCHORING | DETAILING | READY_TO_GO | LIVING | REMEMBERING) from row content — `trips.saga_state` is a cache only. `vw_trips_growth` provides weekly trip-creation counts by status (free-tier capacity KPI). All tables RLS-enabled; frontend subscribes to the parent row; child writes bump `updated_at` (auto-trigger in task 37). Python `TripRepository` in `backend/src/agentic_traveler/tools/trip_repo.py`.
 
     *   **RLS is enforced** on user-scoped tables; atomic credit operations use Supabase RPCs (`deduct_credits`, `accumulate_user_usage`) invoked with the service key.
 
@@ -617,6 +631,8 @@ isort .
 
 - **AI-Powered Travel Personalization**: Uses a deep onboarding questionnaire (Tally) and localized mapping to create a unique "Traveler DNA".
 - **Multi-Agent Orchestration**: Specialised agents for Discovery, Planning, and in-trip Companionship.
+- **State-Driven Multi-Agent Orchestrator**: The backend parses incoming messages and determines the correct saga (e.g. Planning, Discovery, Chat, Off-Topic) based on user intent and current trip context.
+- **Flexible & Natural Interactions**: The bot adapts to how the user plans. Users can set permanent global rules (e.g., "Never ask me about my budget") via the *hard overrides* system, or gracefully bypass any specific question on the fly by simply telling the bot to skip it or that they will handle it themselves.
 - **Real-time Context Awareness**: Weather-aware suggestions and adaptive itineraries based on current mood and energy.
 - **Safety & Moderation**: Integrated off-topic guard and multi-layer webhook security.
 - **Usage & Metrics Tracking**: Real-time per-user LLM usage and estimated credit cost tracking (where `1 credit = 1 eurocent`) inside the Supabase `usage_tracking` table, alongside weekly global analytics rollups flushed to the `analytics_weekly` table.

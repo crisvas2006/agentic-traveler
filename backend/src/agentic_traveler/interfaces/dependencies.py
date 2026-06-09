@@ -153,7 +153,7 @@ def verify_supabase_jwt(authorization: str = Header(default="")) -> WebUserCtx:
     if not auth_id:
         raise HTTPException(status_code=401, detail="Token missing sub claim")
 
-    # After Task 36: public.users.id IS the auth UUID for web users — no lookup
+    # After Task 27: public.users.id IS the auth UUID for web users — no lookup
     # needed. The auth trigger guarantees the users/profile/credits rows exist
     # for every authenticated user. We do not validate the row exists here; an
     # absent row would surface as an integrity error at the first write attempt

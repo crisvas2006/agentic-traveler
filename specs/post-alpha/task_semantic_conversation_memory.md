@@ -154,7 +154,7 @@ ALTER TABLE public.messages
 CREATE INDEX IF NOT EXISTS messages_trip_id_idx ON public.messages (trip_id) WHERE trip_id IS NOT NULL;
 ```
 
-The orchestrator (task 47) writes `trip_id` at message-save time using the
+The orchestrator (task 36) writes `trip_id` at message-save time using the
 resolved trip. Backfill: leave existing rows NULL — `trip_id`-scoped
 retrieval simply degrades to whole-conversation retrieval for messages
 that pre-date the saga work.

@@ -30,15 +30,15 @@ is explicitly deferred.
   child upserts).
 - RLS gives the trip's owner full access; nothing else.
 - Realtime subscriptions on the parent `trips` row reflect changes to
-  child rows transparently (via touch triggers — implemented in task 48).
-- Generated TypeScript types are available for the frontend (task 51).
+  child rows transparently (via touch triggers — implemented in task 37).
+- Generated TypeScript types are available for the frontend (task 40).
 
 ### Non-Goals
 
-- The saga state machine itself — task 47.
-- The frontend reading from these tables — task 51.
-- Realtime triggers — task 48 (this task creates the child tables and the
-  parent column they'll bump; the trigger function itself lives in task 48).
+- The saga state machine itself — task 36.
+- The frontend reading from these tables — task 40.
+- Realtime triggers — task 37 (this task creates the child tables and the
+  parent column they'll bump; the trigger function itself lives in task 37).
 - Multi-user / companion trips — explicitly deferred per proposal §4.7.
 - Attachment / document / photo storage — out of scope per the user's
   alpha cost discipline.
@@ -105,10 +105,10 @@ README.md                                                             [modify]
   columns (Python `dict | list` access is cleaner that way).
 - `created_at` and `updated_at` `timestamptz NOT NULL DEFAULT now()` on every
   table. The parent's `updated_at` is what powers Realtime invalidation
-  (task 48 wires the bump triggers).
+  (task 37 wires the bump triggers).
 - Do not store any file/blob in this task — no `attachments` column.
 - TripRepository methods that mutate must always set `updated_at = now()`
-  on the parent (until task 48 wires the auto-trigger).
+  on the parent (until task 37 wires the auto-trigger).
 
 ## 6. Edge Cases
 

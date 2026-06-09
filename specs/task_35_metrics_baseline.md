@@ -1,7 +1,7 @@
 # Task 35 — Metrics baseline (`analytics_events` + `metrics_daily` + six views)
 
 > Spec lineage: `specs/proposal_trip_model_and_planning_saga.md` §7.1.5, §12.
-> Ships **alongside** task 45 so every saga from task 47 onward inherits
+> Ships **alongside** task 34 so every saga from task 36 onward inherits
 > emission-by-default. Pre-saga: zero behaviour change. Post-saga: fleet-level
 > observability without retrofit.
 
@@ -16,7 +16,7 @@ Which tool is failing? What does the median user cost me?"* LangSmith
 (task 44) answers per-trace LLM debugging — but the LangSmith UI is not
 where you look to answer fleet-level / capacity / growth questions. This
 task lands the minimal data layer that does, **before** the saga model
-arrives, so every saga, tool, and agent shipped in tasks 47–53 emits
+arrives, so every saga, tool, and agent shipped in tasks 36–42 emits
 metrics from birth. The design (proposal §12) is: one append-only
 `analytics_events` table with a 7-day window, one `metrics_daily` rollup,
 six canonical SQL views, and a third phase on the `EventEmitter`.
@@ -288,7 +288,7 @@ def flush_metrics(rows: list[dict[str, Any]]) -> None:
 """EventEmitter — single sink interface, three phases (status, delta, metric).
 
 Sagas and tools call `events.emit(phase, payload)`. The orchestrator routes
-each phase to its concrete sink. Task 48 wires `status` and `delta` to SSE
+each phase to its concrete sink. Task 37 wires `status` and `delta` to SSE
 and Telegram; this task wires `metric` to analytics_events.
 """
 
@@ -353,7 +353,7 @@ events, call `flush_metrics()`, assert the supabase client received one
 ### Step 6 — Wire into orchestrator
 
 In `OrchestratorAgent._process_user_doc`, instantiate the `EventEmitter`
-once per turn, pass it to dispatch (saga work in task 47 reads it), emit a
+once per turn, pass it to dispatch (saga work in task 36 reads it), emit a
 `turn_completed` metric at the end, then call `events.flush_metrics()`.
 For now (pre-saga) the only emission is `turn_completed` itself plus any
 `error_raised` from the existing try/except blocks.
@@ -408,7 +408,7 @@ heartbeat. Cloud Run logs the rollup result for ops verification.
 
 - `on_status` / `on_delta` callbacks in EventEmitter typed as `Callable[[dict], None]`
   but the existing `status_callback` in `agent.py` is `Callable[[str], None]`. Fixed in
-  this task before task 48 wires live status events (see §10.2).
+  this task before task 37 wires live status events (see §10.2).
 
 ### 10.2 Spec deviations
 

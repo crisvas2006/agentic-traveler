@@ -25,7 +25,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  -- Use NEW.id (the auth UUID) directly as users.id — see Task 36 / migration 000.
+  -- Use NEW.id (the auth UUID) directly as users.id — see Task 27 / migration 000.
   INSERT INTO public.users (id, name, source)
   VALUES (
     NEW.id,

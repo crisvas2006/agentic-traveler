@@ -86,9 +86,8 @@ def test_no_pii_keys_in_metadata():
     
     # We need to mock all external dependencies of OrchestratorAgent to run it
     with patch("agentic_traveler.orchestrator.agent.RouterAgent"), \
-         patch("agentic_traveler.orchestrator.agent.ChatAgent"), \
-         patch("agentic_traveler.orchestrator.agent.TripAgent"), \
-         patch("agentic_traveler.orchestrator.agent.PlannerAgent"), \
+         patch("agentic_traveler.orchestrator.agent.SagaDispatcher"), \
+         patch("agentic_traveler.orchestrator.agent.TripRepository"), \
          patch("agentic_traveler.orchestrator.agent.ConversationManager"), \
          patch("agentic_traveler.orchestrator.agent.credit_manager") as mock_credits, \
          patch("agentic_traveler.orchestrator.agent.off_topic_guard") as mock_guard, \

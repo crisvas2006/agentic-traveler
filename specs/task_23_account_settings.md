@@ -1,4 +1,4 @@
-# Task 37 — Account Settings Page
+# Task 23 — Account Settings Page
 
 **Status:** ✅ Completed
 
