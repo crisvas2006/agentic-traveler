@@ -48,7 +48,7 @@ from agentic_traveler.orchestrator.router_agent import RouterAgent
 from agentic_traveler.orchestrator.event_emitter import EventEmitter
 from agentic_traveler.orchestrator.event_text_registry import text_for
 from agentic_traveler.orchestrator.sagas import SagaDispatcher, SagaState
-from agentic_traveler.orchestrator.sagas.trip_resolver import resolve_active_trip
+from agentic_traveler.orchestrator.sagas.trip_resolver import resolve_trip_focus
 from agentic_traveler.tools.user_repo import UserRepository
 from agentic_traveler.tools.trip_repo import TripRepository
 
@@ -278,7 +278,7 @@ class OrchestratorAgent:
                 telegram_user_id, token_records, t_total, events, intent,
                 owner_saga="OffTopicSaga",
             )
-            return {"text": response_text, "action": "RESPONSE"}
+            return {"text": response_text, "action": "RESPONSE", "slot_request": None}
 
         # If the router provided a direct response (e.g., a credit-balance answer)
         # Only short-circuit for CHAT intent — TRIP and PLAN must always reach
@@ -291,7 +291,7 @@ class OrchestratorAgent:
                 telegram_user_id, token_records, t_total, events, intent,
                 owner_saga="ChatSaga",
             )
-            return {"text": router_response, "action": "RESPONSE"}
+            return {"text": router_response, "action": "RESPONSE", "slot_request": None}
 
         # ── 5b. Travel intents — reset off-topic counter ────────────────────
         if user_id:
@@ -308,6 +308,7 @@ class OrchestratorAgent:
             preference_raw=preference_raw,
             router_response=router_response,
             entities=router_result.get("entities", {}) or {},
+            trip_directive=router_result.get("trip_directive", "unspecified"),
             events=events,
         )
 
@@ -401,7 +402,16 @@ class OrchestratorAgent:
                 agent_result.get("action"), response_text[:120],
             )
         logger.info("\n=== FINAL OUTPUT ===\n%s\n===================", response_text)
-        return {"text": response_text, "action": "RESPONSE"}
+        # Surface the owner saga's slot question to the channels (Task 43) so they
+        # can render tappable choices. Wire form (or None for a free-text/no-slot
+        # turn); error turns never carry a usable slot prompt.
+        slot_request = agent_result.get("slot_request")
+        slot_wire = (
+            slot_request.to_wire()
+            if slot_request is not None and not is_error_response
+            else None
+        )
+        return {"text": response_text, "action": "RESPONSE", "slot_request": slot_wire}
 
     # ── saga dispatch ───────────────────────────────────────────────────────
 
@@ -417,13 +427,17 @@ class OrchestratorAgent:
         preference_raw: Optional[str],
         router_response: Optional[str],
         entities: Dict[str, Any],
+        trip_directive: str,
         events: EventEmitter,
     ) -> Dict[str, Any]:
         """Resolve the active trip, select the owner saga (+ listeners), run
         them, apply their side effects, and return an agent_result dict shaped
         like the old `_dispatch` so downstream token logging is unchanged."""
-        # 1. Resolve which trip this turn is about, from cheap summaries.
+        # 1. Resolve which trip this turn is about, honouring the Router's
+        #    trip_directive (task 44): "new" ignores existing trips (a fresh one
+        #    is created below) and reports which trip, if any, was set aside.
         trip: Optional[Dict[str, Any]] = None
+        superseded_title: Optional[str] = None
         if user_id:
             try:
                 summaries = [
@@ -432,7 +446,9 @@ class OrchestratorAgent:
             except Exception:
                 logger.exception("Failed to list trip summaries for user %s", user_id)
                 summaries = []
-            chosen = resolve_active_trip(summaries, message_text, entities)
+            chosen, superseded_title, _create_new = resolve_trip_focus(
+                summaries, message_text, entities, trip_directive
+            )
             if chosen:
                 try:
                     trip_model = self._trip_repo.get_trip(chosen["id"])
@@ -449,13 +465,17 @@ class OrchestratorAgent:
             "router_response": router_response,
             "trip_id": trip.get("id") if trip else None,
             "message_text": message_text,
+            "trip_directive": trip_directive,
+            "superseded_trip_title": superseded_title,
         }
 
         # 3. Select owner + listeners (deterministic, no LLM).
         owner, listeners = self._dispatcher.select(intent, entities, trip, state)
         _emit_status(events, "saga_selected", getattr(owner, "name", None))
 
-        # 4. Zero-trip path: create a DREAMING trip for planning/discovery owners.
+        # 4. Create a fresh DREAMING trip when there's no trip in focus and the
+        #    owner needs one — either the zero-trip path, or a "new" directive
+        #    that deliberately set the existing trip aside (task 44).
         if trip is None and user_id and getattr(owner, "name", "") in (
             "PlanningSaga", "DiscoverySaga"
         ):
@@ -491,6 +511,7 @@ class OrchestratorAgent:
             "_latency_ms": result._latency_ms,
             "_search_responses": result._search_responses,
             "owner_saga": getattr(owner, "name", ""),
+            "slot_request": result.slot_request,
         }
 
     def _apply_side_effects(self, user_id: Optional[str], side_effects: list) -> None:

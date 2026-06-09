@@ -20,6 +20,40 @@ _STOPWORDS = frozenset({
 })
 
 
+def is_established(summary: dict[str, Any]) -> bool:
+    """True for a trip with real planning behind it — one we should not silently
+    clobber or regenerate. Works off the cheap summary fields
+    (`list_trip_summaries` selects no child rows): a non-DREAMING status or a
+    populated ``vision_summary`` both signal an established trip."""
+    status = (summary.get("status") or "").strip().lower()
+    if status and status not in ("dreaming", "draft"):
+        return True
+    return bool((summary.get("vision_summary") or "").strip())
+
+
+def resolve_trip_focus(
+    summaries: list[dict[str, Any]],
+    message: str,
+    entities: Optional[dict[str, Any]],
+    directive: str,
+) -> tuple[Optional[dict[str, Any]], Optional[str], bool]:
+    """Decide which trip a planning turn is about, honouring the Router's
+    ``trip_directive`` (task 44).
+
+    Returns ``(chosen_summary, superseded_title, create_new)``:
+      * ``directive == "new"`` → ``(None, <most-recent established title or None>,
+        True)`` — ignore existing trips; the orchestrator creates a fresh one and
+        the saga can acknowledge the trip set aside.
+      * otherwise → ``(resolve_active_trip(...), None, False)`` — unchanged
+        resolution (explicit name > active > ready > most-recent).
+    """
+    if directive == "new":
+        established = [s for s in summaries if is_established(s)] if summaries else []
+        prior = _most_recent(established) if established else None
+        return None, (prior.get("title") if prior else None), True
+    return resolve_active_trip(summaries, message, entities), None, False
+
+
 def resolve_active_trip(
     summaries: list[dict[str, Any]], message: str, entities: dict[str, Any] = None
 ) -> Optional[dict[str, Any]]:

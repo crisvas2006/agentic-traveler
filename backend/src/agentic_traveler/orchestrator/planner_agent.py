@@ -143,7 +143,10 @@ class PlannerAgent:
         try:
             config = types.GenerateContentConfig(
                 system_instruction=_SYSTEM_PROMPT,
-                max_output_tokens=4500,
+                max_output_tokens=8192,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=256,  # tokens
+                ),
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(
                     maximum_remote_calls=10,  # raised to 10: complex multi-destination itineraries need more searches + weather
                 ),

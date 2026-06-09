@@ -168,7 +168,7 @@ class TripAgent:
         try:
             config = types.GenerateContentConfig(
                 system_instruction=_SYSTEM_PROMPT,
-                max_output_tokens=3500,
+                max_output_tokens=8192,
                 thinking_config=types.ThinkingConfig(
                     # 256 is enough for TRIP tool-orchestration (decide
                     # weather/search, then synthesize). 512 was overkill for

@@ -38,6 +38,7 @@ _MODEL = "gemini-3.1-flash-lite"
 
 _VALID_INTENTS = {"CHAT", "TRIP", "PLAN", "OFF_TOPIC"}
 _VALID_FEEDBACK_CATEGORIES = {"positive", "negative", "suggestion"}
+_VALID_TRIP_DIRECTIVES = {"continue", "new", "unspecified"}
 
 _SYSTEM_PROMPT = """\
 You are the intent router for Agentic Traveler, a travel companion chatbot.
@@ -98,6 +99,21 @@ when absent.
   entities.month = a month name if stated, else null.
   entities.named_trip = the name of an existing trip the user refers to, else null.
 
+STEP 6 — Fill "trip_directive" ONLY for TRIP/PLAN intents; use "unspecified"
+otherwise. It tells the planner whether the user wants to keep working on an
+existing trip or start a new one:
+  • "continue" — the user is continuing or refers to an existing trip:
+      "finish my Japan plan", "let's keep going", "yes, continue", "back to the
+      Rome trip", or naming a trip they already have.
+  • "new" — the user wants to start a fresh/different trip, OR — when the
+      Conversation History shows the assistant just asked "keep going or start a
+      new trip?" — the user chose the new option: "plan a new trip", "a new one",
+      "start fresh", "forget that, somewhere else".
+  • "unspecified" — a generic planning desire with no clear target, and no prior
+      assistant question disambiguating it: "I want to plan a trip", "help me
+      plan something".
+  When unsure between continue and unspecified, prefer "unspecified".
+
 A single message can legitimately set several fields at once (e.g. a new preference AND
 positive feedback AND a TRIP intent). Each action field is filled at most once.
 
@@ -137,6 +153,11 @@ def _response_schema() -> types.Schema:
             "feedback_category": types.Schema(type=types.Type.STRING, nullable=True),
             "feedback_text": types.Schema(type=types.Type.STRING, nullable=True),
             "response": types.Schema(type=types.Type.STRING, nullable=True),
+            "trip_directive": types.Schema(
+                type=types.Type.STRING,
+                enum=["continue", "new", "unspecified"],
+                nullable=True,
+            ),
             "entities": types.Schema(
                 type=types.Type.OBJECT,
                 nullable=True,
@@ -306,6 +327,7 @@ LATEST USER MESSAGE:
                 "preference_raw": new_preference,
                 "response": parsed["response"],
                 "entities": parsed["entities"],
+                "trip_directive": parsed["trip_directive"],
                 "raw_response": raw,
                 "latency_ms": latency_ms,
             }
@@ -323,6 +345,7 @@ LATEST USER MESSAGE:
                 "preference_raw": None,
                 "response": None,
                 "entities": {},
+                "trip_directive": "unspecified",
                 "raw_response": None,
                 "latency_ms": (time.time() - t) * 1000,
             }
@@ -345,6 +368,7 @@ LATEST USER MESSAGE:
             "feedback_text": None,
             "response": None,
             "entities": {},
+            "trip_directive": "unspecified",
         }
 
         if not text:
@@ -369,6 +393,10 @@ LATEST USER MESSAGE:
                 logger.warning("Router emitted invalid feedback_category %r — ignoring.", category)
                 category = None
 
+        directive = (_clean(data.get("trip_directive")) or "unspecified").lower()
+        if directive not in _VALID_TRIP_DIRECTIVES:
+            directive = "unspecified"
+
         return {
             "intent": intent,
             "request_summary": _clean(data.get("request_summary")) or message,
@@ -377,4 +405,5 @@ LATEST USER MESSAGE:
             "feedback_text": _clean(data.get("feedback_text")),
             "response": _clean(data.get("response")),
             "entities": _clean_entities(data.get("entities")),
+            "trip_directive": directive,
         }

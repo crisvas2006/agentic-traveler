@@ -9,10 +9,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentic_traveler.orchestrator.event_emitter import EventEmitter
-from agentic_traveler.orchestrator.sagas.base import SideEffect
+from agentic_traveler.orchestrator.sagas.base import ChoiceOption, SideEffect, SlotRequest
 from agentic_traveler.orchestrator.sagas.planning import (
     _SLOT_QUESTIONS,
     PlanningSaga,
+    slot_selection_to_side_effect,
 )
 
 _EXTRACT = "agentic_traveler.orchestrator.sagas.planning.extract_trip_slots"
@@ -124,16 +125,81 @@ def _trip_fully_slotted():
     )
 
 
-def test_plan_intent_on_full_trip_delegates_to_planner(saga):
-    # Explicit PLAN request on a fully-slotted trip → build the itinerary.
+def test_continue_directive_on_full_trip_delegates_to_planner(saga):
+    # "continue" on a fully-slotted trip → build/refine the itinerary.
     with patch(_EXTRACT, return_value={}):
         result = saga.run(
             "build my itinerary", {}, _trip_fully_slotted(),
-            {"intent": "PLAN"}, "", _events(),
+            {"intent": "PLAN", "trip_directive": "continue"}, "", _events(),
         )
     saga._planner.process_request.assert_called_once()
     saga._trip_agent.process_request.assert_not_called()
     assert result.text == "Here is your day-by-day plan."
+
+
+# ---------------------------------------------------------------------------
+# task 44 — direction switching (confirm / new / continue)
+# ---------------------------------------------------------------------------
+
+def test_generic_plan_on_complete_trip_confirms_direction(saga):
+    # "I want to plan a trip" (PLAN + unspecified) on a COMPLETE established trip
+    # must CONFIRM — never silently regenerate that trip's itinerary.
+    events = _events()
+    with patch(_EXTRACT, return_value={}):
+        result = saga.run(
+            "I want to plan a trip", {}, _trip_fully_slotted(),
+            {"intent": "PLAN", "trip_directive": "unspecified"}, "", events,
+        )
+    saga._planner.process_request.assert_not_called()
+    saga._trip_agent.process_request.assert_not_called()
+    assert result.slot_request is None
+    assert result.side_effects == []
+    assert "new" in result.text.lower()           # offers starting fresh
+    assert len(result.text) <= 320                 # conciseness invariant (§7.1)
+    outcomes = [r["payload"].get("outcome") for r in events._metric_buffer
+                if r["event_name"] == "trip_focus_resolved"]
+    assert "confirm_switch" in outcomes
+
+
+def test_generic_plan_on_blank_trip_does_not_confirm(saga):
+    # A blank DREAMING trip (no destination) has nothing to set aside, so a
+    # generic PLAN proceeds to slot-fill (asks destination), no confirmation.
+    with patch(_EXTRACT, return_value={}):
+        result = saga.run(
+            "I want to plan a trip", {}, _trip(),
+            {"intent": "PLAN", "trip_directive": "unspecified"}, "", _events(),
+        )
+    assert result.slot_request is not None
+    assert result.slot_request.slot == "destination"
+
+
+def test_new_directive_acknowledges_superseded_trip(saga):
+    # A fresh blank trip created by a "new" directive acknowledges the trip set
+    # aside on its first prompt, then asks the destination (AC-4).
+    with patch(_EXTRACT, return_value={}):
+        result = saga.run(
+            "actually, a new trip", {}, _trip(),
+            {"intent": "PLAN", "trip_directive": "new",
+             "superseded_trip_title": "Japan, autumn escape"},
+            "", _events(),
+        )
+    assert result.slot_request.slot == "destination"
+    assert "on hold" in result.text.lower()
+    assert "japan" in result.text.lower()
+
+
+def test_plan_intent_still_asks_missing_slot_under_unspecified(saga):
+    # An established trip that is still MID slot-fill (missing budget) must keep
+    # collecting on a PLAN turn — NOT confirm a switch (confirm is only for a
+    # complete trip).
+    with patch(_EXTRACT, return_value={}):
+        result = saga.run(
+            "let's plan it", {}, _trip_only_budget_missing(),
+            {"intent": "PLAN", "trip_directive": "unspecified"}, "", _events(),
+        )
+    saga._planner.process_request.assert_not_called()
+    assert result.slot_request is not None
+    assert result.slot_request.slot == "budget_tier"
 
 
 def test_casual_trip_question_on_full_trip_uses_companion_not_planner(saga):
@@ -303,3 +369,53 @@ def test_trip_intent_with_new_info_continues_slot_fill(saga):
     saga._trip_agent.process_request.assert_not_called()
     assert result.slot_request is not None
     assert result.slot_request.slot == "structure"
+
+
+# ---------------------------------------------------------------------------
+# task 43 — SlotRequest.to_wire() + deterministic selection mapper
+# ---------------------------------------------------------------------------
+
+def test_slot_request_to_wire_with_choices():
+    sr = SlotRequest(
+        slot="pace", prompt="What pace?",
+        choices=[ChoiceOption("slow", "Slow", "slow"), ChoiceOption("skip", "Skip", "skip")],
+    )
+    wire = sr.to_wire()
+    assert wire["slot"] == "pace"
+    assert wire["allow_multi"] is False
+    assert wire["choices"] == [
+        {"id": "slow", "label": "Slow", "value": "slow"},
+        {"id": "skip", "label": "Skip", "value": "skip"},
+    ]
+
+
+def test_slot_request_to_wire_free_text_has_null_choices():
+    assert SlotRequest(slot="destination", prompt="Where?").to_wire()["choices"] is None
+
+
+def test_selection_writes_pref_and_merges_existing():
+    trip = {"id": "t1", "preferences": {"pace": "slow"}}
+    se = slot_selection_to_side_effect(trip, "budget_tier", "$$")
+    assert se is not None and se.kind == "trip_patch"
+    # merged, not clobbered — pace survives.
+    assert se.payload["preferences"] == {"pace": "slow", "budget_tier": "$$"}
+    assert se.payload["id"] == "t1"
+
+
+def test_selection_skip_writes_sentinel():
+    se = slot_selection_to_side_effect({"id": "t1", "preferences": {}}, "pace", "skip")
+    assert se.payload["preferences"]["pace"] == "skip"
+
+
+def test_selection_illegal_value_returns_none():
+    assert slot_selection_to_side_effect({"id": "t1"}, "pace", "zoomy") is None
+
+
+def test_selection_free_text_slot_returns_none():
+    # destination is parsed from text, not a tappable choice.
+    assert slot_selection_to_side_effect({"id": "t1"}, "destination", "Tokyo") is None
+
+
+def test_selection_no_trip_returns_none():
+    assert slot_selection_to_side_effect(None, "pace", "slow") is None
+    assert slot_selection_to_side_effect({}, "pace", "slow") is None

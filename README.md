@@ -304,13 +304,20 @@ Tools and technologies:
         slots (pace/structure/budget) as **multiple-choice** (`SlotRequest.choices`),
         free-form slots parsed by a small extractor — writing structured patches
         back to the trip via `TripRepository`. The user's message dictates which
-        engine answers: the heavy itinerary **PlannerAgent** runs only on an
-        explicit plan request (intent `PLAN`) or when a new planning fact was just
-        supplied; a fully-slotted trip plus a casual question (a weather check,
-        idle chat) drifts to the lighter conversational **TripAgent** instead — the
-        trip stays in focus without being force-fed a fresh itinerary every turn.
-        State is data, never stored on the saga, so the shape maps 1:1 to a future
-        LangGraph migration. Each saga emits `saga_entered` / `saga_exited` /
+        engine answers and which trip is in focus. The Router emits a
+        `trip_directive` (`continue` / `new` / `unspecified`): `new` sets the
+        current trip aside and starts a fresh one ("Putting **Japan** on hold —
+        let's start fresh. Where to?"); a generic plan request on a *completed*
+        trip (`unspecified`) is **confirmed** rather than silently regenerated
+        ("We're partway through **Japan** — keep refining, or start a new trip?").
+        The heavy itinerary **PlannerAgent** runs only when the user is actually
+        continuing/refining (`continue`, or a new planning fact this turn); a
+        completed trip plus a casual question drifts to the lighter
+        **TripAgent** — the trip stays in focus without being force-fed a fresh
+        itinerary. State is data, never stored on the saga (the confirmation has
+        no persisted flag — the next turn's directive decides), so the shape maps
+        1:1 to a future LangGraph migration. Each saga emits
+        `saga_entered` / `saga_exited` /
         `slot_filled` metrics by default.
             
     *   Planning before acting:

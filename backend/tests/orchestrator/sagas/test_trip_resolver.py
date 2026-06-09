@@ -1,6 +1,11 @@
-"""Trip resolution priority + explicit-name override (Task 36). No DB."""
+"""Trip resolution priority + explicit-name override (Task 36) + directive-aware
+focus (Task 44). No DB."""
 
-from agentic_traveler.orchestrator.sagas.trip_resolver import resolve_active_trip
+from agentic_traveler.orchestrator.sagas.trip_resolver import (
+    is_established,
+    resolve_active_trip,
+    resolve_trip_focus,
+)
 
 
 def _summary(id_, **kw):
@@ -56,3 +61,52 @@ def test_short_and_stopword_titles_do_not_false_match():
     ]
     # "trip"/"my" are stopwords; should fall through to the active trip.
     assert resolve_active_trip(trips, "plan my trip")["id"] == "b"
+
+
+# ---------------------------------------------------------------------------
+# task 44 — is_established + directive-aware resolve_trip_focus
+# ---------------------------------------------------------------------------
+
+def test_is_established_by_status():
+    assert is_established(_summary("a", status="active"))
+    assert is_established(_summary("a", status="ready"))
+    assert not is_established(_summary("a", status="dreaming"))
+    assert not is_established(_summary("a", status="draft"))
+
+
+def test_is_established_by_vision_summary():
+    # A blank-status trip with a vision summary still counts as established.
+    assert is_established(_summary("a", status="dreaming", vision_summary="Sun + surf"))
+    assert not is_established(_summary("a", status="dreaming", vision_summary=""))
+
+
+def test_focus_new_directive_ignores_existing_and_reports_superseded():
+    trips = [
+        _summary("a", title="Japan, autumn", status="dreaming", vision_summary="Temples",
+                 updated_at="2027-05-01"),
+        _summary("b", title="Old draft", status="dreaming", updated_at="2027-01-01"),
+    ]
+    chosen, superseded, create_new = resolve_trip_focus(trips, "a new trip", {}, "new")
+    assert chosen is None
+    assert create_new is True
+    assert superseded == "Japan, autumn"   # most-recent ESTABLISHED trip
+
+
+def test_focus_new_directive_with_no_established_trip_has_no_superseded():
+    trips = [_summary("b", title="Blank", status="dreaming", updated_at="2027-01-01")]
+    chosen, superseded, create_new = resolve_trip_focus(trips, "new trip", {}, "new")
+    assert chosen is None
+    assert create_new is True
+    assert superseded is None
+
+
+def test_focus_continue_and_unspecified_delegate_to_resolve_active():
+    trips = [
+        _summary("a", status="planning", updated_at="2027-01-01"),
+        _summary("b", status="active", updated_at="2027-05-01"),
+    ]
+    for directive in ("continue", "unspecified"):
+        chosen, superseded, create_new = resolve_trip_focus(trips, "weather?", {}, directive)
+        assert chosen["id"] == "b"
+        assert superseded is None
+        assert create_new is False

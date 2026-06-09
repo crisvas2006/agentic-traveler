@@ -81,6 +81,41 @@ _CHOICE_VALUES = frozenset(
     for option in options
 )
 
+# Categorical slots whose chosen value writes straight into trip.preferences.
+_PREFERENCE_SLOTS = ("pace", "structure", "budget_tier")
+
+
+def _legal_values(slot: str) -> frozenset[str]:
+    """Lower-cased set of values a categorical slot legally accepts (incl. 'skip')."""
+    return frozenset(str(o.value).lower() for o in _SLOT_CHOICES.get(slot, []))
+
+
+def slot_selection_to_side_effect(
+    trip: Optional[dict[str, Any]], slot: str, value: str
+) -> Optional[SideEffect]:
+    """Map a tapped/selected slot value onto a deterministic trip write (Task 43 —
+    no LLM). Returns ``None`` for an illegal ``(slot, value)`` pair or a free-text
+    slot (destination/timeframe/travelers are not choice-driven). ``'skip'`` is a
+    legal categorical value: it writes the literal ``"skip"`` sentinel so
+    key-presence marks the slot satisfied and the saga never re-asks it.
+
+    Takes the hydrated ``trip`` (not just its id) because ``upsert_trip`` REPLACES
+    the ``preferences`` JSONB column — we must merge the new value into the
+    existing preferences here, exactly like ``_slots_to_side_effects`` does, so a
+    selection never clobbers sibling slots."""
+    trip_id = (trip or {}).get("id")
+    if not trip_id:
+        return None
+    if str(value).strip().lower() not in _legal_values(slot):
+        return None
+    if slot in _PREFERENCE_SLOTS:
+        merged = {**((trip or {}).get("preferences") or {}), slot: value}
+        return SideEffect(
+            kind="trip_patch",
+            payload={"id": trip_id, "preferences": merged},
+        )
+    return None
+
 
 class PlanningSaga:
     """Owns the trip-planning conversation."""
@@ -147,14 +182,24 @@ class PlanningSaga:
         missing = self._first_missing_slot(trip, overrides)
         intent = state.get("intent", "")
         made_progress = bool(side_effects)
+        directive = state.get("trip_directive", "unspecified")
+        superseded = state.get("superseded_trip_title")
+
+        def _focus(outcome: str) -> None:
+            events.emit("metric", {
+                "name": "trip_focus_resolved", "directive": directive,
+                "outcome": outcome,
+            })
 
         # In-trip / post-trip: hand to the companion content engine, never
         # slot-fill a trip that is already underway or finished.
         if phase in ("LIVING", "REMEMBERING"):
+            _focus("companion")
             return self._delegate(
                 self._trip_agent, "TripAgent", user_doc, message,
                 conversation_context, state, side_effects, events, t,
             )
+
         # Still collecting essentials.
         if missing is not None:
             # Let the user drift. If they're asking a question or exploring
@@ -164,26 +209,42 @@ class PlanningSaga:
             # Without this guard the saga gets stuck re-asking the last missing
             # slot (e.g. "What's the budget vibe?") no matter what the user says.
             if intent == "TRIP" and not made_progress:
+                _focus("companion")
                 return self._delegate(
                     self._trip_agent, "TripAgent", user_doc, message,
                     conversation_context, state, side_effects, events, t,
                 )
             # Otherwise collect the essentials one question at a time (AC-3/AC-9).
-            return self._ask_slot(missing, side_effects, events, t)
+            # On a fresh trip that just superseded another, acknowledge the trip
+            # set aside on the first prompt (task 44 AC-4).
+            _focus("new_trip" if superseded else "slot_fill")
+            return self._ask_slot(
+                missing, side_effects, events, t,
+                superseded=superseded if missing == "destination" else None,
+            )
 
-        # All essentials known. The heavy itinerary builder runs ONLY when the
-        # user actually asked to plan/modify — an explicit PLAN turn, or a turn
-        # where they just supplied a new planning fact worth re-planning around.
-        # A fully-slotted trip plus a casual message (a weather check, a question,
-        # idle chat) is NOT a reason to regenerate an itinerary: the user must be
-        # free to drift to anything and be answered by the lighter companion. The
-        # saga's structure still stands — the trip stays in focus — but the user's
-        # message dictates which engine responds.
-        if intent == "PLAN" or made_progress:
+        # ── All essentials known. ────────────────────────────────────────────
+        # Direction check (task 44): a generic plan-start ("I want to plan a
+        # trip") on a COMPLETE trip is ambiguous — regenerate this one, or start
+        # a new one? Confirm rather than silently rebuilding the wrong trip. (A
+        # complete trip always has a destination, so it's genuinely established.)
+        if intent == "PLAN" and directive == "unspecified" and not made_progress:
+            _focus("confirm_switch")
+            return self._confirm_switch(trip, events, t)
+
+        # The heavy itinerary builder runs ONLY when the user is actually
+        # continuing/refining — an explicit "continue" directive, or a turn where
+        # they supplied a new planning fact worth re-planning around. A complete
+        # trip plus a casual message (a weather check, idle chat) is NOT a reason
+        # to regenerate the itinerary: the user drifts to the lighter companion.
+        # The trip stays in focus, but the user's message dictates the engine.
+        if directive == "continue" or made_progress:
+            _focus("plan")
             return self._delegate(
                 self._planner, "PlannerAgent", user_doc, message,
                 conversation_context, state, side_effects, events, t,
             )
+        _focus("companion")
         return self._delegate(
             self._trip_agent, "TripAgent", user_doc, message,
             conversation_context, state, side_effects, events, t,
@@ -207,21 +268,42 @@ class PlanningSaga:
         return None
 
     def _ask_slot(
-        self, slot: str, side_effects: list[SideEffect], events: Any, t: float
+        self, slot: str, side_effects: list[SideEffect], events: Any, t: float,
+        superseded: Optional[str] = None,
     ) -> SagaResult:
         question = _SLOT_QUESTIONS[slot]
         choices = _SLOT_CHOICES.get(slot)
+        # When a fresh trip just set another aside, acknowledge it on the first
+        # prompt so the switch feels deliberate (task 44 AC-4).
+        text = question
+        if superseded:
+            text = f"Putting {_clip_title(superseded)} on hold — let's start fresh. {question}"
         events.emit("metric", {"name": "slot_request_emitted", "slot": slot})
         events.emit("metric", {
             "name": "saga_exited", "saga": self.name, "outcome": "slot_request",
             "latency_ms": (time.time() - t) * 1000,
         })
         return SagaResult(
-            text=question,
+            text=text,
             slot_request=SlotRequest(slot=slot, prompt=question, choices=choices),
             side_effects=side_effects,
             state_delta={"pending_slot": slot},
         )
+
+    def _confirm_switch(self, trip: dict[str, Any], events: Any, t: float) -> SagaResult:
+        """Ask the user whether to keep refining the in-focus trip or start a new
+        one (task 44). Text only — no plan, no slot mutation. The reply next turn
+        (router → continue/new) decides; nothing is persisted."""
+        title = _trip_title(trip)
+        text = (
+            f"We're partway through planning {title}. Want to keep refining "
+            f"that, or start a brand-new trip?"
+        )
+        events.emit("metric", {
+            "name": "saga_exited", "saga": self.name, "outcome": "confirm_switch",
+            "latency_ms": (time.time() - t) * 1000,
+        })
+        return SagaResult(text=text)
 
     # ------------------------------------------------------------------
     # delegation to content engines
@@ -277,6 +359,29 @@ class PlanningSaga:
 # ---------------------------------------------------------------------------
 # module-level helpers (pure functions — easy to unit test)
 # ---------------------------------------------------------------------------
+
+def _clip_title(title: str, cap: int = 60) -> str:
+    title = (title or "").strip()
+    return title if len(title) <= cap else title[: cap - 1].rstrip() + "…"
+
+
+def _trip_title(trip: Optional[dict[str, Any]]) -> str:
+    """A short, human label for the in-focus trip: its title, else its first
+    destination, else a generic fallback. Used in confirmation/ack text."""
+    if not trip:
+        return "your current trip"
+    title = (trip.get("title") or "").strip()
+    if title:
+        # Strip a trailing generic word so "Japan trip" reads as "Japan".
+        head = title.split(",")[0].strip()
+        return _clip_title(head or title)
+    dests = trip.get("destinations") or []
+    for d in dests:
+        name = (d.get("name") or "").strip()
+        if name:
+            return _clip_title(f"your {name} trip")
+    return "your current trip"
+
 
 def _slot_values(trip: dict[str, Any]) -> dict[str, Any]:
     """Which slots are satisfied. ``destination`` counts as filled when ANY

@@ -35,6 +35,9 @@ class SagaState(TypedDict, total=False):
     pending_slot: Optional[str]
     slots_filled: dict[str, Any]
     message_text: str
+    # task 44 — direction switching
+    trip_directive: str                    # 'continue' | 'new' | 'unspecified'
+    superseded_trip_title: Optional[str]   # title of a trip set aside by a 'new' turn
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,19 @@ class SlotRequest:
     prompt: str
     choices: Optional[list[ChoiceOption]] = None
     allow_multi: bool = False
+
+    def to_wire(self) -> dict[str, Any]:
+        """Serialize for the channel layer (web `metadata.ui` / Telegram keyboard).
+        Task 43. `choices` is None for free-text slots."""
+        return {
+            "slot": self.slot,
+            "prompt": self.prompt,
+            "choices": (
+                [{"id": c.id, "label": c.label, "value": c.value} for c in self.choices]
+                if self.choices else None
+            ),
+            "allow_multi": self.allow_multi,
+        }
 
 
 @dataclass
