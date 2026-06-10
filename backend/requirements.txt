@@ -24,3 +24,4 @@ uvicorn[standard]
 requests
 PyJWT
 langsmith>=0.4,<1.0
+PyYAML==6.0.3

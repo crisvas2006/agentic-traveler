@@ -191,6 +191,29 @@ Core agents (tool-calling architecture):
 
     *   Stores recent messages + compacted summary in Supabase `conversations` table.
 
+#### Curiosity prompts (Task 42)
+
+What keeps Aletheia from feeling like a TripAdvisor clone is that it sometimes
+asks the kind of question a well-read, travel-loving friend would — *"more
+'wander till I'm a little lost', or 'know roughly where I'm headed'?"* A small,
+human-curated, source-cited library
+(`backend/src/agentic_traveler/content/curiosity_prompts.yaml`, grounded in de
+Botton, Iyer, Solnit, Steves, Seneca, Pearce, Potts, Chatwin, Macfarlane and
+others — see `docs/travel_literature_notes.md`) is selected by a **pure-Python**
+`CuriosityPromptInjector` (no LLM) and woven into exploratory / reflective
+companion replies during `DREAMING` / `SHAPING` / `REMEMBERING`.
+
+Because a deep question can fall flat *coming from an AI*, three guards counter
+the "AI effect": (1) the prompt texts are concrete and low-effort (a light
+either/or, answerable in a few words) — the literature lives in the entry's
+rationale, not the wording the user sees; (2) the injector frames each prompt as
+a strictly **optional aside** the model adds at the end of an already-useful
+reply, answerable-or-ignorable, never repeated, dropped if it would feel
+intrusive; (3) the more personal prompts only fire once the trip has a
+destination (no cold-opening intimate questions), capped at once per day per
+trip, and suppressed entirely for high-`structure_preference` planners. Disabled
+in one flip via `CURIOSITY_INJECTOR_ENABLED=false`.
+
 #### Real-time architecture (Task 37)
 
 Three composable layers give the web a live feel, all multiplexed through the

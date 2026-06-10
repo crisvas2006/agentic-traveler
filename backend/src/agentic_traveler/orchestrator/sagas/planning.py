@@ -31,6 +31,12 @@ from agentic_traveler.orchestrator.sagas.base import (
 )
 from agentic_traveler.orchestrator.sagas.saga_state import derive_saga_state_local
 from agentic_traveler.orchestrator.sagas.slot_extractor import extract_trip_slots
+from agentic_traveler.orchestrator.curiosity_injector import (
+    frame_curiosity_prompt,
+    get_injector,
+    is_today_iso,
+    today_iso,
+)
 from agentic_traveler.orchestrator.profile_utils import build_live_context
 from agentic_traveler.orchestrator.trip_agent import TripAgent
 
@@ -352,7 +358,8 @@ class PlanningSaga:
             _focus("companion")
             return self._delegate(
                 self._trip_agent, "TripAgent", user_doc, message,
-                conversation_context, state, side_effects, events, t,
+                conversation_context + self._curiosity_suffix(trip, user_doc, phase, side_effects, events),
+                state, side_effects, events, t,
             )
 
         # Still collecting essentials.
@@ -367,7 +374,8 @@ class PlanningSaga:
                 _focus("companion")
                 return self._delegate(
                     self._trip_agent, "TripAgent", user_doc, message,
-                    conversation_context, state, side_effects, events, t,
+                    conversation_context + self._curiosity_suffix(trip, user_doc, phase, side_effects, events),
+                    state, side_effects, events, t,
                 )
             # Otherwise collect the essentials one question at a time (AC-3/AC-9).
             # On a fresh trip that just superseded another, acknowledge the trip
@@ -402,7 +410,8 @@ class PlanningSaga:
         _focus("companion")
         return self._delegate(
             self._trip_agent, "TripAgent", user_doc, message,
-            conversation_context, state, side_effects, events, t,
+            conversation_context + self._curiosity_suffix(trip, user_doc, phase, side_effects, events),
+            state, side_effects, events, t,
         )
 
     # ------------------------------------------------------------------
@@ -484,6 +493,42 @@ class PlanningSaga:
     # ------------------------------------------------------------------
     # delegation to content engines
     # ------------------------------------------------------------------
+
+    def _curiosity_suffix(
+        self,
+        trip: Optional[dict[str, Any]],
+        user_doc: dict[str, Any],
+        phase: str,
+        side_effects: list[SideEffect],
+        events: Any,
+    ) -> str:
+        """Task 42: pick at most one curiosity prompt for an exploratory /
+        reflective companion turn and return its framed (optional-aside) text to
+        append to the context. Once per day per trip (a ``scratchpad`` marker),
+        and only on companion turns — never on a slot question. Returns "" when
+        nothing should be injected. Called only on the taken companion branch,
+        so it runs at most once per turn."""
+        if phase not in ("DREAMING", "SHAPING", "REMEMBERING"):
+            return ""
+        scratch = (trip or {}).get("scratchpad") or {}
+        session_state = {
+            "curiosity_used_this_session": is_today_iso(scratch.get("curiosity_last_at")),
+        }
+        try:
+            prompt = get_injector().select(phase, user_doc, session_state, trip=trip)
+        except Exception:
+            logger.warning("curiosity injector failed; skipping.", exc_info=True)
+            return ""
+        if not prompt:
+            return ""
+        events.emit("metric", {
+            "name": "curiosity_prompt_injected", "id": prompt.id, "saga": self.name,
+        })
+        side_effects.append(SideEffect(
+            kind="trip_patch",
+            payload={"id": (trip or {}).get("id"), "scratchpad": {**scratch, "curiosity_last_at": today_iso()}},
+        ))
+        return frame_curiosity_prompt(prompt.text)
 
     def _delegate(
         self,

@@ -1,0 +1,274 @@
+# Curiosity prompts (task 42) — human-curated, source-cited.
+#
+# Each prompt gives the advisor permission to ask the kind of question a wise,
+# travel-loving friend would ask. The texts are deliberately CONCRETE and
+# low-effort — answerable in a few words or a light either/or — because a deep,
+# abstract question can fall flat coming from an AI. The literature lives in the
+# `rationale` (the *why*); the `text` is the de-intellectualised line the user
+# actually sees. Delivery as an optional aside is enforced separately by
+# `curiosity_injector.frame_curiosity_prompt`.
+#
+# trigger.requires_destination: true → only fires once the trip has a
+# destination (so the AI never cold-opens a personal question).
+
+# ── DREAMING — cold-open-safe openers (no destination assumed) ───────────────
+
+- id: anticipation
+  source: { author: "Alain de Botton", title: "The Art of Travel", year: 2002 }
+  trigger:
+    states: [DREAMING, SHAPING]
+    profile: { structure_preference_max: 0.7 }
+  text: "When you picture this trip, what's the first thing you see — a place, a meal, a certain kind of light?"
+  rationale: "de Botton: anticipation is often the trip's deepest pleasure. Surfaces the concrete mental image rather than asking for abstract 'goals'."
+
+- id: lost_or_mapped
+  source: { author: "Rebecca Solnit", title: "Wanderlust: A History of Walking", year: 2000 }
+  trigger:
+    states: [DREAMING, SHAPING]
+  text: "Quick gut read: more 'wander till I'm a little lost', or 'know roughly where I'm headed'?"
+  rationale: "Solnit on walking as open-ended discovery vs. destination. A binary is far easier to answer to an AI than 'how do you like to travel?'."
+
+- id: doing_or_nothing
+  source: { author: "Pico Iyer", title: "The Art of Stillness", year: 2014 }
+  trigger:
+    states: [DREAMING, SHAPING]
+  text: "Is this one about doing a lot — or finally doing not-much?"
+  rationale: "Iyer reframes stillness as the point of travel for some. Names the doing/stillness axis as a light either/or."
+
+- id: away_or_toward
+  source: { author: "Pico Iyer", title: "Why We Travel", year: 2000 }
+  trigger:
+    states: [DREAMING]
+  text: "Be honest — is this more about getting away from something, or heading toward something?"
+  rationale: "Iyer's essay on motive. 'Be honest' lowers the stakes; both options are concrete and self-flattering enough to answer."
+
+- id: one_word
+  source: { author: "Alain de Botton", title: "The Art of Travel", year: 2002 }
+  trigger:
+    states: [DREAMING]
+  text: "If the whole trip got just one word, what would you want it to be?"
+  rationale: "A single-word answer is the lowest-effort way to surface the felt intent behind the trip."
+
+- id: warm_or_crisp
+  source: { author: "Robert Macfarlane", title: "The Old Ways", year: 2012 }
+  trigger:
+    states: [DREAMING]
+  text: "Do you want it to feel warm and slow, or crisp and alive?"
+  rationale: "Macfarlane's attention to the texture of a place. Anchors mood to two sensory options, not an open question."
+
+- id: people_or_place
+  source: { author: "Philip L. Pearce", title: "Travel Career Ladder", year: 1988 }
+  trigger:
+    states: [DREAMING]
+    profile: { structure_preference_max: 0.7 }
+  text: "In the daydream, are there people around — or mostly just you and the place?"
+  rationale: "Pearce's social vs. self-directed motives, asked as a picture of the daydream rather than a personality quiz."
+
+- id: move_or_sit
+  source: { author: "Rolf Potts", title: "Vagabonding", year: 2003 }
+  trigger:
+    states: [DREAMING, SHAPING]
+  text: "In the picture in your head, are you moving a lot — or mostly settled somewhere good?"
+  rationale: "Potts on tempo as the real choice in travel. Pace surfaced as a concrete daydream, easy to answer."
+
+# ── SHAPING — slightly more personal; gated on a destination existing ────────
+
+- id: why_there
+  source: { author: "Alain de Botton", title: "The Art of Travel", year: 2002 }
+  trigger:
+    states: [SHAPING, ANCHORING]
+    requires_destination: true
+    profile: { structure_preference_max: 0.7 }
+  text: "Out of everywhere — why this place, do you think? Gut answer's fine."
+  rationale: "de Botton: the 'why' often hides the real hope for the trip. Gated to once a destination exists so it never cold-opens."
+
+- id: one_afternoon
+  source: { author: "Rick Steves", title: "Travel as a Political Act", year: 2009 }
+  trigger:
+    states: [SHAPING, ANCHORING]
+    requires_destination: true
+  text: "If you only got one afternoon there, where would you want to be?"
+  rationale: "Steves' experiential priority. A single-afternoon frame forces the one thing that matters, low effort."
+
+- id: deep_or_wide
+  source: { author: "Philip L. Pearce", title: "Travel Career Ladder", year: 1988 }
+  trigger:
+    states: [SHAPING, DETAILING]
+  text: "One place, gone deep — or a few, lighter touch?"
+  rationale: "Pearce's depth-vs-breadth motive as a clean binary that shapes the whole itinerary."
+
+- id: famous_or_quiet
+  source: { author: "Rick Steves", title: "Travel as a Political Act", year: 2009 }
+  trigger:
+    states: [SHAPING]
+    requires_destination: true
+  text: "More 'see the famous thing', or 'find the quiet corner near the famous thing'?"
+  rationale: "Steves on getting past the postcard. Two concrete modes, not a values lecture."
+
+- id: walk_or_settle
+  source: { author: "Rebecca Solnit", title: "Wanderlust: A History of Walking", year: 2000 }
+  trigger:
+    states: [SHAPING]
+    requires_destination: true
+  text: "Is this somewhere you want to walk a lot — or somewhere to settle into?"
+  rationale: "Solnit on walking as a way of knowing a place. Frames mobility as a felt preference."
+
+- id: food_share
+  source: { author: "Bill Bryson", title: "Notes from a Small Island", year: 1995 }
+  trigger:
+    states: [DREAMING, SHAPING]
+  text: "Be honest — how much of this trip is secretly about the food?"
+  rationale: "Bryson's comic candour. The humour gives permission to answer playfully, which beats a sincere AI question."
+
+- id: why_on_your_mind
+  source: { author: "Bruce Chatwin", title: "The Songlines", year: 1987 }
+  trigger:
+    states: [SHAPING]
+    requires_destination: true
+  text: "Any reason this place has been on your mind — a story, a person, a film?"
+  rationale: "Chatwin on places as carriers of story. Offers concrete hooks (story/person/film) so it isn't a blank prompt."
+
+- id: more_or_slower
+  source: { author: "Patrick Leigh Fermor", title: "A Time of Gifts", year: 1977 }
+  trigger:
+    states: [SHAPING, DETAILING]
+  text: "If you had a few extra days, would you add places — or just slow the ones you've got?"
+  rationale: "Leigh Fermor's unhurried, on-foot Europe. The hypothetical makes the add-vs-deepen instinct easy to voice."
+
+# ── ANCHORING — dates + destination firming up ───────────────────────────────
+
+- id: why_now
+  source: { author: "Rick Steves", title: "Travel as a Political Act", year: 2009 }
+  trigger:
+    states: [ANCHORING]
+    requires_destination: true
+  text: "Any reason this time of year — or just when life allows?"
+  rationale: "Seasons shape a trip. 'Or just when life allows' makes a non-answer perfectly fine, so it never feels like a quiz."
+
+- id: first_morning
+  source: { author: "Alain de Botton", title: "The Art of Travel", year: 2002 }
+  trigger:
+    states: [ANCHORING, READY_TO_GO]
+    requires_destination: true
+  text: "What do you hope the first morning there feels like?"
+  rationale: "de Botton's anticipation, made tangible to one specific morning rather than the whole trip."
+
+- id: one_splurge
+  source: { author: "Rolf Potts", title: "Vagabonding", year: 2003 }
+  trigger:
+    states: [ANCHORING, DETAILING]
+  text: "If you splurged on exactly one thing, what would it be?"
+  rationale: "Potts on spending intentionally. A single splurge reveals priorities without a budget interrogation."
+
+# ── DETAILING — building the days ────────────────────────────────────────────
+
+- id: anchor_day
+  source: { author: "Rick Steves", title: "Travel as a Political Act", year: 2009 }
+  trigger:
+    states: [DETAILING]
+  text: "Which day are you most looking forward to? Let's build around it."
+  rationale: "Steves' experiential anchoring; doubles as a useful planning pivot, so the question earns its place."
+
+- id: empty_afternoon
+  source: { author: "Pico Iyer", title: "The Art of Stillness", year: 2014 }
+  trigger:
+    states: [DETAILING]
+  text: "Want a genuinely empty afternoon built in — or keep it full?"
+  rationale: "Iyer on the value of doing nothing. Offers stillness as an explicit, low-effort opt-in."
+
+- id: gutted_to_miss
+  source: { author: "Philip L. Pearce", title: "Travel Career Ladder", year: 1988 }
+  trigger:
+    states: [DETAILING]
+  text: "What's the one thing you'd be gutted to miss?"
+  rationale: "Pearce's fulfilment motive; surfaces the non-negotiable so the plan protects it."
+
+# ── READY_TO_GO — departure within days ──────────────────────────────────────
+
+- id: leave_behind
+  source: { author: "Seneca", title: "Letters from a Stoic", year: 65 }
+  trigger:
+    states: [READY_TO_GO]
+  text: "Anything you're hoping to leave behind for a week — work, the phone, a certain mood?"
+  rationale: "Seneca: 'they change their climate, not their soul.' Asked lightly, with the opt-out baked in, so it isn't preachy."
+
+- id: one_intention
+  source: { author: "Pico Iyer", title: "The Art of Stillness", year: 2014 }
+  trigger:
+    states: [READY_TO_GO]
+  text: "One small intention for the trip — or would you rather not set one?"
+  rationale: "Iyer's reflective stance, with an explicit 'or not' so declining is a first-class answer."
+
+- id: open_to_change
+  source: { author: "Rolf Potts", title: "Vagabonding", year: 2003 }
+  trigger:
+    states: [READY_TO_GO]
+  text: "Once you're there, how open are you to the plan changing — totally, or you like the plan?"
+  rationale: "Potts on improvisation. Tells the advisor how tightly to hold the itinerary mid-trip."
+
+# ── LIVING — on the ground; minimal cognitive load ───────────────────────────
+
+- id: today_one_good
+  source: { author: "Rick Steves", title: "Travel as a Political Act", year: 2009 }
+  trigger:
+    states: [LIVING]
+  text: "If today had just one good thing in it, what would you want it to be?"
+  rationale: "Keeps the in-trip check ultra-light and forward-looking; one good thing is effortless to name."
+
+- id: noticed_today
+  source: { author: "Robert Macfarlane", title: "The Old Ways", year: 2012 }
+  trigger:
+    states: [LIVING]
+  text: "Anything catch your eye today you didn't expect?"
+  rationale: "Macfarlane's attentiveness to the overlooked, asked as a casual aside in the evening."
+
+- id: too_much_or_right
+  source: { author: "Pico Iyer", title: "The Art of Stillness", year: 2014 }
+  trigger:
+    states: [LIVING]
+  text: "Doing too much, too little, or about right?"
+  rationale: "Iyer's pace check, as a three-way the traveller can answer in one word — and the advisor can act on."
+
+# ── REMEMBERING — reflective, but kept light ─────────────────────────────────
+
+- id: stayed_with_you
+  source: { author: "Alain de Botton", title: "The Art of Travel", year: 2002 }
+  trigger:
+    states: [REMEMBERING]
+  text: "What's stayed with you most — and was it the thing you expected?"
+  rationale: "de Botton on the gap between anticipation and memory; a single concrete recollection, not a debrief."
+
+- id: would_tell_friend
+  source: { author: "Pico Iyer", title: "Why We Travel", year: 2000 }
+  trigger:
+    states: [REMEMBERING]
+  text: "What surprised you that you'd actually tell a friend about?"
+  rationale: "Iyer: we travel to bring stories home. The 'tell a friend' frame keeps it social and easy."
+
+- id: back_or_new
+  source: { author: "Philip L. Pearce", title: "Travel Career Ladder", year: 1988 }
+  trigger:
+    states: [REMEMBERING]
+  text: "Would you go back — or did it make you curious about somewhere new?"
+  rationale: "Pearce's career-ladder idea that each trip reshapes the next. Seeds the future trip from a simple binary."
+
+- id: shifted_anything
+  source: { author: "Maya Angelou", title: "All God's Children Need Traveling Shoes", year: 1986 }
+  trigger:
+    states: [REMEMBERING]
+  text: "Did it shift how you see anything back home, even a little?"
+  rationale: "Angelou on travel and belonging. 'Even a little' invites a modest answer instead of a grand one."
+
+- id: keep_one_memory
+  source: { author: "Bruce Chatwin", title: "The Songlines", year: 1987 }
+  trigger:
+    states: [REMEMBERING]
+  text: "If you kept just one memory from it, which would you keep?"
+  rationale: "Chatwin's sense of place-as-story; forces a single, vivid recollection worth saving to the journal."
+
+- id: do_differently
+  source: { author: "Rolf Potts", title: "Vagabonding", year: 2003 }
+  trigger:
+    states: [REMEMBERING]
+  text: "Anything you'd do differently next time? No big deal if not."
+  rationale: "Potts on travel as a practice you refine. The 'no big deal' tail removes any pressure to have a regret."
