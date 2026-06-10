@@ -98,6 +98,7 @@ when absent.
   entities.season = "winter"|"spring"|"summer"|"autumn"|null.
   entities.month = a month name if stated, else null.
   entities.named_trip = the name of an existing trip the user refers to, else null.
+  entities.intel_question = true if the user asks a factual question about a country's visa, safety, health/vaccines, money/currency, connectivity, plugs, transport, or climate (e.g. "do I need a visa?", "is it safe?", "what is the currency?"). false otherwise.
 
 STEP 6 — Fill "trip_directive" ONLY for TRIP/PLAN intents; use "unspecified"
 otherwise. It tells the planner whether the user wants to keep working on an
@@ -169,6 +170,7 @@ def _response_schema() -> types.Schema:
                     "season": types.Schema(type=types.Type.STRING, nullable=True),
                     "month": types.Schema(type=types.Type.STRING, nullable=True),
                     "named_trip": types.Schema(type=types.Type.STRING, nullable=True),
+                    "intel_question": types.Schema(type=types.Type.BOOLEAN, nullable=True),
                 },
             ),
         },
@@ -201,6 +203,7 @@ def _clean_entities(value: Any) -> Dict[str, Any]:
         cleaned = _clean(value.get(key))
         if cleaned:
             out[key] = cleaned
+    out["intel_question"] = bool(value.get("intel_question"))
     return out
 
 

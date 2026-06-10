@@ -15,7 +15,7 @@ def dispatcher():
 
 def test_registry_order(dispatcher):
     assert [s.name for s in dispatcher.sagas] == [
-        "PlanningSaga", "DiscoverySaga", "OffTopicSaga", "ChatSaga",
+        "CountryIntelSaga", "PlanningSaga", "DiscoverySaga", "OffTopicSaga", "ChatSaga",
     ]
 
 

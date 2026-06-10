@@ -44,7 +44,7 @@ class SearchAgent:
     def __init__(self, client: Optional[genai.Client] = None):
         self._client = client or get_client()
 
-    def search(self, queries: list[str] | str, format: str = "structured") -> str:
+    def search(self, queries: list[str] | str, format: str = "structured", model: str = _MODEL) -> str:
         """
         Search the web for current, time-sensitive information.
 
@@ -66,11 +66,11 @@ class SearchAgent:
         Returns:
             Factual results with source citations.
         """
-        text, _, _ = self.search_with_metadata(queries, format)
+        text, _, _ = self.search_with_metadata(queries, format, model=model)
         return text
 
     @traceable(name="search_agent.search_web")
-    def search_with_metadata(self, queries: list[str] | str, format: str = "structured") -> tuple[str, Any, float]:
+    def search_with_metadata(self, queries: list[str] | str, format: str = "structured", model: str = _MODEL) -> tuple[str, Any, float]:
         """Internal method that returns the text, raw response, and latency."""
         if isinstance(queries, str):
             queries = [queries]
@@ -81,7 +81,7 @@ class SearchAgent:
         try:
             response = gemini_generate(
                 self._client,
-                model=_MODEL,
+                model=model,
                 contents=f"Format: {format}\n\nQueries:\n{queries_text}",
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,

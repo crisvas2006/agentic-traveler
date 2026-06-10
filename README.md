@@ -715,7 +715,8 @@ isort .
 - **Real-time Context Awareness**: Weather-aware suggestions and adaptive itineraries based on current mood and energy.
 - **Safety & Moderation**: Integrated off-topic guard and multi-layer webhook security.
 - **Usage & Metrics Tracking**: Real-time per-user LLM usage and estimated credit cost tracking (where `1 credit = 1 eurocent`) inside the Supabase `usage_tracking` table, alongside weekly global analytics rollups flushed to the `analytics_weekly` table.
-- **Credits & Promo Codes**: Each new user is granted an initial credit balance. Top-ups and promo-code redemption live on the **web** (under Account Settings) — the previous Telegram `/promo <CODE>` command has been removed. When a user runs out of credits, both Telegram and web chat surface a message pointing them back to the web app to redeem or top up.
+- **Profile & Preference Sync** — Extracts hard overrides (e.g. "I'm vegan") and persists them via `ProfileAgent`.
+- **Country Intel Saga** — Background fetch of up-to-date entry rules, safety, health, and money facts when a destination is confirmed or requested. Top-ups and promo-code redemption live on the **web** (under Account Settings) — the previous Telegram `/promo <CODE>` command has been removed. When a user runs out of credits, both Telegram and web chat surface a message pointing them back to the web app to redeem or top up.
 - **Interactive CLI & Webhook**: Support for both local development (CLI) and production Telegram bot interactions.
 - **Feedback Loop**: Integrated tool for capturing user sentiment to refine future suggestions.
 

@@ -294,6 +294,38 @@ class TripRepository:
             logger.exception("delete_trip: failed for trip_id=%s", trip_id)
             raise
 
+    def upsert_country_intel(
+        self,
+        trip_id: str,
+        user_id: str,
+        snapshot: dict[str, Any],
+    ) -> Trip:
+        """
+        Merge the new snapshot into trips.country_intel[] keyed by iso_country.
+        Preserve prior snapshot sections that the new one left empty.
+        Set fetched_at only on populated sections.
+        """
+        self._assert_owner(trip_id, user_id)
+        trip = self.get_trip(trip_id)
+        if not trip:
+            raise ValueError(f"Trip {trip_id!r} not found.")
+
+        existing_intel = list(trip.country_intel)
+        iso = snapshot.get("iso_country")
+        
+        idx = next((i for i, info in enumerate(existing_intel) if info.get("iso_country") == iso), -1)
+        if idx >= 0:
+            existing = dict(existing_intel[idx])
+            for k, v in snapshot.items():
+                if k not in ("iso_country", "fetched_at") and not v and existing.get(k):
+                    continue
+                existing[k] = v
+            existing_intel[idx] = existing
+        else:
+            existing_intel.append(snapshot)
+
+        return self.upsert_trip(user_id, {"id": trip_id, "country_intel": existing_intel})
+
     # ------------------------------------------------------------------
     # Child tables — upserts
     # ------------------------------------------------------------------

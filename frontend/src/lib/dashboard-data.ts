@@ -29,6 +29,7 @@ export interface Trip {
   cover: TripCover;
   weather?: TripWeather;
   mood?: { last: string; suggested: string };
+  countryIntel?: any[];
 }
 
 export interface BlockPin {
@@ -82,6 +83,18 @@ export const TRIPS: Trip[] = [
     cover: { hue: 348, label: "京都", tone: "warm" },
     weather: { code: "rain", temp: "15°", note: "light drizzle until noon" },
     mood: { last: "tired", suggested: "low-energy morning, indoor afternoon" },
+    countryIntel: [
+      {
+        iso_country: "JP",
+        fetched_at: new Date().toISOString(),
+        entry: { visa_rule: "Visa-free up to 90 days for US/EU citizens.", validity: "90 days" },
+        safety: { summary: "Very low crime. Earthquakes can occur.", score_10: 9.5 },
+        health: { vaccines: ["Routine"], water_safe: true },
+        money: { currency: "Japanese Yen (JPY)", card_acceptance: "Widely accepted, but carry some cash for small shops.", tipping: "No tipping." },
+        connectivity: { esim_support: true, wifi_availability: "Common in hotels and cafes." },
+        climate_by_month: { summary: "April is mild with cherry blossoms. Light rain is possible." }
+      }
+    ],
   },
   {
     id: "patagonia",

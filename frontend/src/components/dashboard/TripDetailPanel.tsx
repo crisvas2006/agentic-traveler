@@ -6,6 +6,8 @@ import { TypeChip, EnergyBar } from "./DashChips";
 import {
   SparklesIcon, RainIcon, ChevronDownIcon, ClockIcon, WalkIcon, CheckIcon,
 } from "./DashIcons";
+import { CountryIntelStrip } from "./CountryIntelStrip";
+import { SafetyWarningBanner } from "./SafetyWarningBanner";
 
 /* ── Suggestion card ── */
 function SuggestionCard({ s }: { s: NonNullable<TripDay["suggestions"]>[number] }) {
@@ -483,6 +485,20 @@ export function TripDetailPanel({
       <PanelHeader trip={trip} day={day} />
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        
+        {trip.countryIntel?.map((intel, idx) => (
+          <SafetyWarningBanner 
+            key={`safety-${idx}`}
+            score={intel.safety?.score_10 ?? 10} 
+            country={intel.iso_country || "the region"}
+            sources={intel.sources}
+          />
+        ))}
+
+        {trip.countryIntel && trip.countryIntel.length > 0 && (
+          <CountryIntelStrip tripId={trip.id} countryIntel={trip.countryIntel} />
+        )}
+
         {/* Itinerary — AI note is rendered inside TimelineLayout (below strip),
             and inside the accordion's scroll area for other layouts */}
         {layout === "timeline" ? (
