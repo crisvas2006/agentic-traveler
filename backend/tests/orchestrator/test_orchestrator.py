@@ -188,3 +188,84 @@ def test_web_selection_illegal_value_is_rejected_no_write(mock_user_repo, patche
     # Illegal value → no trip write; the same slot is re-asked.
     patched_deps["trip_repo"].return_value.apply_side_effect.assert_not_called()
     assert resp["slot_request"]["slot"] == "pace"
+
+
+# ---------------------------------------------------------------------------
+# task 51 — global LLM cost deduction (contextvar funnel)
+# ---------------------------------------------------------------------------
+
+def test_turn_bills_usage_captured_by_nested_calls(mock_user_repo, patched_deps):
+    """AC-1: a tool that calls gemini_generate WITHOUT surfacing its raw
+    response to the orchestrator still gets billed at turn end."""
+    from types import SimpleNamespace
+    from agentic_traveler.orchestrator.client_factory import gemini_generate
+
+    mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
+    _route(patched_deps, intent="TRIP", raw_response=None)
+
+    nested_response = SimpleNamespace(
+        usage_metadata=SimpleNamespace(prompt_token_count=300, candidates_token_count=40),
+        candidates=[SimpleNamespace(grounding_metadata=None)],
+        text="parsed",
+    )
+    nested_client = MagicMock()
+    nested_client.models.generate_content.return_value = nested_response
+
+    owner = MagicMock()
+    owner.name = "BookingInputSaga"
+
+    def run_with_hidden_llm_call(*args, **kwargs):
+        gemini_generate(
+            nested_client, model="gemini-3.1-flash-lite", contents="x", config=None
+        )
+        return SagaResult(text="Found a flight. Add it?")
+
+    owner.run.side_effect = run_with_hidden_llm_call
+    patched_deps["dispatcher"].return_value.select.return_value = (owner, [])
+
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    resp = agent.process_request("123", "WZZ 1234 OTP-CTA")
+
+    assert resp["action"] == "RESPONSE"
+    patched_deps["credits"].record_usage_and_bill.assert_called_once()
+    billed = patched_deps["credits"].record_usage_and_bill.call_args.kwargs["token_records"]
+    assert {
+        "model_name": "gemini-3.1-flash-lite",
+        "input_tokens": 300,
+        "output_tokens": 40,
+        "total_tokens": 340,
+    } in billed
+
+
+def test_error_turn_is_not_billed_even_with_captured_usage(mock_user_repo, patched_deps):
+    """AC-2: LLM calls happened, but the turn failed — credits stay put."""
+    from types import SimpleNamespace
+    from agentic_traveler.orchestrator.client_factory import gemini_generate
+
+    mock_user_repo.get_user_with_ref.return_value = ({"user_name": "Alice"}, "user-id-123")
+    _route(patched_deps, intent="TRIP", raw_response=None)
+
+    nested_response = SimpleNamespace(
+        usage_metadata=SimpleNamespace(prompt_token_count=300, candidates_token_count=40),
+        candidates=[SimpleNamespace(grounding_metadata=None)],
+        text="partial",
+    )
+    nested_client = MagicMock()
+    nested_client.models.generate_content.return_value = nested_response
+
+    owner = MagicMock()
+    owner.name = "TripSaga"
+
+    def run_then_fail(*args, **kwargs):
+        gemini_generate(
+            nested_client, model="gemini-3.1-flash-lite", contents="x", config=None
+        )
+        return SagaResult(text="")  # empty → ERROR path
+
+    owner.run.side_effect = run_then_fail
+    patched_deps["dispatcher"].return_value.select.return_value = (owner, [])
+
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    agent.process_request("123", "anything")
+
+    patched_deps["credits"].record_usage_and_bill.assert_not_called()

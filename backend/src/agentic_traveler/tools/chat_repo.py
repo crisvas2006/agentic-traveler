@@ -241,9 +241,9 @@ class ChatRepository:
             .table("messages")
             .select("id, thread_id, sender_type, sender_user_id, body, source, metadata, created_at")
             .eq("thread_id", tid)
-            .text_search("body_tsv", query, options={"config": "simple", "type": "plain"})
             .order("id", desc=True)
             .limit(limit)
+            .text_search("body_tsv", query, options={"config": "simple", "type": "plain"})
             .execute()
         )
         return [_shape(r) for r in (resp.data or [])]

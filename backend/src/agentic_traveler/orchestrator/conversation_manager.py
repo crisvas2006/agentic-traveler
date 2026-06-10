@@ -20,7 +20,10 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from agentic_traveler.orchestrator.client_factory import gemini_generate
+from agentic_traveler.orchestrator.client_factory import (
+    gemini_generate,
+    suppress_usage_capture,
+)
 from agentic_traveler.core.observability import traceable
 
 from agentic_traveler.analytics import usage_tracker
@@ -211,25 +214,28 @@ Write ONLY the updated summary, nothing else.
 """
         try:
             t = time.time()
-            response = gemini_generate(
-                self.client,
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    max_output_tokens=1800,
-                    safety_settings=[
-                        types.SafetySetting(
-                            category=c,
-                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        ) for c in [
-                            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            # System-paid call: compaction must never enter the user's
+            # per-turn billing records (task 51); it self-logs below.
+            with suppress_usage_capture():
+                response = gemini_generate(
+                    self.client,
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=1800,
+                        safety_settings=[
+                            types.SafetySetting(
+                                category=c,
+                                threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            ) for c in [
+                                types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                                types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                            ]
                         ]
-                    ]
-                ),
-            )
+                    ),
+                )
             usage_tracker.log_and_accumulate(
                 agent_name="compaction",
                 model_name=self.model_name,

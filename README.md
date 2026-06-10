@@ -260,6 +260,15 @@ The orchestrator includes a custom metrics system designed for Cloud Run:
 *   **Threshold-based Flush**: Weekly metrics are written to Supabase (`analytics_weekly` table) every 50 events or on process shutdown.
 *   **Deduplicated Tracking**: Monitors active users per ISO week.
 *   **Token Accounting**: Tracks input/output tokens per model and per agent call.
+*   **Global cost capture (task 51)**: every LLM call funnels through
+    `client_factory.gemini_generate` / `gemini_generate_stream`, which append
+    token usage (and grounded-search costs) to a per-turn `ContextVar`
+    accumulator — so nested tools (e.g. the booking parser) are billed
+    correctly without threading usage records through return signatures.
+    System-paid calls (conversation compaction) run under
+    `suppress_usage_capture()` and never enter the user's deduction; the
+    self-billing country-intel background fetch runs outside the request
+    context and is likewise unaffected.
 *   **Failure visibility**: When an agent produces no usable response (empty
     output or an `ERROR` action), the turn is not charged, a `turn_failed`
     metric is emitted, and the LangSmith run is flagged as errored (it otherwise

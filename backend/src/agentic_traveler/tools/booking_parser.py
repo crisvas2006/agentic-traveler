@@ -10,7 +10,7 @@ from typing import Literal, Optional, Tuple, Any
 
 from pydantic import BaseModel
 
-from agentic_traveler.orchestrator.client_factory import get_client
+from agentic_traveler.orchestrator.client_factory import get_client, gemini_generate
 from google.genai import types
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,10 @@ def parse_booking(text: str) -> Tuple[BookingExtraction, Any]:
     )
 
     try:
-        response = client.models.generate_content(
+        # Through the funnel (task 51): traced in LangSmith AND billed —
+        # a direct client.models call here previously lost both.
+        response = gemini_generate(
+            client,
             model="gemini-3.1-flash-lite",
             contents=PROMPT.format(text=text),
             config=config,

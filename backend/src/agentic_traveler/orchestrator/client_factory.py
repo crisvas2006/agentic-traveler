@@ -1,6 +1,8 @@
+import contextvars
 import os
 import logging
 import time
+from contextlib import contextmanager
 from typing import Optional
 from google import genai
 from agentic_traveler.core.observability import traceable
@@ -10,6 +12,82 @@ from agentic_traveler.orchestrator.tool_events import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── Per-turn usage capture (task 51) ─────────────────────────────────────────
+# Every Gemini call funnels through gemini_generate / gemini_generate_stream,
+# so token usage is captured HERE and accumulated into a per-turn ContextVar —
+# nested tools (booking parser, slot extractor, …) get billed without having
+# to thread usage records back up through every return signature.
+#
+# Default None = no active turn (scripts, webhooks, self-billing background
+# work like the country-intel fetcher): capture is a silent no-op.
+#
+# Threading: ContextVars do NOT propagate into raw ThreadPoolExecutor.submit.
+# Work that must stay billable on a worker thread has to be submitted via
+# contextvars.copy_context().run(...) — the copied context references the
+# SAME list object, so appends land in the turn's records (task 48 note).
+current_turn_usage: contextvars.ContextVar[Optional[list]] = contextvars.ContextVar(
+    "current_turn_usage", default=None
+)
+
+
+def begin_usage_capture() -> list:
+    """Start a fresh usage list for this turn and return it. Always called at
+    turn start, which also clears any stale list left on a reused thread."""
+    records: list = []
+    current_turn_usage.set(records)
+    return records
+
+
+@contextmanager
+def suppress_usage_capture():
+    """Exclude a block's LLM calls from the user's turn billing — for system
+    work that pays its own way or is platform overhead (conversation
+    compaction today; the offline judge in task 47)."""
+    token = current_turn_usage.set(None)
+    try:
+        yield
+    finally:
+        current_turn_usage.reset(token)
+
+
+def _capture_usage(model: str, response) -> None:
+    """Append `response`'s token usage (and any grounding cost) to the active
+    turn's records. No active turn or no usage metadata → no-op. Never raises."""
+    records = current_turn_usage.get()
+    if records is None or response is None:
+        return
+    try:
+        usage = getattr(response, "usage_metadata", None)
+        input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
+        output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
+        if input_tokens or output_tokens:
+            records.append({
+                "model_name": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+            })
+            logger.info(
+                "📊 LLM usage | model=%s input_tokens=%d output_tokens=%d",
+                model, input_tokens, output_tokens,
+            )
+        # Grounded calls carry a per-prompt cost on top of tokens. Lazy imports:
+        # utils pulls in the weather tool, economy pulls Supabase — neither
+        # belongs in this module's import graph at startup.
+        from agentic_traveler.orchestrator.utils import has_grounding
+        if has_grounding(response):
+            from agentic_traveler.economy import credit_manager
+            records.append({
+                "model_name": "grounding",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "grounding_count": 1,
+                "grounding_cost_credits": credit_manager.calculate_grounding_cost(1),
+            })
+    except Exception:
+        logger.warning("Usage capture failed for model=%s.", model, exc_info=True)
 
 class MockGenAIClient:
     class MockModels:
@@ -129,8 +207,11 @@ def _trace_inputs(inputs: dict) -> dict:
 @traceable(name="gemini.generate_content", process_inputs=_trace_inputs)
 def gemini_generate(client, *, model: str, contents, config):
     """Single traced wrapper around `client.models.generate_content` — every
-    Gemini call goes through here so prompts appear in LangSmith traces."""
-    return client.models.generate_content(model=model, contents=contents, config=config)
+    Gemini call goes through here so prompts appear in LangSmith traces and
+    token usage lands in the turn's billing records (task 51)."""
+    response = client.models.generate_content(model=model, contents=contents, config=config)
+    _capture_usage(model, response)
+    return response
 
 
 @traceable(name="gemini.generate_content_stream", process_inputs=_trace_inputs)
@@ -158,6 +239,8 @@ def gemini_generate_stream(client, *, model: str, contents, config, on_delta=Non
             full.append(text)
             if on_delta is not None:
                 on_delta(text)
+    # The final chunk carries the cumulative usage for the whole stream.
+    _capture_usage(model, last)
     return last, "".join(full)
 
 

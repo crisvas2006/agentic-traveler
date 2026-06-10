@@ -34,9 +34,8 @@ from typing import Any, Callable, Dict, Optional
 
 from agentic_traveler.economy import credit_manager
 from agentic_traveler.guards import off_topic_guard
-from agentic_traveler.analytics import usage_tracker
 from agentic_traveler.analytics import metrics_tracker
-from agentic_traveler.orchestrator.client_factory import get_client
+from agentic_traveler.orchestrator.client_factory import begin_usage_capture, get_client
 from agentic_traveler.core.observability import (
     traceable,
     attach_run_metadata,
@@ -212,7 +211,9 @@ class OrchestratorAgent:
         save behave identically across channels.
         """
         t_total = time.time()
-        token_records: list[Dict[str, Any]] = []
+        # Task 51: every gemini_generate call this turn — whichever agent,
+        # saga, or nested tool makes it — appends its usage to this list.
+        token_records: list[Dict[str, Any]] = begin_usage_capture()
         events = EventEmitter(
             user_id=user_id, trip_id=None,
             on_status=status_callback, on_delta=delta_callback,
@@ -259,19 +260,7 @@ class OrchestratorAgent:
         )
         logger.info("⏱ Router: %s", _elapsed(t))
 
-        # Log router token usage
-        raw_router = router_result.get("raw_response")
-        if raw_router and hasattr(raw_router, "usage_metadata"):
-            router_usage = usage_tracker.log_and_accumulate(
-                agent_name="router",
-                model_name="gemini-3.1-flash-lite",
-                user_id=telegram_user_id,
-                response=raw_router,
-                latency_ms=router_result.get("latency_ms", 0),
-            )
-            if router_usage.get("total_tokens", 0) > 0:
-                token_records.append(router_usage)
-
+        # Router token usage is captured by the gemini_generate funnel (task 51).
         intent = router_result.get("intent", "CHAT")
         preference_raw = router_result.get("preference_raw")
         router_response = router_result.get("response")
@@ -351,49 +340,9 @@ class OrchestratorAgent:
         if not response_text:
             response_text = _ERROR_FALLBACK
 
-        # Log specialized agent usage
-        raw_agent = agent_result.get("_raw_response")
-        if raw_agent and hasattr(raw_agent, "usage_metadata"):
-            agent_name = {"CHAT": "chat", "TRIP": "trip", "PLAN": "planner"}.get(intent, "agent")
-            model_name = {
-                "CHAT": "gemini-3.1-flash-lite",
-                "TRIP": "gemini-3.5-flash",
-                "PLAN": "gemini-3.5-flash",
-            }.get(intent, "gemini-3.5-flash")
-            agent_usage = usage_tracker.log_and_accumulate(
-                agent_name=agent_name,
-                model_name=model_name,
-                user_id=telegram_user_id,
-                response=raw_agent,
-                latency_ms=agent_result.get("_latency_ms", 0),
-            )
-            if agent_usage.get("total_tokens", 0) > 0:
-                token_records.append(agent_usage)
-
-        # Log SearchAgent usage (including grounding)
-        search_responses = agent_result.get("_search_responses", [])
-        for sr in search_responses:
-            raw_search = sr.get("raw")
-            if raw_search and hasattr(raw_search, "usage_metadata"):
-                search_usage = usage_tracker.log_and_accumulate(
-                    agent_name="search",
-                    model_name="gemini-3.1-flash-lite",
-                    user_id=telegram_user_id,
-                    response=raw_search,
-                    latency_ms=sr.get("lat", 0),
-                )
-                if search_usage.get("total_tokens", 0) > 0:
-                    token_records.append(search_usage)
-
-                grounding_credits = search_usage.get("grounding_cost_credits", 0)
-                if grounding_credits > 0:
-                    token_records.append({
-                        "model_name": "grounding",
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "total_tokens": 0,
-                        "grounding_cost_credits": grounding_credits,
-                    })
+        # Specialized-agent, search, and nested-tool usage (incl. grounding
+        # costs) all arrive in token_records via the funnel (task 51) — no
+        # per-agent raw-response scraping anymore.
 
         # Surface agent failures before the metrics flush below: flag the run in
         # LangSmith (otherwise recorded as successful, since we return a graceful
@@ -467,7 +416,9 @@ class OrchestratorAgent:
         before any write (trust-but-verify, §5): an illegal/free-text/unknown
         slot is ignored (logged WARN) and the same slot is simply re-asked."""
         t_total = time.time()
-        token_records: list[Dict[str, Any]] = []
+        # Task 51: selection turns are zero-LLM by design, but a completed trip
+        # may run the planner — the funnel captures whatever actually ran.
+        token_records: list[Dict[str, Any]] = begin_usage_capture()
         events = EventEmitter(
             user_id=user_id, trip_id=None,
             on_status=status_callback, on_delta=delta_callback,
@@ -557,18 +508,8 @@ class OrchestratorAgent:
             "I had trouble continuing just now. Please try again."
         )
 
-        # Log delegated-agent usage (a completed trip may have run the planner).
-        if result is not None and getattr(result, "_raw_response", None) is not None:
-            raw_agent = result._raw_response
-            if hasattr(raw_agent, "usage_metadata"):
-                agent_usage = usage_tracker.log_and_accumulate(
-                    agent_name="planner", model_name="gemini-3.5-flash",
-                    user_id=telegram_user_id, response=raw_agent,
-                    latency_ms=getattr(result, "_latency_ms", 0),
-                )
-                if agent_usage.get("total_tokens", 0) > 0:
-                    token_records.append(agent_usage)
-
+        # Delegated-agent usage (a completed trip may have run the planner)
+        # arrives in token_records via the funnel (task 51).
         _save_and_finish(
             self, user_doc, user_id, label, response_text,
             telegram_user_id, token_records, t_total, events, "PLAN",
