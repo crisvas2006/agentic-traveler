@@ -1,6 +1,6 @@
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Zap, Check, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import Link from "next/link";
 import { Reveal } from "@/components/ui/Reveal";
 
@@ -50,9 +50,9 @@ export default function PricingPage() {
                   ))}
                 </ul>
 
-                <Button className="w-full h-12 rounded-full text-base font-bold shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all hover:scale-[1.02]" asChild>
-                  <Link href="/#email-input">Get early access</Link>
-                </Button>
+                <Link href="/#email-input" className={buttonVariants({ className: "w-full h-12 rounded-full text-base font-bold shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all hover:scale-[1.02]" })}>
+                  Get early access
+                </Link>
 
                 <p className="text-center mt-5 text-xs text-muted-foreground">
                   No credit card. Just your email.

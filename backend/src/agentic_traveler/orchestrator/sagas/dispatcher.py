@@ -17,6 +17,7 @@ from agentic_traveler.orchestrator.sagas.discovery import DiscoverySaga
 from agentic_traveler.orchestrator.sagas.off_topic import OffTopicSaga
 from agentic_traveler.orchestrator.sagas.planning import PlanningSaga
 from agentic_traveler.orchestrator.sagas.country_intel import CountryIntelSaga
+from agentic_traveler.orchestrator.sagas.booking_input import BookingInputSaga
 
 
 class SagaDispatcher:
@@ -25,6 +26,7 @@ class SagaDispatcher:
     def __init__(self, client: Any = None):
         # Priority order: specialised owners first, ChatSaga last as fallback.
         self._sagas: list[BaseSaga] = [
+            BookingInputSaga(),
             CountryIntelSaga(client),
             PlanningSaga(client),
             DiscoverySaga(client),

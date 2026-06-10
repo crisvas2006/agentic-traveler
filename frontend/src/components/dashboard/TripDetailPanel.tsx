@@ -8,6 +8,10 @@ import {
 } from "./DashIcons";
 import { CountryIntelStrip } from "./CountryIntelStrip";
 import { SafetyWarningBanner } from "./SafetyWarningBanner";
+import { LogisticsRail } from "./LogisticsRail";
+import { BookingFormSheet } from "./BookingFormSheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
 
 /* ── Suggestion card ── */
 function SuggestionCard({ s }: { s: NonNullable<TripDay["suggestions"]>[number] }) {
@@ -156,10 +160,11 @@ function BlockRow({
 
 /* ── Accordion layout ── */
 function AccordionLayout({
-  days, todayN, activeDayN, setActiveDayN, density,
+  days, todayN, activeDayN, setActiveDayN, density, bookings = []
 }: {
   days: TripDay[]; todayN: number; activeDayN: number;
   setActiveDayN: (n: number | null) => void; density: Density;
+  bookings?: TripBooking[];
 }) {
   // Block IDs are unique across all days — one flat Set covers everything.
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
@@ -177,6 +182,12 @@ function AccordionLayout({
         const open = d.n === activeDayN;
         const isToday = d.n === todayN;
         const isPast = d.status === "past";
+        
+        const dayBookings = bookings.filter(b => {
+          if (!b.datetime_local) return false;
+          const bDate = b.datetime_local.split("T")[0];
+          return bDate === d.isoDate;
+        });
 
         // Highlight the block immediately after the highest-indexed done block
         // for this day. If none done → highlight first; if all done → no highlight.
@@ -232,6 +243,22 @@ function AccordionLayout({
             </button>
             {open && (
               <div className="px-2.5 pb-3 space-y-1.5 animate-fade-up">
+                {dayBookings.length > 0 && (
+                  <div className="mb-3 px-1">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 ml-1">
+                      Linked Bookings
+                    </div>
+                    <div className="flex flex-col gap-1.5 border-l-2 border-primary/20 pl-2">
+                      {dayBookings.map(b => (
+                        <div key={b.id} className="text-xs bg-slate-50 border border-border p-2 rounded-md flex items-center gap-2">
+                           <span className="font-semibold">{b.kind === "flight" ? "Flight" : b.kind === "accommodation" ? "Stay" : "Booking"}:</span>
+                           <span className="truncate">{b.payload?.airline || b.payload?.name || "Confirmed"}</span>
+                           <span className="ml-auto text-muted-foreground">{b.datetime_local?.split("T")[1] || ""}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {d.blocks.map((b, i) => (
                   <BlockRow
                     key={b.id}
@@ -447,6 +474,11 @@ function PanelHeader({ trip, day }: { trip: Trip; day: TripDay }) {
           >
             Expand ↗
           </button>
+          {(trip.bookings?.length ?? 0) > 0 && (
+            <div className="text-[10px] font-medium text-primary mt-1">
+              {trip.bookings?.length} Booking{trip.bookings?.length !== 1 ? 's' : ''} saved
+            </div>
+          )}
         </div>
       </div>
     </header>
@@ -471,9 +503,12 @@ export function TripDetailPanel({
   activeDayN,
   setActiveDayN,
 }: TripDetailPanelProps) {
+  const [showLogistics, setShowLogistics] = useState(false);
+  const [editingBooking, setEditingBooking] = useState<Partial<TripBooking> | null>(null);
+
   const day = days.find((d) => d.n === activeDayN) || days.find((d) => d.n === todayN)!;
 
-  const layoutProps = { days, todayN, activeDayN, setActiveDayN: setActiveDayN as (n: number) => void, density };
+  const layoutProps = { days, todayN, activeDayN, setActiveDayN: setActiveDayN as (n: number) => void, density, bookings: trip.bookings || [] };
   // Only surface the AI note for today; other days have no note.
   const todayNote = day.n === todayN ? day.note : undefined;
 
@@ -485,6 +520,12 @@ export function TripDetailPanel({
       <PanelHeader trip={trip} day={day} />
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        
+        <div className="flex items-center justify-between mb-2">
+          <Button variant="outline" size="sm" onClick={() => setShowLogistics(true)}>
+            View Logistics & Bookings
+          </Button>
+        </div>
         
         {trip.countryIntel?.map((intel, idx) => (
           <SafetyWarningBanner 
@@ -538,6 +579,25 @@ export function TripDetailPanel({
           </section>
         )}
       </div>
+
+      <Sheet open={showLogistics} onOpenChange={setShowLogistics}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto p-0">
+          <LogisticsRail
+            bookings={trip.bookings || []}
+            onEdit={(b) => setEditingBooking(b)}
+            onAdd={(kind) => setEditingBooking({ kind, trip_id: trip.id, payload: {} })}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <BookingFormSheet
+        booking={editingBooking}
+        onClose={() => setEditingBooking(null)}
+        onSave={() => {
+          // In a real implementation this would trigger an API call to save the booking
+          setEditingBooking(null);
+        }}
+      />
     </div>
   );
 }

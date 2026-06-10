@@ -13,6 +13,42 @@ export interface TripCover {
   tone: "warm" | "cool";
 }
 
+export interface TripChecklistItem {
+  id: string;
+  text: string;
+  status: "done" | "todo" | "idea";
+}
+
+export interface TripBookingPayload {
+  kind?: "flight" | "accommodation" | "ground" | "restaurant" | "activity";
+  airline?: string;
+  number?: string;
+  from_?: string;
+  to?: string;
+  depart_local?: string;
+  arrive_local?: string;
+  name?: string;
+  address?: string;
+  check_in?: string;
+  check_out?: string;
+  datetime_local?: string;
+  reservation_status?: string;
+  confirmation_code?: string;
+  notes?: string;
+  [key: string]: unknown;
+}
+
+export interface TripBooking {
+  id: string;
+  trip_id: string;
+  kind: "flight" | "accommodation" | "ground" | "restaurant" | "activity" | "other";
+  datetime_local?: string;
+  confirmation_code?: string;
+  payload: TripBookingPayload;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TripWeather {
   code: string;
   temp: string;
@@ -28,8 +64,9 @@ export interface Trip {
   dayLabel: string;
   cover: TripCover;
   weather?: TripWeather;
+  bookings?: TripBooking[];
   mood?: { last: string; suggested: string };
-  countryIntel?: any[];
+  countryIntel?: unknown[];
 }
 
 export interface BlockPin {
@@ -59,6 +96,7 @@ export interface DaySuggestion {
 export interface TripDay {
   n: number;
   date: string;
+  isoDate?: string;
   title: string;
   status: DayStatus;
   energy: number;
@@ -118,7 +156,7 @@ export const TRIPS: Trip[] = [
 
 export const KYOTO_DAYS: TripDay[] = [
   {
-    n: 1, date: "Mon · Apr 14", title: "Arrival & easing in",
+    n: 1, date: "Mon · Apr 14", isoDate: "2026-04-14", title: "Arrival & easing in",
     status: "past", energy: 2,
     blocks: [
       {
@@ -142,7 +180,7 @@ export const KYOTO_DAYS: TripDay[] = [
     ],
   },
   {
-    n: 2, date: "Tue · Apr 15", title: "Higashiyama hills",
+    n: 2, date: "Tue · Apr 15", isoDate: "2026-04-15", title: "Higashiyama hills",
     status: "past", energy: 4,
     blocks: [
       {
@@ -166,7 +204,7 @@ export const KYOTO_DAYS: TripDay[] = [
     ],
   },
   {
-    n: 3, date: "Wed · Apr 16", title: "Slow temples, rivers, alleys",
+    n: 3, date: "Wed · Apr 16", isoDate: "2026-04-16", title: "Slow temples, rivers, alleys",
     status: "today", energy: 2, weather: "light rain",
     note: "You said you felt tired. Plan is dialled down — indoor temples, no long walks.",
     blocks: [
@@ -201,7 +239,7 @@ export const KYOTO_DAYS: TripDay[] = [
     ],
   },
   {
-    n: 4, date: "Thu · Apr 17", title: "Arashiyama bamboo grove",
+    n: 4, date: "Thu · Apr 17", isoDate: "2026-04-17", title: "Arashiyama bamboo grove",
     status: "future", energy: 3,
     blocks: [
       {
@@ -225,7 +263,7 @@ export const KYOTO_DAYS: TripDay[] = [
     ],
   },
   {
-    n: 5, date: "Fri · Apr 18", title: "Fushimi Inari at dawn",
+    n: 5, date: "Fri · Apr 18", isoDate: "2026-04-18", title: "Fushimi Inari at dawn",
     status: "future", energy: 4,
     blocks: [
       {

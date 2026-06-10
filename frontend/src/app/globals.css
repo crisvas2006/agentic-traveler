@@ -16,6 +16,10 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
   --radius-xl: var(--radius);
   
   --animate-float: float 20s ease-in-out infinite;
@@ -38,6 +42,10 @@
   --border: #e2e8f0;
   --input: #e2e8f0;
   --ring: #3b82f6;
+  --popover: #ffffff;
+  --popover-foreground: #020617;
+  --card: #ffffff;
+  --card-foreground: #020617;
   --radius: 2rem;
 }
 
@@ -55,6 +63,10 @@
   --border: #2a3754;
   --input: #2a3754;
   --ring: #3b82f6;
+  --popover: #0a1224;
+  --popover-foreground: #f1f5fb;
+  --card: #0a1224;
+  --card-foreground: #f1f5fb;
 }
 
 body {

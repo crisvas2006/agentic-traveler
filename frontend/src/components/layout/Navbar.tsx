@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Sun, Moon, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { useTheme } from "./ThemeProvider";
 
 export function Navbar() {
@@ -50,9 +50,9 @@ export function Navbar() {
             <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
           </Button>
 
-          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary hover:bg-primary/10 hidden sm:flex rounded-full" asChild>
-            <Link href="/#email-input">Request Access</Link>
-          </Button>
+          <Link href="/#email-input" className={buttonVariants({ variant: "ghost", size: "sm", className: "text-muted-foreground hover:text-primary hover:bg-primary/10 hidden sm:flex rounded-full" })}>
+            Request Access
+          </Link>
         </div>
       </div>
     </nav>

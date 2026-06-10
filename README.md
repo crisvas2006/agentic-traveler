@@ -166,7 +166,12 @@ Core agents (tool-calling architecture):
 
     *   Converts raw Tally form responses into a structured "Traveler DNA" profile.
 
-8.  **Conversation Manager**
+8.  **Booking Input Saga** — unstructured booking parser
+
+    *   Parses pasted flight/hotel confirmations into structured JSON data.
+    *   Stateful 2-turn saga: parse -> verify -> upsert to the active trip.
+
+9.  **Conversation Manager**
 
     *   Stores recent messages + compacted summary in Supabase `conversations` table.
 
