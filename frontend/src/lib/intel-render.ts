@@ -1,4 +1,16 @@
-export function formatIntelCard(type: string, data: any): { title: string; content: string; icon: string } {
+interface IntelData {
+  visa_rule?: string;
+  summary?: string;
+  vaccines?: string[];
+  water_safe?: boolean;
+  currency?: string;
+  card_acceptance?: string;
+  tipping?: string;
+  esim_support?: boolean;
+  wifi_availability?: string;
+}
+
+export function formatIntelCard(type: string, data: IntelData | null | undefined): { title: string; content: string; icon: string } {
   const isMissing = !data || Object.keys(data).length === 0;
 
   switch (type) {

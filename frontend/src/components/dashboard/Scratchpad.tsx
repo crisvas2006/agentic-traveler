@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { TripScratchpad, TripPhase } from "@/lib/dashboard-data";
+import type { TripScratchpad } from "@/lib/dashboard-data";
 import { ChevronDownIcon, CheckIcon, SparklesIcon } from "./DashIcons";
 
 /**

@@ -171,7 +171,23 @@ Core agents (tool-calling architecture):
     *   Parses pasted flight/hotel confirmations into structured JSON data.
     *   Stateful 2-turn saga: parse -> verify -> upsert to the active trip.
 
-9.  **Conversation Manager**
+9.  **Mood Check-in & Journal Sagas** — trip lifecycle endpoints (Task 41)
+
+    *   **MoodCheckinSaga** (listener, only while a trip is `LIVING`): captures
+        a volunteered mood — free text or the dashboard's mood widget message —
+        into `trips.live_state.last_mood` (deterministic fast-path for the
+        widget, keyword-gated `flash-lite` for free text), and once per day, if
+        none is logged, surfaces a soft mood prompt as a status nudge (never
+        interrupts a question). The latest mood is folded into the
+        TripAgent/PlannerAgent context so pacing and swap suggestions adapt to
+        how the traveler feels.
+    *   **JournalSaga** (`REMEMBERING` window, ≤30 days post-trip): offers at
+        most one reflection prompt per day on a low-substance turn, and
+        otherwise silently captures reflections (entry + highlights/regrets via
+        `flash-lite`) into `trips.journal` while the companion answers. Never
+        interrogates.
+
+10. **Conversation Manager**
 
     *   Stores recent messages + compacted summary in Supabase `conversations` table.
 

@@ -272,9 +272,10 @@ export function ProfileDropdown({
   }, [onClose, containerRef, excludeRef]);
 
   /* Refetch credits on dropdown open */
+  const { refetchCredits } = userProfile;
   useEffect(() => {
-    userProfile.refetchCredits?.();
-  }, [userProfile.refetchCredits]);
+    refetchCredits?.();
+  }, [refetchCredits]);
 
   const [showInfo, setShowInfo] = useState(false);
   const [expandedTags, setExpandedTags] = useState(false);

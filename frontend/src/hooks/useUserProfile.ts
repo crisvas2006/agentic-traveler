@@ -8,7 +8,7 @@ export interface UserProfile {
   email: string;
   initials: string;
   dnaTags: string[];
-  formResponse: any;
+  formResponse: Record<string, unknown> | null;
   summary: string;
   hasCompletedForm: boolean;
   balance: number;
@@ -123,7 +123,7 @@ export function useUserProfile(): UserProfile {
       const rawProfile = usersResult.data.user_profiles;
       const profileRow = (Array.isArray(rawProfile) ? rawProfile[0] : rawProfile) as {
         profile_data: { tags?: string[] } | null;
-        form_response: any;
+        form_response: Record<string, unknown> | null;
         summary: string | null;
       } | null;
       const name = usersResult.data.name || email.split("@")[0] || "Traveler";

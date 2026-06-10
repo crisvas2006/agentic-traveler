@@ -26,7 +26,7 @@ export default function TermsPage() {
               <section>
                 <h2 className="text-xl font-bold text-foreground mb-3">2. Alpha Phase Disclaimer</h2>
                 <p>
-                  Aletheia Travel is currently in an alpha development phase. The service is provided "as is" and "as available" without any warranties of any kind. We do not guarantee that the service will be uninterrupted, error-free, or completely accurate in its suggestions.
+                  Aletheia Travel is currently in an alpha development phase. The service is provided &quot;as is&quot; and &quot;as available&quot; without any warranties of any kind. We do not guarantee that the service will be uninterrupted, error-free, or completely accurate in its suggestions.
                 </p>
               </section>
 

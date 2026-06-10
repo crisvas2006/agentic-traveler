@@ -45,7 +45,7 @@ export function CountryIntelStrip({ tripId, countryIntel, destination }: Country
       } else {
         setRefreshing(prev => ({ ...prev, [iso]: false }));
       }
-    } catch (e) {
+    } catch {
       setRefreshing(prev => ({ ...prev, [iso]: false }));
     }
   };

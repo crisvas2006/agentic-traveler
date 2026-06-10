@@ -95,7 +95,7 @@ export default function PrivacyPage() {
                   </li>
                 </ul>
                 <p className="mt-4 text-xs text-muted-foreground leading-relaxed">
-                  <strong>Important Notice:</strong> We share this data specifically to generate personalized travel suggestions, build day-by-day itineraries, and monitor system performance and safety logs in real time. Because your chat prompts and the AI's replies are processed by these services to fulfill your requests, <strong>you must not type or paste passwords, credit cards, or other sensitive secrets into the chat interface.</strong>
+                  <strong>Important Notice:</strong> We share this data specifically to generate personalized travel suggestions, build day-by-day itineraries, and monitor system performance and safety logs in real time. Because your chat prompts and the AI&apos;s replies are processed by these services to fulfill your requests, <strong>you must not type or paste passwords, credit cards, or other sensitive secrets into the chat interface.</strong>
                 </p>
               </section>
 

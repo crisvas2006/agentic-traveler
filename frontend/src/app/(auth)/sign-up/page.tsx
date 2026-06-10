@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+
 import Link from "next/link";
 import { Sparkles, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User, Compass, Check, Zap } from "lucide-react";
 import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
@@ -82,7 +82,6 @@ function SignUpMarketing() {
 const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 function SignUpForm() {
-  const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -169,7 +168,7 @@ function SignUpForm() {
           </div>
           <h3 className="text-lg font-bold text-foreground mb-2">Already have an account?</h3>
           <p className="text-sm text-muted-foreground mb-6">
-            This email is already registered. Sign in to pick up where you left off — or reset your password if you've lost access.
+            This email is already registered. Sign in to pick up where you left off — or reset your password if you&apos;ve lost access.
           </p>
           <Link
             href="/login"

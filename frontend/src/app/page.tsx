@@ -268,24 +268,25 @@ function CTASection() {
       const lastSubmitTime = parseInt(lastSubmitStr, 10);
       const timeSinceLastSubmit = Date.now() - lastSubmitTime;
       if (timeSinceLastSubmit < 60000) {
-        setCooldown(Math.ceil((60000 - timeSinceLastSubmit) / 1000));
+        setTimeout(() => setCooldown(Math.ceil((60000 - timeSinceLastSubmit) / 1000)), 0);
       }
     }
   }, []);
 
   // Live countdown timer
   React.useEffect(() => {
-    if (cooldown <= 0) {
-      if (status.type === 'error' && status.message.includes('wait')) {
-        setStatus({ type: null, message: "" }); // Clear rate limit error when done
-      }
-      return;
-    }
+    if (cooldown <= 0) return;
     const timer = setInterval(() => {
-      setCooldown(prev => prev - 1);
+      setCooldown(prev => {
+        if (prev <= 1) {
+          setStatus(s => (s.type === 'error' && s.message.includes('wait') ? { type: null, message: "" } : s));
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
     return () => clearInterval(timer);
-  }, [cooldown, status]);
+  }, [cooldown]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

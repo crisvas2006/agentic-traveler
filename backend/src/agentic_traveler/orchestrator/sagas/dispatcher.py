@@ -18,6 +18,8 @@ from agentic_traveler.orchestrator.sagas.off_topic import OffTopicSaga
 from agentic_traveler.orchestrator.sagas.planning import PlanningSaga
 from agentic_traveler.orchestrator.sagas.country_intel import CountryIntelSaga
 from agentic_traveler.orchestrator.sagas.booking_input import BookingInputSaga
+from agentic_traveler.orchestrator.sagas.mood_checkin import MoodCheckinSaga
+from agentic_traveler.orchestrator.sagas.journal import JournalSaga
 
 
 class SagaDispatcher:
@@ -25,16 +27,20 @@ class SagaDispatcher:
 
     def __init__(self, client: Any = None):
         # Priority order: specialised owners first, ChatSaga last as fallback.
+        # Lifecycle listeners (mood/journal) sit ahead of the generic owners so
+        # JournalSaga can own a low-substance REMEMBERING turn before ChatSaga's
+        # fallback, while MoodCheckinSaga only ever listens (task 41).
         self._sagas: list[BaseSaga] = [
             BookingInputSaga(),
             CountryIntelSaga(client),
+            MoodCheckinSaga(client),
+            JournalSaga(client),
             PlanningSaga(client),
             DiscoverySaga(client),
             OffTopicSaga(client),
             ChatSaga(client),
         ]
-        # Future tasks register BookingInputSaga,
-        # MoodCheckinSaga, JournalSaga, MemorySearchSaga here.
+        # Future tasks register MemorySearchSaga here.
 
     @property
     def sagas(self) -> list[BaseSaga]:

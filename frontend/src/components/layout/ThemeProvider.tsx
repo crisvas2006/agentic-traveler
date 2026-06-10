@@ -12,16 +12,16 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Use "system" as default, but we'll try to load from localStorage on mount
-  const [theme, setThemeState] = useState<Theme>("system");
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("theme") as Theme | null) || "system";
+    }
+    return "system";
+  });
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme") as Theme | null;
-    if (savedTheme) {
-      setThemeState(savedTheme);
-    }
-    setMounted(true);
+    setTimeout(() => setMounted(true), 0);
   }, []);
 
   useEffect(() => {

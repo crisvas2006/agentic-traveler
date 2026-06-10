@@ -31,6 +31,7 @@ from agentic_traveler.orchestrator.sagas.base import (
 )
 from agentic_traveler.orchestrator.sagas.saga_state import derive_saga_state_local
 from agentic_traveler.orchestrator.sagas.slot_extractor import extract_trip_slots
+from agentic_traveler.orchestrator.profile_utils import build_live_context
 from agentic_traveler.orchestrator.trip_agent import TripAgent
 
 logger = logging.getLogger(__name__)
@@ -330,6 +331,9 @@ class PlanningSaga:
         """Route a planning turn once the trip reflects any writes staged this
         turn. Shared by ``run`` (after extraction) and ``run_after_selection``
         (deterministic tap, no extraction)."""
+        # Task 41 AC-4: fold the latest mood check-in into the context so the
+        # content engines (TripAgent / PlannerAgent) adapt pacing and swaps.
+        conversation_context = conversation_context + build_live_context(trip)
         phase = derive_saga_state_local(trip)
         missing = self._first_missing_slot(trip, overrides)
         intent = state.get("intent", "")

@@ -6,7 +6,27 @@ ProfileAgent.  This module turns it into a short narrative that any LLM
 agent can consume without needing to know the raw field names.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+
+def build_live_context(trip: Optional[Dict[str, Any]]) -> str:
+    """Task 41 (AC-4): a one-line context hint built from the trip's most
+    recent mood check-in, so the TripAgent/PlannerAgent adapt today's pacing
+    and swaps to how the traveler is feeling. Returns "" when no mood is
+    logged (so nothing is injected). The mood is written by MoodCheckinSaga
+    into ``trips.live_state.last_mood``; it surfaces on the turn after it's
+    logged (the trip is re-hydrated each turn)."""
+    last = ((trip or {}).get("live_state") or {}).get("last_mood") or {}
+    label = last.get("label")
+    if not label:
+        return ""
+    energy = last.get("energy")
+    energy_str = f" (energy {energy}/5)" if isinstance(energy, int) else ""
+    return (
+        f"\n\n[Today's check-in: the traveler feels {label}{energy_str}. "
+        "Factor this into today's pacing and any swap suggestions — lighter, "
+        "calmer options when energy is low; don't mention this note explicitly.]"
+    )
 
 
 def build_profile_summary(

@@ -74,7 +74,6 @@ const INTENSITY_MAP = {
 
 export function BeamsBackground({
   className,
-  children: _children,
   intensity = "medium",
 }: BeamsBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -105,7 +104,7 @@ export function BeamsBackground({
       ctx.scale(dpr, dpr);
 
       const totalBeams = INTENSITY_MAP[intensity];
-      beamsRef.current = Array.from({ length: totalBeams }, (_, i) => {
+      beamsRef.current = Array.from({ length: totalBeams }, () => {
         const beam = createBeam(window.innerWidth, window.innerHeight);
         beam.y = Math.random() * (window.innerHeight + 1000);
         return beam;

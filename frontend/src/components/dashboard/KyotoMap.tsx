@@ -49,9 +49,11 @@ function ContourLines({ paths, theme }: { paths: string[]; theme: "light" | "dar
   );
 }
 
+const EMPTY_BLOCKS: TripDay["blocks"] = [];
+
 export function KyotoMap({ days, todayN, activeDayN, onSelectPin, theme, novelty = "tame", weather = "" }: KyotoMapProps) {
   const activeDay = days.find((d) => d.n === activeDayN) || days.find((d) => d.n === todayN);
-  const todayBlocks = activeDay?.blocks || [];
+  const todayBlocks = activeDay?.blocks || EMPTY_BLOCKS;
   const currentBlock = todayBlocks.find((b) => b.current);
 
   const routePath = useMemo(() => {

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import type { Trip, TripDay, DayBlock, Density, PanelLayout, TripBooking } from "@/lib/dashboard-data";
 import { TypeChip, EnergyBar } from "./DashChips";
 import {
-  SparklesIcon, RainIcon, ChevronDownIcon, ClockIcon, WalkIcon, CheckIcon, PlusIcon,
+  SparklesIcon, RainIcon, ClockIcon, WalkIcon, CheckIcon, PlusIcon,
 } from "./DashIcons";
 import { CountryIntelStrip } from "./CountryIntelStrip";
 import { SafetyWarningBanner } from "./SafetyWarningBanner";
@@ -547,8 +547,7 @@ export function TripDetailPanel({
     ? days.find((d) => d.n === activeDayN) ?? days.find((d) => d.n === todayN) ?? days[0]
     : undefined;
 
-  const phase = trip.phase;
-  const preDeparture = phase !== "LIVING" && phase !== "REMEMBERING" && phase !== "ARCHIVED";
+
   const intel = trip.countryIntel ?? [];
 
   const layoutProps = {

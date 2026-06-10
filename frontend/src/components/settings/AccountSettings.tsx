@@ -1226,7 +1226,7 @@ export function AccountSettings({ botUsername }: { botUsername: string }) {
         const rawProfile = usersResult.data?.user_profiles;
         const profileRow = (Array.isArray(rawProfile) ? rawProfile[0] : rawProfile) as {
           profile_data: { tags?: string[] } | null;
-          form_response: any;
+          form_response: Record<string, unknown> | null;
           summary: string | null;
         } | null;
         const name = usersResult.data?.name || email.split("@")[0] || "Traveler";

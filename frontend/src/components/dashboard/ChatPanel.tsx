@@ -403,7 +403,7 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setColorScheme(mq.matches ? "dark" : "light");
+    setTimeout(() => setColorScheme(mq.matches ? "dark" : "light"), 0);
     const handler = (e: MediaQueryListEvent) =>
       setColorScheme(e.matches ? "dark" : "light");
     mq.addEventListener("change", handler);
@@ -607,12 +607,13 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     window.addEventListener("resize", closeContextMenu);
-    scrollRef.current?.addEventListener("scroll", closeContextMenu);
+    const scrollContainer = scrollRef.current;
+    scrollContainer?.addEventListener("scroll", closeContextMenu);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", closeContextMenu);
-      scrollRef.current?.removeEventListener("scroll", closeContextMenu);
+      scrollContainer?.removeEventListener("scroll", closeContextMenu);
     };
   }, [menu, closeContextMenu]);
 

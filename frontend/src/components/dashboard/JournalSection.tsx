@@ -33,7 +33,10 @@ export function JournalSection({
   const highlights = journal?.highlights ?? [];
   const regrets = journal?.regrets ?? [];
   const hasContent = entries.length > 0 || highlights.length > 0 || regrets.length > 0;
-  const [text, setText] = useState(() => entries.map(e => e.text).join("\n\n"));
+  // New-entry composer (empty); existing entries are summarised in the header
+  // badge. Saving sends the note through chat so the JournalSaga (task 41)
+  // captures it — there's no direct journal-write endpoint (chat-first model).
+  const [text, setText] = useState("");
 
   return (
     <div className="rounded-xl border border-border overflow-hidden" style={{ background: isOpen ? "color-mix(in oklab, var(--background) 60%, transparent)" : "transparent" }}>
@@ -75,8 +78,9 @@ export function JournalSection({
                 </button>
               ))}
             </div>
-            <Button size="sm" onClick={() => {
-              // Persist locally (mocked for now)
+            <Button size="sm" disabled={!text.trim()} onClick={() => {
+              const note = text.trim();
+              if (note) { onAsk?.(note); setText(""); }
               setIsOpen(false);
             }}>
               Save Note
