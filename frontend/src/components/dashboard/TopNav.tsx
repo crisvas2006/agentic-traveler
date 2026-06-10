@@ -1,20 +1,22 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { TRIPS, type Trip } from "@/lib/dashboard-data";
+import type { TripSummary } from "@/lib/dashboard-data";
 import type { UserProfile } from "@/hooks/useUserProfile";
 import { StatusChip } from "./DashChips";
 import { SparklesIcon, BellIcon, DNAIcon, ChevronDownIcon } from "./DashIcons";
 import { AvatarButton, ProfileDropdown } from "./ProfileDropdown";
 
 interface TopNavProps {
-  trip: Trip;
+  summaries: TripSummary[];
+  activeId: string | null;
   onTripSelect: (id: string) => void;
   userProfile: UserProfile;
 }
 
-export function TopNav({ trip, onTripSelect, userProfile }: TopNavProps) {
+export function TopNav({ summaries, activeId, onTripSelect, userProfile }: TopNavProps) {
   const [open, setOpen] = useState(false);
+  const active = summaries.find((t) => t.id === activeId) ?? summaries[0];
   const [profileOpen, setProfileOpen] = useState(false);
 
   // Wraps both the AvatarButton and ProfileDropdown so clicks inside
@@ -53,20 +55,20 @@ export function TopNav({ trip, onTripSelect, userProfile }: TopNavProps) {
             <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-60" />
             <span className="relative w-2 h-2 rounded-full bg-emerald-500" />
           </span>
-          <span className="text-sm font-bold">{trip.destination}</span>
-          <span className="text-xs text-muted-foreground">· {trip.dayLabel}</span>
+          <span className="text-sm font-bold">{active?.destination ?? "No trips yet"}</span>
+          {active && <span className="text-xs text-muted-foreground">· {active.dayLabel}</span>}
           <ChevronDownIcon width={14} height={14} className="text-muted-foreground" />
         </button>
 
-        {open && (
+        {open && summaries.length > 0 && (
           <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 aletheia-card p-2 animate-fade-up z-50">
-            {TRIPS.map((t) => (
+            {summaries.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => { onTripSelect(t.id); setOpen(false); }}
                 className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left hover:bg-foreground/5 transition ${
-                  t.id === trip.id ? "bg-foreground/[0.04]" : ""
+                  t.id === activeId ? "bg-foreground/[0.04]" : ""
                 }`}
               >
                 <div

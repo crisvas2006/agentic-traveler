@@ -38,6 +38,7 @@ class SagaState(TypedDict, total=False):
     # task 44 — direction switching
     trip_directive: str                    # 'continue' | 'new' | 'unspecified'
     superseded_trip_title: Optional[str]   # title of a trip set aside by a 'new' turn
+    activation_mode: str                   # 'owner' or 'listener', set by dispatcher
 
 
 @dataclass(frozen=True)

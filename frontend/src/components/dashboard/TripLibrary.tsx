@@ -1,10 +1,10 @@
 "use client";
 
-import { DNA_TAGS, TRIPS, type Trip } from "@/lib/dashboard-data";
+import { DNA_TAGS, type TripSummary } from "@/lib/dashboard-data";
 import { StatusChip } from "./DashChips";
 import { LibraryIcon, PlusIcon, DNAIcon, ChevronRightIcon } from "./DashIcons";
 
-function TripCard({ trip, active, onClick }: { trip: Trip; active: boolean; onClick: () => void }) {
+function TripCard({ trip, active, onClick }: { trip: TripSummary; active: boolean; onClick: () => void }) {
   const { cover } = trip;
   return (
     <button
@@ -87,11 +87,13 @@ function DNATeaser() {
 }
 
 interface TripLibraryProps {
-  activeId: string;
+  summaries: TripSummary[];
+  activeId: string | null;
   onSelect: (id: string) => void;
+  onNew?: () => void;
 }
 
-export function TripLibrary({ activeId, onSelect }: TripLibraryProps) {
+export function TripLibrary({ summaries, activeId, onSelect, onNew }: TripLibraryProps) {
   return (
     <aside className="aletheia-card flex flex-col h-full overflow-hidden">
       <header className="px-4 pt-4 pb-3 flex items-center justify-between">
@@ -101,6 +103,7 @@ export function TripLibrary({ activeId, onSelect }: TripLibraryProps) {
         </div>
         <button
           type="button"
+          onClick={onNew}
           className="inline-flex items-center gap-1 text-xs font-semibold rounded-full px-2.5 py-1 bg-foreground/5 hover:bg-primary/10 text-foreground/80 hover:text-primary transition"
         >
           <PlusIcon width={12} height={12} /> New
@@ -108,14 +111,20 @@ export function TripLibrary({ activeId, onSelect }: TripLibraryProps) {
       </header>
 
       <div className="flex-1 px-3 pb-3 space-y-2.5 overflow-y-auto">
-        {TRIPS.map((t) => (
-          <TripCard
-            key={t.id}
-            trip={t}
-            active={t.id === activeId}
-            onClick={() => onSelect(t.id)}
-          />
-        ))}
+        {summaries.length > 0 ? (
+          summaries.map((t) => (
+            <TripCard
+              key={t.id}
+              trip={t}
+              active={t.id === activeId}
+              onClick={() => onSelect(t.id)}
+            />
+          ))
+        ) : (
+          <p className="px-2 py-6 text-xs text-muted-foreground text-center leading-relaxed">
+            No journeys yet.<br />Start one in chat.
+          </p>
+        )}
       </div>
 
       <div className="px-3 pb-3">

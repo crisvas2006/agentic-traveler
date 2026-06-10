@@ -4,14 +4,17 @@ import { useState, useRef, useEffect } from "react";
 import type { Trip, TripDay, DayBlock, Density, PanelLayout, TripBooking } from "@/lib/dashboard-data";
 import { TypeChip, EnergyBar } from "./DashChips";
 import {
-  SparklesIcon, RainIcon, ChevronDownIcon, ClockIcon, WalkIcon, CheckIcon,
+  SparklesIcon, RainIcon, ChevronDownIcon, ClockIcon, WalkIcon, CheckIcon, PlusIcon,
 } from "./DashIcons";
 import { CountryIntelStrip } from "./CountryIntelStrip";
 import { SafetyWarningBanner } from "./SafetyWarningBanner";
-import { LogisticsRail } from "./LogisticsRail";
+import { LogisticsPanel, LogisticsSummary } from "./LogisticsRail";
 import { BookingFormSheet } from "./BookingFormSheet";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Button } from "@/components/ui/button";
+import { VisionBanner } from "./VisionBanner";
+import { BudgetBar } from "./BudgetBar";
+import { Scratchpad } from "./Scratchpad";
+import { LiveStateCard } from "./LiveStateCard";
+import { JournalSection } from "./JournalSection";
 
 /* ── Suggestion card ── */
 function SuggestionCard({ s }: { s: NonNullable<TripDay["suggestions"]>[number] }) {
@@ -158,15 +161,14 @@ function BlockRow({
   );
 }
 
-/* ── Accordion layout ── */
-function AccordionLayout({
+/* ── Structured Itinerary layout ── */
+function StructuredItineraryLayout({
   days, todayN, activeDayN, setActiveDayN, density, bookings = []
 }: {
   days: TripDay[]; todayN: number; activeDayN: number;
   setActiveDayN: (n: number | null) => void; density: Density;
   bookings?: TripBooking[];
 }) {
-  // Block IDs are unique across all days — one flat Set covers everything.
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
   const toggleDone = (id: string) => {
     setDoneIds((prev) => {
@@ -176,105 +178,127 @@ function AccordionLayout({
     });
   };
 
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // If there are no days, we render a dummy "Day 1" to showcase capabilities.
+  const displayDays = days.length > 0 ? days : [{ n: 1, date: "Day 1", isoDate: "", title: "Start planning", status: "future" as const, energy: 0, blocks: [] }];
+  const d = displayDays.find((dd) => dd.n === activeDayN) || displayDays.find((dd) => dd.n === todayN) || displayDays[0];
+
+  const dayBookings = bookings.filter(b => {
+    if (!b.datetime_local || !d.isoDate) return false;
+    const bDate = b.datetime_local.split("T")[0];
+    return bDate === d.isoDate;
+  });
+
+  const maxDoneIdx = d.blocks?.reduce((acc, b, i) => (doneIds.has(b.id) ? i : acc), -1) ?? -1;
+  const currentIdx = maxDoneIdx + 1 < (d.blocks?.length || 0) ? maxDoneIdx + 1 : -1;
+
+  // Group blocks by part of day (simple string match since fixtures use "Morning", etc. or fallback to time parsing if needed)
+  const isMorning = (t: string) => /morning|am/i.test(t) || /^(0?[0-9]|1[0-1]):/.test(t);
+  const isAfternoon = (t: string) => /afternoon|pm/i.test(t) || /^(1[2-6]):/.test(t);
+  const isEvening = (t: string) => /evening|night/i.test(t) || /^(1[7-9]|2[0-3]):/.test(t);
+
+  const getBlocks = (check: (t: string) => boolean) => d.blocks?.filter(b => check(b.time)) || [];
+  
+  // Anything unmatched goes to Morning as fallback so it isn't lost
+  const mornings = d.blocks?.filter(b => isMorning(b.time) || (!isMorning(b.time) && !isAfternoon(b.time) && !isEvening(b.time))) || [];
+  const afternoons = getBlocks(isAfternoon);
+  const evenings = getBlocks(isEvening);
+
+  const parts = [
+    { name: "Morning", blocks: mornings },
+    { name: "Afternoon", blocks: afternoons },
+    { name: "Evening", blocks: evenings }
+  ];
+
   return (
-    <div className="space-y-1.5">
-      {days.map((d) => {
-        const open = d.n === activeDayN;
-        const isToday = d.n === todayN;
-        const isPast = d.status === "past";
-        
-        const dayBookings = bookings.filter(b => {
-          if (!b.datetime_local) return false;
-          const bDate = b.datetime_local.split("T")[0];
-          return bDate === d.isoDate;
-        });
-
-        // Highlight the block immediately after the highest-indexed done block
-        // for this day. If none done → highlight first; if all done → no highlight.
-        const maxDoneIdx = d.blocks.reduce((acc, b, i) => (doneIds.has(b.id) ? i : acc), -1);
-        const currentIdx = maxDoneIdx + 1 < d.blocks.length ? maxDoneIdx + 1 : -1;
-
-        return (
-          <div
-            key={d.n}
-            className="rounded-xl border border-border overflow-hidden"
-            style={{ background: open ? "color-mix(in oklab, var(--background) 60%, transparent)" : "transparent" }}
-          >
+    <div className="space-y-4 animate-fade-up">
+      {/* Day picker strip */}
+      <div
+        ref={stripRef}
+        className="flex gap-2 overflow-x-auto pb-2 -mx-2 px-2 scrollbar-primary"
+      >
+        {displayDays.map((day) => {
+          const isActive = day.n === d.n;
+          const isPast = day.status === "past";
+          return (
             <button
+              key={day.n}
               type="button"
-              onClick={() => setActiveDayN(open ? null! : d.n)}
-              className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-foreground/[0.03] transition"
+              onClick={() => setActiveDayN(day.n)}
+              className={`flex-shrink-0 flex-grow-0 min-w-[80px] px-3 py-2 rounded-xl border transition-all text-left
+                ${isActive ? "border-transparent text-white shadow-sm" : "border-border hover:border-primary/30"}
+                ${isPast && !isActive ? "opacity-60" : ""}`}
+              style={
+                isActive
+                  ? { background: "linear-gradient(135deg, var(--primary), #9333ea)" }
+                  : { background: "color-mix(in oklab, var(--background) 60%, transparent)" }
+              }
             >
-              <div
-                className="w-8 h-8 rounded-lg grid place-items-center font-bold text-xs"
-                style={
-                  isToday
-                    ? { background: "linear-gradient(135deg, var(--primary), #9333ea)", color: "#fff" }
-                    : isPast
-                    ? {
-                        background: "color-mix(in oklab, var(--foreground) 4%, transparent)",
-                        color: "color-mix(in oklab, var(--foreground) 35%, transparent)",
-                      }
-                    : {
-                        background: "color-mix(in oklab, var(--foreground) 6%, transparent)",
-                        color: "color-mix(in oklab, var(--foreground) 65%, transparent)",
-                      }
-                }
-              >
-                {d.n}
+              <div className={`text-[10px] font-bold uppercase tracking-wider ${isActive ? "text-white/80" : "text-muted-foreground"}`}>
+                Day {day.n}
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-                  {d.date}
-                </div>
-                <div className={`text-sm font-bold leading-tight ${isPast ? "text-foreground/50" : ""}`}>
-                  {d.title}
-                </div>
+              <div className={`text-xs font-bold mt-0.5 leading-tight ${isActive ? "text-white" : "text-foreground"}`}>
+                {day.date.split(" · ")[0] || `Day ${day.n}`}
               </div>
-              {isToday && (
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500 mr-1">
-                  Today
-                </span>
-              )}
-              <ChevronDownIcon
-                width={16} height={16}
-                className={`transition-transform ${open ? "rotate-180" : ""} text-muted-foreground`}
-              />
             </button>
-            {open && (
-              <div className="px-2.5 pb-3 space-y-1.5 animate-fade-up">
-                {dayBookings.length > 0 && (
-                  <div className="mb-3 px-1">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 ml-1">
-                      Linked Bookings
-                    </div>
-                    <div className="flex flex-col gap-1.5 border-l-2 border-primary/20 pl-2">
-                      {dayBookings.map(b => (
-                        <div key={b.id} className="text-xs bg-slate-50 border border-border p-2 rounded-md flex items-center gap-2">
-                           <span className="font-semibold">{b.kind === "flight" ? "Flight" : b.kind === "accommodation" ? "Stay" : "Booking"}:</span>
-                           <span className="truncate">{b.payload?.airline || b.payload?.name || "Confirmed"}</span>
-                           <span className="ml-auto text-muted-foreground">{b.datetime_local?.split("T")[1] || ""}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {d.blocks.map((b, i) => (
+          );
+        })}
+      </div>
+
+      {dayBookings.length > 0 && (
+        <div className="px-1 mb-2">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 ml-1">
+            Linked Bookings
+          </div>
+          <div className="flex flex-col gap-1.5 border-l-2 border-primary/20 pl-2">
+            {dayBookings.map(b => (
+              <div key={b.id} className="text-xs bg-slate-50 border border-border p-2 rounded-md flex items-center gap-2">
+                 <span className="font-semibold">{b.kind === "flight" ? "Flight" : b.kind === "accommodation" ? "Stay" : "Booking"}:</span>
+                 <span className="truncate">{b.payload?.airline || b.payload?.name || "Confirmed"}</span>
+                 <span className="ml-auto text-muted-foreground">{b.datetime_local?.split("T")[1] || ""}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Skeletons for Morning/Afternoon/Evening */}
+      <div className="space-y-4">
+        {parts.map((part) => (
+          <div key={part.name} className="relative pl-4 border-l-[1.5px] border-border/60">
+            <h4 className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground mb-2 -ml-6 flex items-center gap-2">
+              <span className="w-4 h-4 rounded-full bg-background border-[1.5px] border-border/60 grid place-items-center">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary/40"></span>
+              </span>
+              {part.name}
+            </h4>
+            
+            <div className="space-y-2.5">
+              {part.blocks.map((b) => {
+                const bIdx = d.blocks?.findIndex(x => x.id === b.id) || 0;
+                return (
                   <BlockRow
-                    key={b.id}
-                    b={b}
-                    idx={i}
-                    density={density}
-                    current={i === currentIdx}
-                    isDone={doneIds.has(b.id)}
+                    key={b.id} b={b} idx={bIdx} density={density}
+                    current={bIdx === currentIdx} isDone={doneIds.has(b.id)}
                     onToggleDone={() => toggleDone(b.id)}
                   />
-                ))}
-              </div>
-            )}
+                );
+              })}
+
+              {/* Add Activity CTA (Placeholder) */}
+              <button 
+                type="button"
+                className="w-full rounded-xl border border-dashed border-border/80 p-2.5 text-left text-xs text-muted-foreground/80 hover:text-primary hover:border-primary/40 transition-colors flex items-center gap-2"
+                style={{ background: "color-mix(in oklab, var(--background) 50%, transparent)" }}
+              >
+                <PlusIcon width={12} height={12} className="opacity-70" />
+                <span>Add {part.name.toLowerCase()} activity</span>
+              </button>
+            </div>
           </div>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }
@@ -439,22 +463,33 @@ function KanbanLayout({
 }
 
 /* ── Panel header ── */
-function PanelHeader({ trip, day }: { trip: Trip; day: TripDay }) {
+function PanelHeader({ trip, day, totalDays }: { trip: Trip; day?: TripDay; totalDays?: number }) {
+  const [from, to] = trip.dateRange.split(" – ");
+  
+  let label = trip.dayLabel;
+  if (day && day.n && totalDays) {
+    label = `Day ${day.n} of ${totalDays}`;
+  } else if (day && day.n) {
+    const totalMatch = trip.dayLabel.match(/of (\d+)/);
+    const total = totalMatch ? totalMatch[1] : "?";
+    label = `Day ${day.n} of ${total}`;
+  }
+
   return (
     <header className="px-5 pt-5 pb-3 border-b border-border">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground">
-              {trip.dateRange.split(" – ")[0]} → {trip.dateRange.split(" – ")[1]}
+              {to ? `${from} → ${to}` : from}
             </span>
           </div>
           <h2 className="font-extrabold tracking-tight leading-tight">
             <span className="text-2xl">{trip.destination}</span>
             <br />
-            <span className="text-lg font-bold text-foreground/50">Day {day.n} of 7</span>
+            <span className="text-lg font-bold text-foreground/50">{label}</span>
           </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">{day.title}</p>
+          {day?.title && <p className="text-sm text-muted-foreground mt-0.5">{day.title}</p>}
         </div>
         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
           {trip.weather && (
@@ -465,18 +500,13 @@ function PanelHeader({ trip, day }: { trip: Trip; day: TripDay }) {
                 color: "color-mix(in oklab, var(--foreground) 75%, transparent)",
               }}
             >
-              <RainIcon width={12} height={12} /> {trip.weather.temp} · drizzle
+              <RainIcon width={12} height={12} /> {trip.weather.temp}
+              {trip.weather.note ? ` · ${trip.weather.note}` : ""}
             </div>
           )}
-          <button
-            type="button"
-            className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-primary"
-          >
-            Expand ↗
-          </button>
           {(trip.bookings?.length ?? 0) > 0 && (
             <div className="text-[10px] font-medium text-primary mt-1">
-              {trip.bookings?.length} Booking{trip.bookings?.length !== 1 ? 's' : ''} saved
+              {trip.bookings?.length} booking{trip.bookings?.length !== 1 ? "s" : ""} saved
             </div>
           )}
         </div>
@@ -485,7 +515,10 @@ function PanelHeader({ trip, day }: { trip: Trip; day: TripDay }) {
   );
 }
 
-/* ── Main export ── */
+/* ── Main export ──
+ * Renders the proposal §6.2 ten-section stack with progressive disclosure:
+ * every section is gated on having data (or, for a few, on the lifecycle
+ * phase), so empty sections vanish rather than showing "N/A" placeholders. */
 interface TripDetailPanelProps {
   trip: Trip;
   days: TripDay[];
@@ -494,6 +527,8 @@ interface TripDetailPanelProps {
   density?: Density;
   activeDayN: number;
   setActiveDayN: (n: number) => void;
+  /** Send a message into the chat (idea chips, mood, journal prompts). */
+  onSendMessage?: (text: string) => void;
 }
 
 export function TripDetailPanel({
@@ -502,68 +537,86 @@ export function TripDetailPanel({
   density = "comfortable",
   activeDayN,
   setActiveDayN,
+  onSendMessage,
 }: TripDetailPanelProps) {
-  const [showLogistics, setShowLogistics] = useState(false);
   const [editingBooking, setEditingBooking] = useState<Partial<TripBooking> | null>(null);
+  const [isLogisticsOpen, setIsLogisticsOpen] = useState(false);
 
-  const day = days.find((d) => d.n === activeDayN) || days.find((d) => d.n === todayN)!;
+  const hasDays = days.length > 0;
+  const day = hasDays
+    ? days.find((d) => d.n === activeDayN) ?? days.find((d) => d.n === todayN) ?? days[0]
+    : undefined;
 
-  const layoutProps = { days, todayN, activeDayN, setActiveDayN: setActiveDayN as (n: number) => void, density, bookings: trip.bookings || [] };
-  // Only surface the AI note for today; other days have no note.
-  const todayNote = day.n === todayN ? day.note : undefined;
+  const phase = trip.phase;
+  const preDeparture = phase !== "LIVING" && phase !== "REMEMBERING" && phase !== "ARCHIVED";
+  const intel = trip.countryIntel ?? [];
+
+  const layoutProps = {
+    days, todayN, activeDayN,
+    setActiveDayN: setActiveDayN as (n: number) => void,
+    density, bookings: trip.bookings || [],
+  };
+  const todayNote = day?.n === todayN ? day?.note : undefined;
 
   return (
-    <div
-      className="aletheia-card flex flex-col h-full overflow-hidden"
-      style={{ background: "var(--background)" }}
-    >
-      <PanelHeader trip={trip} day={day} />
+    <>
+      <div
+        className="aletheia-card flex flex-col h-full overflow-hidden relative"
+        style={{ background: "var(--background)" }}
+      >
+        <PanelHeader trip={trip} day={day} totalDays={days.length} />
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-        
-        <div className="flex items-center justify-between mb-2">
-          <Button variant="outline" size="sm" onClick={() => setShowLogistics(true)}>
-            View Logistics & Bookings
-          </Button>
-        </div>
-        
-        {trip.countryIntel?.map((intel, idx) => (
-          <SafetyWarningBanner 
+        {/* 1. Vision banner */}
+        <VisionBanner vision={trip.vision} />
+
+        {/* 4. Safety warning — one per intel entry below threshold. */}
+        {intel.map((entry, idx) => (
+          <SafetyWarningBanner
             key={`safety-${idx}`}
-            score={intel.safety?.score_10 ?? 10} 
-            country={intel.iso_country || "the region"}
-            sources={intel.sources}
+            score={entry.safety?.score_10 ?? 10}
+            country={entry.iso_country || "the region"}
+            sources={entry.sources}
           />
         ))}
 
-        {trip.countryIntel && trip.countryIntel.length > 0 && (
-          <CountryIntelStrip tripId={trip.id} countryIntel={trip.countryIntel} />
-        )}
+        {/* 3. Country intel strip. */}
+        <CountryIntelStrip tripId={trip.id} countryIntel={intel} destination={trip.destination} />
 
-        {/* Itinerary — AI note is rendered inside TimelineLayout (below strip),
-            and inside the accordion's scroll area for other layouts */}
-        {layout === "timeline" ? (
+        {/* 9. Live state */}
+        <LiveStateCard
+          liveState={trip.liveState}
+          today={day}
+          onMood={
+            onSendMessage
+              ? (label, energy) =>
+                  onSendMessage(`Mood check-in: feeling ${label} today (energy ${energy}/5).`)
+              : undefined
+          }
+        />
+
+        {/* 5. Itinerary */}
+        {layout === "timeline" && hasDays ? (
           <TimelineLayout {...layoutProps} note={todayNote} />
-        ) : layout === "kanban" ? (
+        ) : layout === "kanban" && hasDays ? (
           <KanbanLayout {...layoutProps} />
         ) : (
           <>
-            {/* Accordion: show AI note at the top of the scroll area */}
             {todayNote && (
               <div
-                className="rounded-2xl border border-primary/20 px-3.5 py-2.5 text-xs text-foreground/80 leading-relaxed"
+                className="rounded-2xl border border-primary/20 px-3.5 py-2.5 text-xs text-foreground/80 leading-relaxed mb-4"
                 style={{ background: "color-mix(in oklab, var(--primary) 6%, transparent)" }}
               >
                 <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-primary mr-1.5">AI</span>
                 {todayNote}
               </div>
             )}
-            <AccordionLayout {...layoutProps} setActiveDayN={setActiveDayN as (n: number | null) => void} />
+            <StructuredItineraryLayout {...layoutProps} setActiveDayN={setActiveDayN as (n: number | null) => void} />
           </>
         )}
 
-        {/* AI suggestions */}
-        {day.n === todayN && day.suggestions && day.suggestions.length > 0 && (
+        {/* AI suggestions for today. */}
+        {day?.n === todayN && day?.suggestions && day.suggestions.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
               <SparklesIcon width={14} height={14} className="text-primary" />
@@ -578,26 +631,41 @@ export function TripDetailPanel({
             </div>
           </section>
         )}
+
+        {/* 6. Logistics summary and panel trigger */}
+        <LogisticsSummary
+          bookings={trip.bookings || []}
+          onOpen={() => setIsLogisticsOpen(true)}
+        />
+
+        {/* 7. Budget — only when a target is set. */}
+        <BudgetBar budget={trip.budget} />
+
+        {/* 8. Scratchpad */}
+        <Scratchpad scratchpad={trip.scratchpad} onAsk={onSendMessage} />
+
+        {/* 10. Journal */}
+        <JournalSection journal={trip.journal} onAsk={onSendMessage} />
       </div>
 
-      <Sheet open={showLogistics} onOpenChange={setShowLogistics}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto p-0">
-          <LogisticsRail
-            bookings={trip.bookings || []}
-            onEdit={(b) => setEditingBooking(b)}
-            onAdd={(kind) => setEditingBooking({ kind: kind as TripBooking["kind"], trip_id: trip.id, payload: {} })}
-          />
-        </SheetContent>
-      </Sheet>
+        <BookingFormSheet
+          booking={editingBooking}
+          onClose={() => setEditingBooking(null)}
+          onSave={() => {
+            setEditingBooking(null);
+          }}
+        />
+      </div>
 
-      <BookingFormSheet
-        booking={editingBooking}
-        onClose={() => setEditingBooking(null)}
-        onSave={() => {
-          // In a real implementation this would trigger an API call to save the booking
-          setEditingBooking(null);
-        }}
+      <LogisticsPanel
+        bookings={trip.bookings || []}
+        isOpen={isLogisticsOpen}
+        onClose={() => setIsLogisticsOpen(false)}
+        onEdit={(b) => setEditingBooking(b)}
+        onAdd={(kind) =>
+          setEditingBooking({ kind: kind as TripBooking["kind"], trip_id: trip.id, payload: {} })
+        }
       />
-    </div>
+    </>
   );
 }

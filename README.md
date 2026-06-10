@@ -216,6 +216,31 @@ pacing each status ≥1 s and letting the reply preempt pending statuses),
 SSE-finalized ids), and `useTripRealtime` (one parent subscription → refetches
 the assembled trip on any change, for the trip panel).
 
+#### Trip Detail Panel (live data, task 40)
+
+The dashboard's trip view is fully live (no mock data on the runtime path):
+
+- **`useTripList`** queries the user's trips through the RLS-protected browser
+  client (so a user only ever sees their own — never another user's), maps
+  each to a library-card summary, and picks a default focus (an `active` trip,
+  else the most recently updated).
+- **`useTrip(tripId)`** wraps `useTripRealtime` and runs the raw assembled trip
+  (parent JSONB columns + the five child collections) through **`trip-adapter`**
+  into the `Trip` + `TripDay[]` view model the panel components consume. A 60s
+  poll backstops a dropped Realtime socket.
+- **`TripDetailPanel`** renders the ten-section stack (vision banner, header,
+  country-intel strip, safety banner, itinerary, logistics rail, budget bar,
+  scratchpad, live-state card, journal) under a **progressive-disclosure law**:
+  every section is gated on having data (or, for a few, the lifecycle phase),
+  so empty sections vanish rather than showing placeholders. The phase is
+  derived from `trips.status` + `saga_state`.
+- Mutations stay chat-first: saved-idea chips, the mood check-in, journal
+  prompts, and "plan a trip" CTAs send a message into the chat thread rather
+  than writing directly, so the assistant (and its sagas) owns trip state.
+- The Kyoto map is a visual placeholder pending the real MapLibre map (task 49);
+  the hand-coded Kyoto trip now lives in `lib/dashboard-fixtures.ts` (tests +
+  the map placeholder only), not the runtime data path.
+
 #### Current Model Stack
 
 The system uses a tiered model approach to balance reasoning quality and cost:
@@ -291,7 +316,7 @@ Tools and technologies:
 
     *   Next.js 16 / React 19 / TypeScript / Tailwind CSS v4 on Vercel
     *   Supabase Auth with Google OAuth and email/password (PKCE flow, Cloudflare Turnstile CAPTCHA)
-    *   Dashboard: phase-aware trip view, map canvas, AI chat panel (in design/build)
+    *   Dashboard: phase-aware live trip view + AI chat panel (live via Realtime); map canvas placeholder pending the real map (task 49)
 
 *   **GCP**
     

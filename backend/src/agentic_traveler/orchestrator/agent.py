@@ -601,6 +601,7 @@ class OrchestratorAgent:
         # 6. Listeners first (idempotent side effects), then the owner.
         for saga in listeners:
             try:
+                state["activation_mode"] = "listener"
                 listener_result = saga.run(
                     message_text, user_doc, trip, state, conv_context, events
                 )
@@ -611,6 +612,7 @@ class OrchestratorAgent:
                 )
 
         _emit_status(events, "composing")
+        state["activation_mode"] = "owner"
         result = owner.run(message_text, user_doc, trip, state, conv_context, events)
         self._apply_side_effects(user_id, result.side_effects)
 

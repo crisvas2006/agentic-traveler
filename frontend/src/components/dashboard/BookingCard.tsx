@@ -27,16 +27,19 @@ export function BookingCard({ booking, onEdit }: BookingCardProps) {
   let line2 = "";
   
   if (booking.kind === "flight") {
-    line1 = `${payload.airline || "Flight"} ${payload.number || ""} · ${payload.from_ || "Origin"} → ${payload.to || "Dest"}`;
+    const flightName = [payload.airline, payload.number].filter(Boolean).join(" ");
+    const route = (payload.from_ || payload.to) ? `${payload.from_ || "?"} → ${payload.to || "?"}` : "";
+    line1 = [flightName || "Flight", route].filter(Boolean).join(" · ");
     line2 = payload.depart_local || booking.datetime_local || "";
   } else if (booking.kind === "accommodation") {
-    line1 = payload.name || "Hotel";
-    line2 = `Check-in: ${payload.check_in || "TBD"}`;
+    line1 = payload.name || "Accommodation";
+    line2 = payload.check_in ? `Check-in: ${payload.check_in}` : "";
   } else if (booking.kind === "ground") {
-    line1 = `Transit · ${payload.from_ || "Origin"} → ${payload.to || "Dest"}`;
+    const route = (payload.from_ || payload.to) ? `${payload.from_ || "?"} → ${payload.to || "?"}` : "";
+    line1 = route ? `Transit · ${route}` : "Transit";
     line2 = payload.datetime_local || "";
   } else {
-    line1 = payload.name || "Reservation";
+    line1 = payload.name || (booking.kind === "restaurant" ? "Reservation" : "Activity");
     line2 = payload.datetime_local || "";
   }
 

@@ -5,15 +5,23 @@ import { formatIntelCard } from "@/lib/intel-render";
 import { RefreshCwIcon } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 
+import { ChevronDownIcon } from "./DashIcons";
+
 interface CountryIntelStripProps {
   tripId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   countryIntel: any[];
+  destination?: string;
 }
 
-export function CountryIntelStrip({ tripId, countryIntel }: CountryIntelStripProps) {
+export function CountryIntelStrip({ tripId, countryIntel, destination }: CountryIntelStripProps) {
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
+  const [openIsos, setOpenIsos] = useState<Record<string, boolean>>({});
 
-  if (!countryIntel || countryIntel.length === 0) return null;
+  // If no intel is available, create a dummy entry to show placeholders
+  const intelList = countryIntel && countryIntel.length > 0 
+    ? countryIntel 
+    : [{ iso_country: destination || "Unknown", isPlaceholder: true }];
 
   const handleRefresh = async (iso: string) => {
     setRefreshing(prev => ({ ...prev, [iso]: true }));
@@ -44,9 +52,10 @@ export function CountryIntelStrip({ tripId, countryIntel }: CountryIntelStripPro
 
   return (
     <div className="mb-4 space-y-4">
-      {countryIntel.map((intel) => {
-        const iso = intel.iso_country;
-        const fetchedAt = intel.fetched_at ? new Date(intel.fetched_at).toLocaleDateString() : "Unknown";
+      {intelList.map((intel, idx) => {
+        const iso = intel.iso_country as string;
+        const fetchedAt = intel.fetched_at ? new Date(intel.fetched_at as string).toLocaleDateString() : "Unknown";
+        const isOpen = openIsos[iso] || false;
         
         const cards = [
           formatIntelCard("entry", intel.entry),
@@ -58,51 +67,65 @@ export function CountryIntelStrip({ tripId, countryIntel }: CountryIntelStripPro
         ];
 
         return (
-          <div key={iso} className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          <div key={`${iso}-${idx}`} className="rounded-xl border border-border overflow-hidden">
+            <div
+              onClick={() => setOpenIsos(prev => ({ ...prev, [iso]: !prev[iso] }))}
+              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-foreground/[0.03] transition cursor-pointer"
+            >
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex-1 text-left">
                 Country Intel • {iso}
               </span>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-muted-foreground">Last checked: {fetchedAt}</span>
-                <button 
-                  onClick={() => handleRefresh(iso)}
-                  disabled={refreshing[iso]}
-                  title="Refresh Intel"
-                  className="p-1 rounded-full hover:bg-foreground/5 text-muted-foreground transition-colors disabled:opacity-50"
-                >
-                  <RefreshCwIcon className={`w-3 h-3 ${refreshing[iso] ? "animate-spin" : ""}`} />
-                </button>
+                {!intel.isPlaceholder && (
+                  <>
+                    <span className="text-[10px] text-muted-foreground">Last checked: {fetchedAt}</span>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleRefresh(iso); }}
+                      disabled={refreshing[iso]}
+                      title="Refresh Intel"
+                      className="p-1 rounded-full hover:bg-foreground/5 text-muted-foreground transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCwIcon className={`w-3 h-3 ${refreshing[iso] ? "animate-spin" : ""}`} />
+                    </button>
+                  </>
+                )}
+                <ChevronDownIcon width={14} height={14} className={`text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
               </div>
             </div>
             
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-primary -mx-2 px-2">
-              {cards.map((card, i) => (
-                <div 
-                  key={i} 
-                  className="flex-shrink-0 w-[180px] rounded-xl border border-border p-3"
-                  style={{ background: "color-mix(in oklab, var(--background) 50%, transparent)" }}
-                >
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="text-sm">{card.icon}</span>
-                    <span className="text-xs font-bold">{card.title}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground leading-snug line-clamp-3">
-                    {card.content}
-                  </div>
-                  <div className="mt-3 space-y-1">
-                    <p className="text-[9px] text-muted-foreground/70 italic leading-tight">
-                      Verify with official sources before booking.
-                    </p>
-                    {intel.sources && intel.sources.length > 0 && (
-                      <p className="text-[9px] text-muted-foreground/70 truncate">
-                        Source: <a href={intel.sources[0]} target="_blank" rel="noreferrer" className="underline hover:text-primary">{intel.sources[0]}</a>
-                      </p>
-                    )}
-                  </div>
+            {isOpen && (
+              <div className="px-3 pb-3 animate-fade-up">
+                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-primary -mx-2 px-2">
+                  {cards.map((card, i) => (
+                    <div 
+                      key={i} 
+                      className="flex-shrink-0 w-[180px] rounded-xl border border-border p-3"
+                      style={{ background: "color-mix(in oklab, var(--background) 50%, transparent)" }}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="text-sm">{card.icon}</span>
+                        <span className="text-xs font-bold">{card.title}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground leading-snug line-clamp-3">
+                        {card.content}
+                      </div>
+                      {!intel.isPlaceholder && (
+                        <div className="mt-3 space-y-1">
+                          <p className="text-[9px] text-muted-foreground/70 italic leading-tight">
+                            Verify with official sources before booking.
+                          </p>
+                          {intel.sources && intel.sources.length > 0 && (
+                            <p className="text-[9px] text-muted-foreground/70 truncate">
+                              Source: <a href={intel.sources[0]} target="_blank" rel="noreferrer" className="underline hover:text-primary">{intel.sources[0]}</a>
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
         );
       })}

@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { TRIPS, KYOTO_DAYS, TODAY_N, type Trip } from "@/lib/dashboard-data";
+import { useCallback, useState, useRef, useEffect } from "react";
 import { useUserProfile, type UserProfile } from "@/hooks/useUserProfile";
+import { useTrip, useTripList } from "@/hooks/useTrip";
+import type { Trip, TripDay, TripSummary } from "@/lib/dashboard-data";
+// Map placeholder data — the dashboard map is a NON-GOAL of task 40 and is
+// replaced wholesale by a real MapLibre map in task 49. Until then it renders
+// from these demo days so the canvas stays visually coherent, decoupled from
+// live trip data (live itinerary blocks carry no abstract-canvas pins).
+import { KYOTO_DAYS, TODAY_N as MAP_TODAY_N } from "@/lib/dashboard-fixtures";
 import { WelcomeGrantModal } from "./WelcomeGrantModal";
 import { TopNav } from "./TopNav";
 import { TripLibrary } from "./TripLibrary";
 import { TripDetailPanel } from "./TripDetailPanel";
 import { KyotoMap } from "./KyotoMap";
-import { ChatStripIcons, ChatPanel, ChatBubbleFloating } from "./ChatPanel";
+import { ChatStripIcons, ChatPanel } from "./ChatPanel";
 import { SparklesIcon, LibraryIcon } from "./DashIcons";
 import { AvatarButton, ProfileDropdown } from "./ProfileDropdown";
 
@@ -35,17 +41,46 @@ function MapLegend() {
   );
 }
 
-/* ── Ambient backdrop ──
- * Deliberately minimal. The Kyoto map is opaque and slice-covers the whole
- * content area, so almost all of this backdrop is hidden behind it — only the
- * thin strip behind the (frosted) TopNav and any panel gaps ever show it.
- *
- * Previous versions rendered:
- *   • a perpetual <BeamsBackground> canvas (animating 60fps entirely BEHIND
- *     the opaque map — 100% wasted GPU), and
- *   • two blur-[120px] floating orbs (the "moving/fading orb" — expensive and
- *     pointless behind the map).
- * Both are removed. A flat themed gradient + static grid is all that's needed. */
+/* ── Empty-trip onboarding canvas (frontend_dashboard_design.md §7) ── */
+function EmptyTripCanvas({ onStart }: { onStart: () => void }) {
+  const cards = [
+    { title: "Discover", body: "Find where to go from your travel DNA." },
+    { title: "Plan", body: "Shape a day-by-day trip, your pace." },
+    { title: "Live", body: "Adapt on the ground, day by day." },
+  ];
+  return (
+    <div className="aletheia-card h-full overflow-y-auto flex flex-col items-center justify-center text-center px-6 py-10" style={{ background: "var(--background)" }}>
+      <div
+        className="w-14 h-14 rounded-2xl grid place-items-center mb-5"
+        style={{ background: "linear-gradient(135deg, var(--primary), #9333ea)" }}
+      >
+        <SparklesIcon width={26} height={26} className="text-white" />
+      </div>
+      <h2 className="text-2xl font-extrabold tracking-tight">Your journey starts here.</h2>
+      <p className="text-sm text-muted-foreground mt-2 max-w-xs">
+        Tell me what you&apos;re dreaming of, and I&apos;ll help it take shape.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-7 w-full max-w-md">
+        {cards.map((c) => (
+          <div key={c.title} className="rounded-2xl border border-border p-3.5 text-left" style={{ background: "color-mix(in oklab, var(--background) 55%, transparent)" }}>
+            <div className="text-sm font-bold">{c.title}</div>
+            <div className="text-xs text-muted-foreground leading-relaxed mt-1">{c.body}</div>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onStart}
+        className="mt-7 px-5 py-2.5 rounded-full text-white font-bold text-sm transition hover:scale-[1.03]"
+        style={{ background: "linear-gradient(135deg, var(--primary), #9333ea)" }}
+      >
+        Plan your first trip →
+      </button>
+    </div>
+  );
+}
+
+/* ── Ambient backdrop ── */
 function Backdrop({ theme }: { theme: "light" | "dark" }) {
   return (
     <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
@@ -63,32 +98,45 @@ function Backdrop({ theme }: { theme: "light" | "dark" }) {
   );
 }
 
+interface ShellViewProps {
+  trip: Trip | null;
+  days: TripDay[];
+  todayN: number;
+  loading: boolean;
+  summaries: TripSummary[];
+  activeTripId: string | null;
+  setActiveTripId: (id: string) => void;
+  theme: "light" | "dark";
+  userProfile: UserProfile;
+  sendMessage: (text: string) => void;
+}
+
 /* ── Desktop layout ── */
 function DesktopShell({
-  trip, activeTripId, setActiveTripId, theme, userProfile,
-}: {
-  trip: Trip; activeTripId: string; setActiveTripId: (id: string) => void; theme: "light" | "dark"; userProfile: UserProfile;
-}) {
-  const [activeDayN, setActiveDayN] = useState(TODAY_N);
+  trip, days, todayN, summaries, activeTripId, setActiveTripId,
+  theme, userProfile, sendMessage,
+}: ShellViewProps) {
+  const [activeDayN, setActiveDayN] = useState(todayN);
   const [chatStyle, setChatStyle] = useState<"strip" | "drawer">("strip");
+
+  // Reset to the focused trip's "today" when the trip changes. React's
+  // adjust-state-during-render pattern (no effect): converges immediately.
+  const [seenTrip, setSeenTrip] = useState(activeTripId);
+  if (seenTrip !== activeTripId) {
+    setSeenTrip(activeTripId);
+    setActiveDayN(todayN);
+  }
 
   const chatColWidth = chatStyle === "drawer" ? "360px" : "56px";
 
   return (
     <div className="relative w-full h-full flex flex-col overflow-hidden">
-      <TopNav trip={trip} onTripSelect={setActiveTripId} userProfile={userProfile} />
+      <TopNav summaries={summaries} activeId={activeTripId} onTripSelect={setActiveTripId} userProfile={userProfile} />
 
       <div className="flex-1 relative overflow-hidden">
-        {/* Map — full bleed canvas */}
+        {/* Map — full bleed canvas (placeholder pending task 49) */}
         <div className="absolute inset-0">
-          <KyotoMap
-            days={KYOTO_DAYS}
-            todayN={TODAY_N}
-            activeDayN={activeDayN}
-            theme={theme}
-            weather="rain"
-          />
-          {/* Vignette overlay to give panels contrast */}
+          <KyotoMap days={KYOTO_DAYS} todayN={MAP_TODAY_N} activeDayN={MAP_TODAY_N} theme={theme} weather="rain" />
           <div
             className="absolute inset-0"
             style={{
@@ -100,39 +148,44 @@ function DesktopShell({
           />
         </div>
 
-        {/* Three-column floor layout */}
         <div
           className="absolute inset-0 grid p-4 gap-4 pointer-events-none"
           style={{ gridTemplateColumns: `280px 1fr ${chatColWidth}` }}
         >
-          {/* Trip library (col 1) */}
           <div className="pointer-events-auto min-h-0">
-            <TripLibrary activeId={activeTripId} onSelect={setActiveTripId} />
+            <TripLibrary
+              summaries={summaries}
+              activeId={activeTripId}
+              onSelect={setActiveTripId}
+              onNew={() => sendMessage("I'd like to plan a new trip.")}
+            />
           </div>
 
-          {/* Center: floating trip detail panel on the right side of the map */}
           <div className="relative pointer-events-none">
             <div className="absolute top-0 right-0 w-[460px] max-w-full max-h-full pointer-events-auto">
               <div className="h-[calc(100vh-56px-32px)] max-h-full">
-                <TripDetailPanel
-                  trip={trip}
-                  days={KYOTO_DAYS}
-                  todayN={TODAY_N}
-                  layout="timeline"
-                  density="comfortable"
-                  activeDayN={activeDayN}
-                  setActiveDayN={setActiveDayN}
-                />
+                {trip ? (
+                  <TripDetailPanel
+                    trip={trip}
+                    days={days}
+                    todayN={todayN}
+                    layout="timeline"
+                    density="comfortable"
+                    activeDayN={activeDayN}
+                    setActiveDayN={setActiveDayN}
+                    onSendMessage={sendMessage}
+                  />
+                ) : (
+                  <EmptyTripCanvas onStart={() => sendMessage("I'd like to plan a trip.")} />
+                )}
               </div>
             </div>
 
-            {/* Map legend — bottom-left of center column */}
             <div className="absolute bottom-2 left-2 pointer-events-auto">
               <MapLegend />
             </div>
           </div>
 
-          {/* Chat (col 3) */}
           {chatStyle === "strip" ? (
             <div className="pointer-events-auto">
               <ChatStripIcons onExpand={() => setChatStyle("drawer")} />
@@ -150,22 +203,25 @@ function DesktopShell({
 
 /* ── Mobile layout (3-pane swipe) ── */
 function MobileShell({
-  trip, activeTripId, setActiveTripId, theme, userProfile,
-}: {
-  trip: Trip; activeTripId: string; setActiveTripId: (id: string) => void; theme: "light" | "dark"; userProfile: UserProfile;
-}) {
+  trip, days, todayN, summaries, activeTripId, setActiveTripId,
+  theme, userProfile, sendMessage,
+}: ShellViewProps) {
   const [pane, setPane] = useState(1); // 0=library, 1=trip, 2=map
   const [chatOpen, setChatOpen] = useState(false);
-  const [activeDayN, setActiveDayN] = useState(TODAY_N);
+  const [activeDayN, setActiveDayN] = useState(todayN);
   const [profileOpen, setProfileOpen] = useState(false);
-  // The dropdown renders as a fixed overlay outside the header to avoid the
-  // backdropFilter stacking context making the panel appear transparent.
-  // profileDropdownRef → the panel (treated as "inside" by the outside-click check)
-  // avatarBtnRef       → the trigger button (excluded so the toggle onClick wins)
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const avatarBtnRef = useRef<HTMLDivElement>(null);
 
-  // Touch swipe detection
+  // Reset to the focused trip's "today" when the trip changes (no effect).
+  const [seenTrip, setSeenTrip] = useState(activeTripId);
+  if (seenTrip !== activeTripId) {
+    setSeenTrip(activeTripId);
+    setActiveDayN(todayN);
+  }
+
+  const active = summaries.find((t) => t.id === activeTripId) ?? summaries[0];
+
   const touchStartX = useRef<number | null>(null);
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
@@ -174,110 +230,77 @@ function MobileShell({
     if (touchStartX.current === null) return;
     const dx = e.changedTouches[0].clientX - touchStartX.current;
     if (Math.abs(dx) < 40) return;
-    if (dx < 0 && pane < 2) setPane((p) => p + 1); // swipe left → next
-    if (dx > 0 && pane > 0) setPane((p) => p - 1); // swipe right → prev
+    if (dx < 0 && pane < 2) setPane((p) => p + 1);
+    if (dx > 0 && pane > 0) setPane((p) => p - 1);
     touchStartX.current = null;
   };
 
   const panes = [
-    { id: "lib",  label: "Library" },
-    { id: "trip", label: "Trip"    },
-    { id: "map",  label: "Map"     },
+    { id: "lib", label: "Library" },
+    { id: "trip", label: "Trip" },
+    { id: "map", label: "Map" },
   ];
 
   return (
     <div className="relative w-full h-full overflow-hidden flex flex-col">
-      {/* Mobile top bar */}
       <header
         className="h-14 px-4 flex items-center justify-between border-b border-border flex-shrink-0"
-        style={{
-          background: "color-mix(in oklab, var(--background) 70%, transparent)",
-          backdropFilter: "blur(20px)",
-        }}
+        style={{ background: "color-mix(in oklab, var(--background) 70%, transparent)", backdropFilter: "blur(20px)" }}
       >
-        <button
-          type="button"
-          className="w-9 h-9 rounded-full grid place-items-center text-muted-foreground"
-          onClick={() => setPane(0)}
-        >
+        <button type="button" className="w-9 h-9 rounded-full grid place-items-center text-muted-foreground" onClick={() => setPane(0)}>
           <LibraryIcon width={16} height={16} />
         </button>
         <div className="flex flex-col items-center">
-          <span className="text-sm font-bold leading-tight">{trip.destination}</span>
-          <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            {trip.dayLabel}
-          </span>
+          <span className="text-sm font-bold leading-tight">{active?.destination ?? "Aletheia"}</span>
+          {active && (
+            <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {active.dayLabel}
+            </span>
+          )}
         </div>
-        {/* avatarBtnRef is passed as excludeRef to ProfileDropdown so that
-            clicking the button when the dropdown is open is treated as "inside"
-            — the outside-click handler stays silent and the toggle onClick closes */}
         <div ref={avatarBtnRef}>
-          <AvatarButton
-            initials={userProfile.initials}
-            open={profileOpen}
-            onClick={() => setProfileOpen((v) => !v)}
-          />
+          <AvatarButton initials={userProfile.initials} open={profileOpen} onClick={() => setProfileOpen((v) => !v)} />
         </div>
       </header>
 
-      {/* Profile dropdown — rendered as a fixed overlay so the header's
-          backdropFilter stacking context does not affect the panel background */}
       {profileOpen && (
-        <div
-          ref={profileDropdownRef}
-          className="fixed top-14 right-3 z-[60]"
-        >
-          <ProfileDropdown
-            userProfile={userProfile}
-            onClose={() => setProfileOpen(false)}
-            containerRef={profileDropdownRef}
-            excludeRef={avatarBtnRef}
-          />
+        <div ref={profileDropdownRef} className="fixed top-14 right-3 z-[60]">
+          <ProfileDropdown userProfile={userProfile} onClose={() => setProfileOpen(false)} containerRef={profileDropdownRef} excludeRef={avatarBtnRef} />
         </div>
       )}
 
-      {/* Pane container */}
-      <div
-        className="flex-1 relative overflow-hidden"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        <div
-          className="absolute inset-0 flex transition-transform duration-500 ease-out"
-          style={{ transform: `translateX(-${pane * (100 / 3)}%)`, width: "300%" }}
-        >
-          {/* Pane 0: Library */}
+      <div className="flex-1 relative overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        <div className="absolute inset-0 flex transition-transform duration-500 ease-out" style={{ transform: `translateX(-${pane * (100 / 3)}%)`, width: "300%" }}>
           <div className="h-full p-3 overflow-y-auto" style={{ width: "33.3333%" }}>
             <TripLibrary
+              summaries={summaries}
               activeId={activeTripId}
               onSelect={(id) => { setActiveTripId(id); setPane(1); }}
+              onNew={() => { sendMessage("I'd like to plan a new trip."); setChatOpen(true); }}
             />
           </div>
 
-          {/* Pane 1: Trip detail */}
           <div className="h-full p-3 overflow-hidden" style={{ width: "33.3333%" }}>
-            <TripDetailPanel
-              trip={trip}
-              days={KYOTO_DAYS}
-              todayN={TODAY_N}
-              layout="accordion"
-              density="comfortable"
-              activeDayN={activeDayN}
-              setActiveDayN={setActiveDayN}
-            />
+            {trip ? (
+              <TripDetailPanel
+                trip={trip}
+                days={days}
+                todayN={todayN}
+                layout="accordion"
+                density="comfortable"
+                activeDayN={activeDayN}
+                setActiveDayN={setActiveDayN}
+                onSendMessage={sendMessage}
+              />
+            ) : (
+              <EmptyTripCanvas onStart={() => { sendMessage("I'd like to plan a trip."); setChatOpen(true); }} />
+            )}
           </div>
 
-          {/* Pane 2: Map */}
           <div className="h-full p-3" style={{ width: "33.3333%" }}>
             <div className="aletheia-card h-full overflow-hidden relative">
-              <KyotoMap
-                days={KYOTO_DAYS}
-                todayN={TODAY_N}
-                activeDayN={activeDayN}
-                theme={theme}
-                weather="rain"
-              />
+              <KyotoMap days={KYOTO_DAYS} todayN={MAP_TODAY_N} activeDayN={MAP_TODAY_N} theme={theme} weather="rain" />
               <div className="absolute top-3 left-3">
                 <MapLegend />
               </div>
@@ -286,53 +309,32 @@ function MobileShell({
         </div>
       </div>
 
-      {/* Pane indicator dots */}
       <div
         className="flex-shrink-0 flex items-center justify-center gap-1.5 py-3"
-        style={{
-          background: "color-mix(in oklab, var(--background) 70%, transparent)",
-          backdropFilter: "blur(20px)",
-          borderTop: "1px solid var(--border)",
-        }}
+        style={{ background: "color-mix(in oklab, var(--background) 70%, transparent)", backdropFilter: "blur(20px)", borderTop: "1px solid var(--border)" }}
       >
         {panes.map((p, i) => (
           <button
-            key={p.id}
-            type="button"
-            onClick={() => setPane(i)}
-            aria-label={p.label}
+            key={p.id} type="button" onClick={() => setPane(i)} aria-label={p.label}
             className="transition-all rounded-full"
             style={{
-              width: i === pane ? "24px" : "8px",
-              height: "8px",
-              background:
-                i === pane
-                  ? "linear-gradient(90deg, var(--primary), #9333ea)"
-                  : "color-mix(in oklab, var(--foreground) 14%, transparent)",
+              width: i === pane ? "24px" : "8px", height: "8px",
+              background: i === pane ? "linear-gradient(90deg, var(--primary), #9333ea)" : "color-mix(in oklab, var(--foreground) 14%, transparent)",
             }}
           />
         ))}
       </div>
 
-      {/* Floating chat bubble */}
       {!chatOpen && (
         <button
-          type="button"
-          onClick={() => setChatOpen(true)}
+          type="button" onClick={() => setChatOpen(true)}
           className="absolute bottom-16 right-4 z-40 w-14 h-14 rounded-full text-white grid place-items-center"
-          style={{
-            background: "linear-gradient(135deg, var(--primary), #9333ea)",
-            boxShadow: "0 16px 40px -10px color-mix(in oklab, var(--primary) 70%, transparent)",
-          }}
+          style={{ background: "linear-gradient(135deg, var(--primary), #9333ea)", boxShadow: "0 16px 40px -10px color-mix(in oklab, var(--primary) 70%, transparent)" }}
         >
           <SparklesIcon width={22} height={22} />
-          <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 text-[10px] font-bold grid place-items-center">
-            2
-          </span>
         </button>
       )}
 
-      {/* Full-screen chat sheet */}
       {chatOpen && (
         <div className="absolute inset-0 z-50 flex flex-col animate-fade-up" style={{ background: "var(--background)" }}>
           <ChatPanel onCollapse={() => setChatOpen(false)} />
@@ -342,14 +344,33 @@ function MobileShell({
   );
 }
 
-/* ── Root shell — picks desktop vs mobile via CSS visibility ── */
+/* ── Root shell ── */
 export function DashboardShell() {
-  const [activeTripId, setActiveTripId] = useState("kyoto");
+  const { summaries, defaultActiveId } = useTripList();
+  const [activeTripId, setActiveTripId] = useState<string | null>(null);
 
-  // Live user data: fetched once here, passed down as props
+  // Adopt the resolved default trip once it loads, without clobbering a user
+  // choice. Adjust-state-during-render (no effect): the guard makes it
+  // converge after the first non-null default.
+  if (activeTripId === null && defaultActiveId !== null) {
+    setActiveTripId(defaultActiveId);
+  }
+
+  const { trip, days, todayN, loading } = useTrip(activeTripId);
+
+  // Send a message into the chat thread (idea chips, mood, journal prompts,
+  // "plan a trip" CTAs). Fire-and-forget: the persisted turn + reply surface
+  // in the chat panel via its realtime subscription (task 37).
+  const sendMessage = useCallback((text: string) => {
+    void fetch("/api/chat/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: text }),
+    }).catch(() => {});
+  }, []);
+
   const userProfileRaw = useUserProfile();
 
-  // Trigger onboarding welcome message if the user has not completed the onboarding form
   useEffect(() => {
     if (!userProfileRaw.loading && !userProfileRaw.fetchError) {
       if (!userProfileRaw.hasCompletedForm) {
@@ -359,25 +380,15 @@ export function DashboardShell() {
     }
   }, [userProfileRaw.loading, userProfileRaw.fetchError, userProfileRaw.hasCompletedForm]);
 
-  // Allow the WelcomeGrantModal to optimistically update the balance in state
-  // without requiring a full re-fetch after a successful claim.
   const [profileOverride, setProfileOverride] = useState<Partial<typeof userProfileRaw>>({});
   const userProfile = { ...userProfileRaw, ...profileOverride };
 
-  // Session-level dismiss — X button hides modal until next login;
-  // if the grant is still unclaimed, the modal will reappear on the next session.
   const [modalDismissed, setModalDismissed] = useState(false);
 
   const handleGranted = (balance: number) => {
     if (balance >= 0) {
-      // Mark claimed and update balance immediately
-      setProfileOverride({
-        balance,
-        initialGrant: balance,
-        welcomeClaimedAt: new Date().toISOString(),
-      });
+      setProfileOverride({ balance, initialGrant: balance, welcomeClaimedAt: new Date().toISOString() });
     } else {
-      // balance=-1 means "already_claimed" — just hide the modal
       setProfileOverride({ welcomeClaimedAt: new Date().toISOString() });
     }
   };
@@ -393,11 +404,7 @@ export function DashboardShell() {
         body = {};
       }
       if (res.ok && body.status === "granted" && typeof body.balance === "number") {
-        setProfileOverride({
-          balance: body.balance,
-          initialGrant: body.balance,
-          welcomeClaimedAt: new Date().toISOString(),
-        });
+        setProfileOverride({ balance: body.balance, initialGrant: body.balance, welcomeClaimedAt: new Date().toISOString() });
       } else {
         setProfileOverride({ welcomeClaimedAt: new Date().toISOString() });
       }
@@ -407,60 +414,43 @@ export function DashboardShell() {
     }
   };
 
-  // Show modal only when:
-  //   • profile has fully loaded (not loading)
-  //   • the fetch didn't error (welcomeClaimedAt !== undefined)
-  //   • the grant is genuinely unclaimed (welcomeClaimedAt === null)
-  //   • user hasn't dismissed it this session
   const showWelcomeModal =
     !userProfile.loading &&
     !userProfile.fetchError &&
     userProfile.welcomeClaimedAt === null &&
     !modalDismissed;
 
-  // Read theme from <html> class (set by ThemeProvider)
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   useEffect(() => {
-    const update = () =>
-      setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+    const update = () => setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     update();
     const observer = new MutationObserver(update);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => observer.disconnect();
   }, []);
 
-  const trip = TRIPS.find((t) => t.id === activeTripId) || TRIPS[0];
+  const viewProps: ShellViewProps = {
+    trip, days, todayN, loading, summaries, activeTripId, setActiveTripId,
+    theme, userProfile, sendMessage,
+  };
 
   return (
     <>
       <Backdrop theme={theme} />
 
-      {/* Desktop — shown on lg+ screens */}
       <div className="relative z-10 hidden lg:block h-full">
-        <DesktopShell
-          trip={trip}
-          activeTripId={activeTripId}
-          setActiveTripId={setActiveTripId}
-          theme={theme}
-          userProfile={userProfile}
-        />
+        <DesktopShell {...viewProps} />
       </div>
 
-      {/* Mobile — shown below lg */}
       <div className="relative z-10 flex lg:hidden h-full">
-        <MobileShell
-          trip={trip}
-          activeTripId={activeTripId}
-          setActiveTripId={setActiveTripId}
-          theme={theme}
-          userProfile={userProfile}
-        />
+        <MobileShell {...viewProps} />
       </div>
 
-      {/* Welcome credits modal — shown once, until claimed */}
       {showWelcomeModal && (
         <WelcomeGrantModal onGranted={handleGranted} onDismiss={handleDismiss} />
       )}
     </>
   );
 }
+
+// triggered hot reload
