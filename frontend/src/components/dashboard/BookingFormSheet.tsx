@@ -9,19 +9,19 @@ import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 
 interface BookingFormSheetProps {
-  booking: TripBooking | null;
+  booking: Partial<TripBooking> | null;
   onClose: () => void;
-  onSave: (updated: TripBooking) => void;
+  onSave: (updated: Partial<TripBooking>) => void;
 }
 
 export function BookingFormSheet({ booking, onClose, onSave }: BookingFormSheetProps) {
-  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [formData, setFormData] = useState<Record<string, string | undefined>>({});
   
   useEffect(() => {
     if (booking) {
       // eslint-disable-next-line
       setFormData({
-        ...booking.payload,
+        ...(booking.payload || {}),
         datetime_local: booking.datetime_local,
         confirmation_code: booking.confirmation_code
       });
@@ -35,19 +35,21 @@ export function BookingFormSheet({ booking, onClose, onSave }: BookingFormSheetP
   };
 
   const handleSave = () => {
-    const updated = {
+    const updated: Partial<TripBooking> = {
       ...booking,
       datetime_local: formData.datetime_local,
       confirmation_code: formData.confirmation_code,
       payload: { ...formData }
     };
     // Clean up top-level duplicated keys from payload if needed
-    delete updated.payload.datetime_local;
-    delete updated.payload.confirmation_code;
+    if (updated.payload) {
+      delete updated.payload.datetime_local;
+      delete updated.payload.confirmation_code;
+    }
     onSave(updated);
   };
 
-  const kind = booking.kind;
+  const kind = booking.kind || "booking";
 
   return (
     <Sheet open={!!booking} onOpenChange={(open) => !open && onClose()}>

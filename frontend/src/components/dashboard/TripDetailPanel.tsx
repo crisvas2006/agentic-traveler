@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import type { Trip, TripDay, DayBlock, Density, PanelLayout } from "@/lib/dashboard-data";
+import type { Trip, TripDay, DayBlock, Density, PanelLayout, TripBooking } from "@/lib/dashboard-data";
 import { TypeChip, EnergyBar } from "./DashChips";
 import {
   SparklesIcon, RainIcon, ChevronDownIcon, ClockIcon, WalkIcon, CheckIcon,
@@ -585,7 +585,7 @@ export function TripDetailPanel({
           <LogisticsRail
             bookings={trip.bookings || []}
             onEdit={(b) => setEditingBooking(b)}
-            onAdd={(kind) => setEditingBooking({ kind, trip_id: trip.id, payload: {} })}
+            onAdd={(kind) => setEditingBooking({ kind: kind as TripBooking["kind"], trip_id: trip.id, payload: {} })}
           />
         </SheetContent>
       </Sheet>

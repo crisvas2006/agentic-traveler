@@ -55,6 +55,13 @@ export interface TripWeather {
   note: string;
 }
 
+export interface CountryIntelData {
+  safety?: { score_10?: number; summary?: string; [key: string]: unknown };
+  iso_country?: string;
+  sources?: string[];
+  [key: string]: unknown;
+}
+
 export interface Trip {
   id: string;
   destination: string;
@@ -66,7 +73,7 @@ export interface Trip {
   weather?: TripWeather;
   bookings?: TripBooking[];
   mood?: { last: string; suggested: string };
-  countryIntel?: unknown[];
+  countryIntel?: CountryIntelData[];
 }
 
 export interface BlockPin {
