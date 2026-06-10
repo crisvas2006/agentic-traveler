@@ -137,7 +137,7 @@ function ChatBubble({
 function getUiBlock(msg: ChatMessage): UiBlock | null {
   const ui = (msg.metadata as { ui?: UiBlock } | undefined)?.ui;
   if (!ui || !Array.isArray(ui.options) || ui.options.length === 0) return null;
-  if (ui.kind !== "multi_choice" && ui.kind !== "quick_reply") return null;
+  if (ui.kind !== "multi_choice" && ui.kind !== "quick_reply" && ui.kind !== "proposal") return null;
   return ui;
 }
 
@@ -196,6 +196,17 @@ function SlotChoices({
       if (!interactive) return;
       if (ui.kind === "quick_reply") {
         onQuickReply(opt.send ?? opt.label, opt.label);
+        return;
+      }
+      // Proposal (task 45): "Set X" writes the proposed value deterministically
+      // (validated server-side against the pending proposal); "Another time" /
+      // "Skip" send a plain message that re-engages the advisor / skip path.
+      if (ui.kind === "proposal") {
+        if (opt.id === "confirm" && opt.value) {
+          onSelect([opt.value], opt.label);
+        } else {
+          onQuickReply(opt.send ?? opt.label, opt.label);
+        }
         return;
       }
       if (multi) {

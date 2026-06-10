@@ -328,17 +328,18 @@ def _trip_only_budget_missing():
     )
 
 
-def test_trip_question_drifts_to_trip_agent_not_slot(saga):
-    # User asks an unrelated travel question while only budget is missing.
-    # The saga must ANSWER (delegate), not re-ask "What's the budget vibe?".
+def test_trip_question_answered_and_slot_reattached(saga):
+    # AC-11 (the "September bug", generalized): a question asked while a slot is
+    # open is ANSWERED by the companion AND the open slot is re-attached to the
+    # same reply — never dropped, but never marching past the question either.
     with patch(_EXTRACT, return_value={}):
         result = saga.run(
             "what's the tipping etiquette in European restaurants?",
             {}, _trip_only_budget_missing(), {"intent": "TRIP"}, "", _events(),
         )
     saga._trip_agent.process_request.assert_called_once()
-    assert result.slot_request is None
     assert result.text == "Some destination ideas."
+    assert result.slot_request is not None and result.slot_request.slot == "budget_tier"
 
 
 def test_new_desire_drifts_to_trip_agent(saga):
@@ -607,3 +608,128 @@ def test_run_after_selection_complete_trip_builds_plan(saga):
     extract.assert_not_called()
     saga._planner.process_request.assert_called_once()
     assert result.text == "Here is your day-by-day plan."
+
+
+# ---------------------------------------------------------------------------
+# task 45 — advisory turns (insight-led timeframe + proposals)
+# ---------------------------------------------------------------------------
+
+from agentic_traveler.orchestrator.sagas.advisor_turn import AdvisorTurn  # noqa: E402
+from agentic_traveler.orchestrator.sagas.planning import _dna_default_line  # noqa: E402
+
+_COMPOSE = "agentic_traveler.orchestrator.sagas.planning.compose_advisor_turn"
+_ENSURE = "agentic_traveler.orchestrator.sagas.planning.ensure_brief"
+
+
+def _trip_dest_no_timeframe():
+    return _trip(
+        destinations=[{"name": "Taormina, Sicily", "status": "confirmed"}],
+        discovery={"destination_brief": {"destination": "Taormina, Sicily", "best_windows": [{"months": ["SEP"]}]}},
+    )
+
+
+def _metric_names(events):
+    return [r["event_name"] for r in events._metric_buffer]
+
+
+def test_september_question_is_answered_and_flow_advances(saga):
+    # AC-1 regression: timeframe open, "september. what is the best time?" →
+    # ONE reply that answers the timing question AND proposes a value with
+    # confirm chips. No marching past the question.
+    turn = AdvisorTurn(
+        text="June is peak; late September keeps the warm sea with quiet lanes — set September?",
+        proposal={"slot": "timeframe", "value": "2099-09", "label": "September"},
+    )
+    events = _events()
+    with patch(_ENSURE, return_value=None), \
+         patch(_EXTRACT, return_value={}), \
+         patch(_COMPOSE, return_value=turn):
+        result = saga.run(
+            "september. what is the best time?",
+            {}, _trip_dest_no_timeframe(), {"intent": "PLAN"}, "", events,
+        )
+    assert "September" in result.text
+    assert result.slot_request is not None and result.slot_request.slot == "timeframe"
+    ui = ui_block_from_wire(result.slot_request.to_wire())
+    assert ui["kind"] == "proposal"
+    assert ui["options"][0] == {"id": "confirm", "label": "Set September", "value": "2099-09"}
+    assert "proposal_made" in _metric_names(events)
+    # pending proposal persisted on the trip
+    patch_se = [s for s in result.side_effects if s.kind == "trip_patch"]
+    assert any(s.payload.get("discovery", {}).get("advisor", {}).get("pending_proposal") for s in patch_se)
+
+
+def test_advise_slot_composer_failure_falls_back_to_static_question(saga):
+    # AC-10 degradation: composer returns None → static timeframe question.
+    events = _events()
+    with patch(_ENSURE, return_value=None), \
+         patch(_EXTRACT, return_value={}), \
+         patch(_COMPOSE, return_value=None):
+        result = saga.run(
+            "when should I go?", {}, _trip_dest_no_timeframe(),
+            {"intent": "PLAN"}, "", events,
+        )
+    assert result.slot_request.slot == "timeframe"
+    assert result.slot_request.choices is None  # free-text static question
+    assert result.text == _SLOT_QUESTIONS["timeframe"]
+
+
+def test_affirmation_writes_pending_proposal_and_advances(saga):
+    # AC-4/AC-5: a bare "yes" on a pending September proposal writes timeframe
+    # and the saga asks the next missing slot.
+    trip = _trip_dest_no_timeframe()
+    trip["discovery"]["advisor"] = {
+        "pending_proposal": {"slot": "timeframe", "value": "2099-09", "label": "September"}
+    }
+    events = _events()
+    with patch(_ENSURE, return_value=None), patch(_EXTRACT, return_value={}):
+        result = saga.run("yes", {}, trip, {"intent": "PLAN"}, "", events)
+    # timeframe written into discovery; advisor pending cleared
+    disc = [s for s in result.side_effects if s.kind == "trip_patch"][0].payload["discovery"]
+    assert disc["timeframe"]["text"] == "September"
+    assert "pending_proposal" not in (disc.get("advisor") or {})
+    assert "proposal_accepted" in _metric_names(events)
+    # next missing slot is travelers
+    assert result.slot_request.slot == "travelers"
+
+
+def test_counter_proposal_clears_pending_and_recomposes(saga):
+    # AC-5: "what about May?" writes nothing, re-evaluates, re-proposes.
+    trip = _trip_dest_no_timeframe()
+    trip["discovery"]["advisor"] = {
+        "pending_proposal": {"slot": "timeframe", "value": "2099-09", "label": "September"}
+    }
+    re_turn = AdvisorTurn(
+        text="May works — cooler, fewer crowds. Set May?",
+        proposal={"slot": "timeframe", "value": "2099-05", "label": "May"},
+    )
+    events = _events()
+    with patch(_ENSURE, return_value=None), patch(_COMPOSE, return_value=re_turn) as comp:
+        result = saga.run("what about May?", {}, trip, {"intent": "PLAN"}, "", events)
+    assert "proposal_rejected" in _metric_names(events)
+    comp.assert_called_once()  # re-composed; extractor suppressed
+    assert "May" in result.text
+    assert result.slot_request.slot == "timeframe"
+
+
+def test_dna_default_line_personalizes_chip_question():
+    # AC-9: zero-LLM personalization from stored profile signal.
+    user = {"user_profile": {"profile_data": {"trip_defaults": {"pace": "slow"}}}}
+    line = _dna_default_line("pace", user)
+    assert line == "Your last trips ran slow — same again? "
+    assert _dna_default_line("pace", {}) == ""
+
+
+def test_proposal_selection_writes_on_match():
+    # AC-4: a confirm tap whose (slot,value) matches the pending proposal writes.
+    from agentic_traveler.orchestrator.sagas.planning import proposal_selection_to_side_effect
+    trip = _trip(discovery={"advisor": {"pending_proposal": {"slot": "timeframe", "value": "2099-09", "label": "September"}}})
+    se = proposal_selection_to_side_effect(trip, "timeframe", "2099-09")
+    assert se is not None and se.payload["discovery"]["timeframe"]["text"] == "September"
+
+
+def test_proposal_selection_rejects_mismatch():
+    # E9: a stale / tampered tap (value != pending) writes nothing.
+    from agentic_traveler.orchestrator.sagas.planning import proposal_selection_to_side_effect
+    trip = _trip(discovery={"advisor": {"pending_proposal": {"slot": "timeframe", "value": "2099-09", "label": "September"}}})
+    assert proposal_selection_to_side_effect(trip, "timeframe", "2099-12") is None

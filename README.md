@@ -214,6 +214,39 @@ destination (no cold-opening intimate questions), capped at once per day per
 trip, and suppressed entirely for high-`structure_preference` planners. Disabled
 in one flip via `CURIOSITY_INJECTOR_ENABLED=false`.
 
+#### Advisory turns (Task 45)
+
+The PlanningSaga doesn't just collect slots — for the **timeframe** it composes
+an *advisory turn*: one `gemini-3.5-flash` call that answers any question the
+traveler asked, offers one grounded insight, and **proposes** a value with
+one-tap confirm chips (`[Set September] [Another time] [Skip]`). The insight is
+grounded in a **destination brief** — cached "world facts" (best windows by the
+weather/crowds/price triad, seasonal character, signature experiences, fit
+hooks) captured once when a destination is first set, stored on
+`trip.discovery.destination_brief`, never authoritative (a verify-with-official
+-sources disclaimer applies). The composer's system prompt distils travel
+frameworks (seasonality triad, push/pull, comfort-novelty, state-over-trait,
+anticipation) so the advice feels like a knowledgeable friend, not a form.
+
+Key behaviours:
+- **Answer, don't march past** (the "September bug" fixed): a question asked
+  while a slot is open is answered AND the open decision is re-presented in the
+  same reply — never dropped. For the timeframe slot the composer does both;
+  for chip slots the companion answers and the chip is re-attached.
+- **Propose, then confirm** — proposed values are written ONLY on confirmation
+  (tap or an affirmation like "yes"); a counter-proposal ("what about May?")
+  re-evaluates and re-proposes instead of moving on. Values the traveller
+  *states* decisively ("May, that's fixed") still write immediately via the
+  extractor. Pending proposals persist on `trip.discovery.advisor`; a confirm
+  tap is re-validated against them server-side before writing (trust-but-verify).
+- **DNA-default chip lines** (zero LLM): chip questions lead with a
+  personalization when the profile has signal ("Your last trips ran slow —
+  same again?").
+- Degrades cleanly: no brief → composer runs DNA-only; composer fails → the
+  static slot question. The brief and composer are `@traceable`; metrics
+  (`brief_captured`, `advisor_turn_composed`, `proposal_made/accepted/rejected`)
+  feed the proposal-acceptance KPI.
+
 #### Real-time architecture (Task 37)
 
 Three composable layers give the web a live feel, all multiplexed through the

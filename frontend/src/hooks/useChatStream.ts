@@ -21,9 +21,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const MIN_STATUS_MS = 1000;
 
 /** A tappable-choice block (Task 43) attached to an agent reply's metadata. */
-export type UiOption = { id: string; label: string; send?: string };
+export type UiOption = { id: string; label: string; send?: string; value?: string };
 export type UiBlock = {
-  kind: "multi_choice" | "quick_reply";
+  // `proposal` (task 45): an advisory turn's [Set X] / [Another time] / [Skip]
+  // — the confirm option carries the proposed `value`, written deterministically.
+  kind: "multi_choice" | "quick_reply" | "proposal";
   slot: string;
   prompt: string;
   allow_multi: boolean;

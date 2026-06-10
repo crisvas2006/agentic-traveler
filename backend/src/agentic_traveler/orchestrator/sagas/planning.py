@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 import time
 from typing import Any, Optional
 
@@ -37,7 +38,12 @@ from agentic_traveler.orchestrator.curiosity_injector import (
     is_today_iso,
     today_iso,
 )
-from agentic_traveler.orchestrator.profile_utils import build_live_context
+from agentic_traveler.orchestrator.profile_utils import (
+    build_live_context,
+    build_profile_summary,
+)
+from agentic_traveler.orchestrator.sagas.advisor_turn import compose_advisor_turn
+from agentic_traveler.orchestrator.sagas.destination_brief import ensure_brief
 from agentic_traveler.orchestrator.trip_agent import TripAgent
 
 logger = logging.getLogger(__name__)
@@ -143,7 +149,26 @@ def ui_block_from_wire(wire: Optional[dict[str, Any]]) -> Optional[dict[str, Any
     if not wire or not wire.get("choices"):
         return None
     slot = wire["slot"]
+    choices = wire["choices"]
     is_choice_slot = slot in _SLOT_CHOICES
+    # Task 45: an advisory proposal carries a "confirm" option whose value is the
+    # proposed value — the structural discriminator for the `proposal` kind. The
+    # confirm tap sends a deterministic `selection {slot, [value]}` (validated
+    # server-side against the persisted pending proposal); other/skip send a
+    # plain message that re-engages the composer / skip path.
+    is_proposal = not is_choice_slot and any(c["id"] == "confirm" for c in choices)
+    if is_proposal:
+        return {
+            "kind": "proposal",
+            "slot": slot,
+            "prompt": wire["prompt"],
+            "allow_multi": False,
+            "options": [
+                {"id": c["id"], "label": c["label"],
+                 **({"value": c["value"]} if c["id"] == "confirm" else {"send": c["value"]})}
+                for c in choices
+            ],
+        }
     block: dict[str, Any] = {
         "kind": "multi_choice" if is_choice_slot else "quick_reply",
         "slot": slot,
@@ -154,13 +179,13 @@ def ui_block_from_wire(wire: Optional[dict[str, Any]]) -> Optional[dict[str, Any
         # Deterministic slot: the client echoes the option id back as the value;
         # the backend re-validates it. The raw value never needs to leave here.
         block["options"] = [
-            {"id": c["id"], "label": c["label"]} for c in wire["choices"]
+            {"id": c["id"], "label": c["label"]} for c in choices
         ]
     else:
         # Quick reply: the client sends `send` as a normal chat message.
         block["options"] = [
             {"id": c["id"], "label": c["label"], "send": c["value"]}
-            for c in wire["choices"]
+            for c in choices
         ]
     if block["allow_multi"]:
         block["submit_label"] = "Confirm"
@@ -227,6 +252,193 @@ def slot_selection_to_side_effect(
     return slot_values_to_side_effect(trip, slot, [value])
 
 
+def proposal_selection_to_side_effect(
+    trip: Optional[dict[str, Any]], slot: str, value: str
+) -> Optional[SideEffect]:
+    """Task 45: a tapped advisory proposal / suggestion is valid ONLY if its
+    ``(slot, value)`` matches the trip's persisted ``pending_proposal`` (or a
+    pending suggestion) — trust-but-verify. Returns the deterministic write, or
+    ``None`` on a mismatch (stale / tampered tap)."""
+    advisor = _advisor_state(trip)
+    pending = advisor.get("pending_proposal") or {}
+    if pending.get("slot") == slot and str(pending.get("value")) == str(value):
+        return _proposal_write(trip, pending)
+    if slot == "destination":
+        for sug in advisor.get("pending_suggestions") or []:
+            if str(sug.get("value")) == str(value):
+                return _proposal_write(
+                    trip, {"slot": "destination", "value": value, "label": sug.get("label")}
+                )
+    return None
+
+
+# ── Task 45 — advisory turns (insight-led slot filling) ──────────────────────
+# Only `timeframe` is advisory in the PlanningSaga: destination has a brief by
+# the time timeframe is open, so the composer can ground its insight.
+# Destination *discovery* (no destination yet) is the DiscoverySaga's job.
+_ADVISORY_SLOTS = ("timeframe",)
+_ADVISOR_SLOT_CAP = 350
+
+_AFFIRMATIONS = frozenset({
+    "yes", "y", "yep", "yeah", "ok", "okay", "sure", "sounds good", "sounds great",
+    "perfect", "do it", "let's do it", "lets do it", "great", "go for it", "set it",
+    "yes please", "please do", "that works", "works for me",
+})
+_INTERROGATIVE_CUES = (
+    "what about", "how about", "what if", "would ", "could ", "should i",
+    "is it", "are there", "what's the", "whats the", "when is", "when's",
+)
+
+
+def _is_affirmation(message: str) -> bool:
+    return (message or "").strip().lower().rstrip("!. ") in _AFFIRMATIONS
+
+
+def _is_interrogative(message: str) -> bool:
+    m = (message or "").lower()
+    return "?" in m or any(cue in m for cue in _INTERROGATIVE_CUES)
+
+
+def _advisor_state(trip: Optional[dict[str, Any]]) -> dict[str, Any]:
+    return dict(((trip or {}).get("discovery") or {}).get("advisor") or {})
+
+
+def _discovery_patch(trip: Optional[dict[str, Any]], **changes: Any) -> SideEffect:
+    """A trip_patch carrying the trip's discovery dict with ``changes`` merged in
+    (the column is replaced wholesale on write, so we merge here). A ``None``
+    value deletes that key — used to clear ``advisor`` pending state."""
+    disc = dict((trip or {}).get("discovery") or {})
+    for key, val in changes.items():
+        if val is None:
+            disc.pop(key, None)
+        else:
+            disc[key] = val
+    return SideEffect(kind="trip_patch", payload={"id": (trip or {}).get("id"), "discovery": disc})
+
+
+def _set_pending_proposal(
+    trip: Optional[dict[str, Any]], proposal: Optional[dict[str, Any]]
+) -> SideEffect:
+    """Persist (or clear) ``discovery.advisor.pending_proposal`` on the trip."""
+    advisor = _advisor_state(trip)
+    if proposal:
+        advisor["pending_proposal"] = proposal
+    else:
+        advisor.pop("pending_proposal", None)
+    return _discovery_patch(trip, advisor=advisor or None)
+
+
+def _proposal_write(
+    trip: Optional[dict[str, Any]], proposal: dict[str, Any]
+) -> Optional[SideEffect]:
+    """Map a CONFIRMED proposal (slot+value) onto a trip write, also clearing the
+    pending proposal. Currently timeframe (→ discovery.timeframe) and destination
+    (→ confirmed child row)."""
+    slot, value = proposal.get("slot"), proposal.get("value")
+    trip_id = (trip or {}).get("id")
+    if not (slot and value and trip_id):
+        return None
+    if slot == "timeframe":
+        tf = dict(((trip or {}).get("discovery") or {}).get("timeframe") or {})
+        tf["text"] = proposal.get("label") or value
+        if re.fullmatch(r"\d{4}-\d{2}", str(value)):
+            tf["start_date"] = f"{value}-01"
+        elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value)):
+            tf["start_date"] = str(value)
+        advisor = _advisor_state(trip)
+        advisor.pop("pending_proposal", None)
+        return _discovery_patch(trip, timeframe=tf, advisor=advisor or None)
+    if slot == "destination":
+        return SideEffect(
+            kind="destination_upsert",
+            payload={"trip_id": trip_id, "name": str(value), "status": "confirmed"},
+        )
+    return None
+
+
+def _coalesce_trip_patches(side_effects: list[SideEffect]) -> list[SideEffect]:
+    """Merge all ``trip_patch`` side effects in a turn into ONE, deep-merging
+    JSONB section dicts. ``upsert_trip`` replaces each column wholesale, so two
+    discovery patches in a turn would otherwise clobber each other (e.g. a brief
+    capture + a timeframe write)."""
+    merged: dict[str, Any] = {}
+    out: list[SideEffect] = []
+    patch_index: Optional[int] = None
+    for se in side_effects:
+        if getattr(se, "kind", None) != "trip_patch":
+            out.append(se)
+            continue
+        for key, val in (se.payload or {}).items():
+            if isinstance(val, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **val}
+            else:
+                merged[key] = val
+        if patch_index is None:
+            patch_index = len(out)
+            out.append(SideEffect(kind="trip_patch", payload=merged))
+    if patch_index is not None:
+        out[patch_index] = SideEffect(kind="trip_patch", payload=merged)
+    return out
+
+
+def _apply_side_effect_local(
+    trip: Optional[dict[str, Any]], se: SideEffect
+) -> Optional[dict[str, Any]]:
+    """Reflect a staged SideEffect onto a local copy of the trip so the
+    missing-slot computation this turn sees it (mirrors ``_apply_local``)."""
+    if trip is None:
+        return trip
+    local = copy.deepcopy(trip)
+    if se.kind == "trip_patch":
+        for key, val in (se.payload or {}).items():
+            if key != "id":
+                local[key] = val
+    elif se.kind == "destination_upsert":
+        local.setdefault("destinations", []).append(
+            {"name": se.payload.get("name"), "status": se.payload.get("status", "considering")}
+        )
+    return local
+
+
+def _dna_default_line(slot: str, user_doc: dict[str, Any]) -> str:
+    """A zero-LLM personalization prefix for a chip slot, from stored profile
+    signal. "" when there's no usable signal (AC-9)."""
+    pd = (user_doc.get("user_profile") or {}).get("profile_data") or {}
+    prefs = pd.get("trip_defaults") or pd.get("last_trip_preferences") or {}
+    val = prefs.get(slot)
+    labels = {
+        "pace": {"slow": "ran slow", "medium": "kept a steady rhythm", "fast": "moved fast"},
+        "structure": {"loose": "stayed loose", "full": "were fully planned"},
+    }
+    phrase = (labels.get(slot) or {}).get(str(val).lower()) if val else None
+    if phrase:
+        return f"Your last trips {phrase} — same again? "
+    return ""
+
+
+def _state_signal(trip: Optional[dict[str, Any]]) -> Optional[str]:
+    """Short current-state line for the composer (STATE OVER TRAIT), from the
+    latest mood check-in (task 41). None when no mood is logged."""
+    lm = ((trip or {}).get("live_state") or {}).get("last_mood") or {}
+    label = lm.get("label")
+    return f"feeling {label}" if label else None
+
+
+def _proposal_slot_request(slot: str, prompt: str, proposal: dict[str, Any]) -> SlotRequest:
+    """A proposal SlotRequest: [Set <label>] [Another time] [Skip for now]. The
+    ``confirm`` option id is the structural discriminator the channel layer uses
+    to render kind ``proposal`` (the SlotRequest dataclass stays frozen)."""
+    return SlotRequest(
+        slot=slot, prompt=prompt,
+        choices=[
+            ChoiceOption("confirm", f"Set {proposal.get('label')}", str(proposal.get("value"))),
+            ChoiceOption("other", "Another time", "another time"),
+            ChoiceOption("skip", "Skip for now", "skip"),
+        ],
+        allow_multi=False,
+    )
+
+
 class PlanningSaga:
     """Owns the trip-planning conversation."""
 
@@ -271,28 +483,71 @@ class PlanningSaga:
         events.emit("metric", {"name": "saga_entered", "saga": self.name})
 
         overrides = _hard_overrides(user_doc)
-
-        # 1. Extract any facts in this message and stage writes.
         side_effects: list[SideEffect] = []
-        extracted: dict[str, Any] = {}
-        try:
-            pending_slot = state.get("pending_slot")
-            extracted = extract_trip_slots(self._client, message, pending_slot=pending_slot)
-            if extracted:
-                events.emit("metric", {
-                    "name": "slot_filled", "saga": self.name,
-                    "slots": sorted(extracted.keys()),
-                })
-            side_effects = _slots_to_side_effects(extracted, trip)
-            trip = _apply_local(trip, extracted)
-        except Exception:
-            logger.warning("PlanningSaga slot extraction failed.", exc_info=True)
+        made_progress = False
 
-        return self._decide(
+        # 0. Task 45 — resolve a pending advisory proposal BEFORE extraction.
+        pending = _advisor_state(trip).get("pending_proposal")
+        suppress_extraction = False
+        if pending:
+            if _is_affirmation(message):
+                se = _proposal_write(trip, pending)
+                if se is not None:
+                    side_effects.append(se)
+                    trip = _apply_side_effect_local(trip, se)
+                    made_progress = True
+                    events.emit("metric", {"name": "proposal_accepted", "slot": pending.get("slot")})
+            elif _is_interrogative(message):
+                # Counter-proposal ("what about May?") — clear the pending
+                # proposal, write nothing, and let the composer re-propose.
+                clear = _set_pending_proposal(trip, None)
+                side_effects.append(clear)
+                trip = _apply_side_effect_local(trip, clear)
+                suppress_extraction = True
+                events.emit("metric", {"name": "proposal_rejected", "slot": pending.get("slot")})
+            # else: ambiguous → fall through; a decisive restatement still
+            # writes via the extractor (AC-6).
+
+        # 1. Extract any facts in this message and stage writes (unless we're in
+        #    a counter-proposal loop, where the composer re-proposes instead).
+        if not suppress_extraction:
+            try:
+                pending_slot = state.get("pending_slot")
+                extracted = extract_trip_slots(self._client, message, pending_slot=pending_slot)
+                # AC-1/AC-6: when the message is a QUESTION about a knowledge slot
+                # ("september, what's the best time?"), don't let the bare value
+                # short-circuit the advisory turn — drop it so the composer
+                # answers and PROPOSES it (confirm-to-write). A decisive statement
+                # ("September, that's fixed") is non-interrogative → writes here.
+                if extracted and _is_interrogative(message):
+                    extracted.pop("timeframe", None)
+                if extracted:
+                    events.emit("metric", {
+                        "name": "slot_filled", "saga": self.name,
+                        "slots": sorted(extracted.keys()),
+                    })
+                side_effects.extend(_slots_to_side_effects(extracted, trip))
+                trip = _apply_local(trip, extracted)
+                made_progress = made_progress or bool(extracted)
+            except Exception:
+                logger.warning("PlanningSaga slot extraction failed.", exc_info=True)
+
+        # 2. Capture the destination brief once a destination exists (AC-2).
+        try:
+            brief_se = ensure_brief(self._client, trip, user_doc, events)
+            if brief_se is not None:
+                side_effects.append(brief_se)
+                trip = _apply_side_effect_local(trip, brief_se)
+        except Exception:
+            logger.warning("ensure_brief failed.", exc_info=True)
+
+        result = self._decide(
             message, user_doc, trip, state, conversation_context, events,
-            side_effects=side_effects, made_progress=bool(side_effects),
+            side_effects=side_effects, made_progress=made_progress,
             overrides=overrides, t=t,
         )
+        result.side_effects = _coalesce_trip_patches(result.side_effects)
+        return result
 
     @traceable(name="saga.planning.run_after_selection")
     def run_after_selection(
@@ -315,10 +570,12 @@ class PlanningSaga:
         t = time.time()
         events.emit("metric", {"name": "saga_entered", "saga": self.name})
         overrides = _hard_overrides(user_doc)
-        return self._decide(
+        result = self._decide(
             message, user_doc, trip, state, conversation_context, events,
             side_effects=[], made_progress=True, overrides=overrides, t=t,
         )
+        result.side_effects = _coalesce_trip_patches(result.side_effects)
+        return result
 
     def _decide(
         self,
@@ -364,12 +621,33 @@ class PlanningSaga:
 
         # Still collecting essentials.
         if missing is not None:
-            # Let the user drift. If they're asking a question or exploring
-            # (intent TRIP) rather than answering the open slot, ANSWER them via
-            # the content engine instead of re-asking the slot. Any planning
-            # facts they mentioned were still captured above as side_effects.
-            # Without this guard the saga gets stuck re-asking the last missing
-            # slot (e.g. "What's the budget vibe?") no matter what the user says.
+            interrogative = _is_interrogative(message)
+
+            # Task 45: a knowledge slot (timeframe) becomes an advisory turn —
+            # the composer answers any question AND proposes a value in one reply.
+            if missing in _ADVISORY_SLOTS and missing not in overrides:
+                advised = self._advise_slot(
+                    missing, message, trip, user_doc, state,
+                    conversation_context, side_effects, events, t,
+                )
+                if advised is not None:
+                    _focus("advise_slot")
+                    return advised
+                # composer failed → fall through to the static question (AC-10).
+
+            # Task 45 / AC-11 (the "September bug"): a question asked while a CHIP
+            # slot is open is ANSWERED, and the open slot is re-attached to the
+            # SAME reply — never dropped. (Knowledge slots that reach here had a
+            # composer failure → fall through to the static question, AC-10.)
+            if interrogative and missing not in _ADVISORY_SLOTS:
+                _focus("answer_and_reask")
+                return self._answer_and_reask(
+                    missing, message, user_doc, trip, conversation_context,
+                    state, side_effects, events, t,
+                )
+
+            # Open drift: exploring (intent TRIP) without progress → companion
+            # answers rather than the saga re-asking the same slot.
             if intent == "TRIP" and not made_progress:
                 _focus("companion")
                 return self._delegate(
@@ -378,11 +656,9 @@ class PlanningSaga:
                     state, side_effects, events, t,
                 )
             # Otherwise collect the essentials one question at a time (AC-3/AC-9).
-            # On a fresh trip that just superseded another, acknowledge the trip
-            # set aside on the first prompt (task 44 AC-4).
             _focus("new_trip" if superseded else "slot_fill")
             return self._ask_slot(
-                missing, side_effects, events, t,
+                missing, side_effects, events, t, user_doc=user_doc,
                 superseded=superseded if missing == "destination" else None,
             )
 
@@ -433,13 +709,17 @@ class PlanningSaga:
 
     def _ask_slot(
         self, slot: str, side_effects: list[SideEffect], events: Any, t: float,
-        superseded: Optional[str] = None,
+        superseded: Optional[str] = None, user_doc: Optional[dict[str, Any]] = None,
     ) -> SagaResult:
         question = _SLOT_QUESTIONS[slot]
         choices = _SLOT_CHOICES.get(slot)
+        # Task 45 AC-9: a zero-LLM DNA-default prefix when the profile has signal
+        # ("Your last trips ran slow — same again?"). The chip card shows the
+        # plain question; the spoken text leads with the personalization.
+        dna_prefix = _dna_default_line(slot, user_doc or {})
         # When a fresh trip just set another aside, acknowledge it on the first
         # prompt so the switch feels deliberate (task 44 AC-4).
-        text = question
+        text = dna_prefix + question
         if superseded:
             text = f"Putting {_clip_title(superseded)} on hold — let's start fresh. {question}"
         events.emit("metric", {"name": "slot_request_emitted", "slot": slot})
@@ -489,6 +769,71 @@ class PlanningSaga:
                 ],
             ),
         )
+
+    # ------------------------------------------------------------------
+    # advisory turns (task 45)
+    # ------------------------------------------------------------------
+
+    def _advise_slot(
+        self, slot: str, message: str, trip: Optional[dict[str, Any]],
+        user_doc: dict[str, Any], state: SagaState, conversation_context: str,
+        side_effects: list[SideEffect], events: Any, t: float,
+    ) -> Optional[SagaResult]:
+        """Compose an advisory turn for a knowledge slot: answer any question,
+        offer one grounded insight, propose a value with confirm chips. Returns
+        ``None`` on composer failure so the caller falls back to the static
+        question (AC-10)."""
+        brief = ((trip or {}).get("discovery") or {}).get("destination_brief")
+        dna = build_profile_summary(user_doc or {}, include_scores=False)
+        c0 = time.time()
+        turn = compose_advisor_turn(
+            self._client, mode="advise_slot", slot=slot, message=message,
+            brief=brief, dna_summary=dna, state_signal=_state_signal(trip),
+            curiosity_prompt=None, conversation_context=conversation_context,
+            char_cap=_ADVISOR_SLOT_CAP,
+        )
+        if turn is None:
+            return None
+        events.emit("metric", {
+            "name": "advisor_turn_composed", "mode": "advise_slot",
+            "latency_ms": int((time.time() - c0) * 1000),
+        })
+        if turn.truncated:
+            events.emit("metric", {"name": "advisor_budget_overflow", "slot": slot})
+
+        slot_request = None
+        if turn.proposal:
+            side_effects.append(_set_pending_proposal(trip, turn.proposal))
+            events.emit("metric", {"name": "proposal_made", "slot": slot})
+            slot_request = _proposal_slot_request(slot, turn.text, turn.proposal)
+        events.emit("metric", {
+            "name": "saga_exited", "saga": self.name, "outcome": "advise_slot",
+            "latency_ms": (time.time() - t) * 1000,
+        })
+        return SagaResult(
+            text=turn.text, slot_request=slot_request, side_effects=side_effects,
+            state_delta={"pending_slot": slot},
+        )
+
+    def _answer_and_reask(
+        self, slot: str, message: str, user_doc: dict[str, Any],
+        trip: Optional[dict[str, Any]], conversation_context: str,
+        state: SagaState, side_effects: list[SideEffect], events: Any, t: float,
+    ) -> SagaResult:
+        """AC-11 / the "September bug": answer the user's question via the
+        companion AND re-attach the open chip slot to the SAME reply, so the
+        question is never dropped and the flow still advances."""
+        phase = derive_saga_state_local(trip)
+        result = self._delegate(
+            self._trip_agent, "TripAgent", user_doc, message,
+            conversation_context + self._curiosity_suffix(trip, user_doc, phase, side_effects, events),
+            state, side_effects, events, t,
+        )
+        result.slot_request = SlotRequest(
+            slot=slot, prompt=_SLOT_QUESTIONS[slot], choices=_SLOT_CHOICES.get(slot),
+            allow_multi=slot in _MULTI_SELECT_SLOTS,
+        )
+        return result
 
     # ------------------------------------------------------------------
     # delegation to content engines

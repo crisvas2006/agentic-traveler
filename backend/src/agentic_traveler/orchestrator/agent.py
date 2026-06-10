@@ -47,7 +47,10 @@ from agentic_traveler.orchestrator.router_agent import RouterAgent
 from agentic_traveler.orchestrator.event_emitter import EventEmitter
 from agentic_traveler.orchestrator.event_text_registry import text_for
 from agentic_traveler.orchestrator.sagas import SagaDispatcher, SagaState
-from agentic_traveler.orchestrator.sagas.planning import slot_values_to_side_effect
+from agentic_traveler.orchestrator.sagas.planning import (
+    proposal_selection_to_side_effect,
+    slot_values_to_side_effect,
+)
 from agentic_traveler.orchestrator.sagas.trip_resolver import (
     resolve_active_trip,
     resolve_trip_focus,
@@ -463,7 +466,11 @@ class OrchestratorAgent:
 
         # 2. Validate + apply the chosen value(s) deterministically as one write
         #    (multi-select slots like travelers aggregate; 'skip' is exclusive).
+        #    A non-chip slot is an advisory proposal (task 45): validate the
+        #    tapped value against the trip's persisted pending proposal.
         se = slot_values_to_side_effect(trip, slot, values)
+        if se is None and values:
+            se = proposal_selection_to_side_effect(trip, slot, values[0])
         if se is None:
             logger.warning(
                 "Selection rejected (illegal/free-text/no-trip) slot=%s channel=%s",
