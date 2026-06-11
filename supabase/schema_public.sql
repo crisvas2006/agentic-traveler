@@ -291,6 +291,7 @@ CREATE TABLE IF NOT EXISTS public.trip_destinations (
   iso_country  text,
   status       text        NOT NULL DEFAULT 'considering'
                            CHECK (status IN ('considering','confirmed','rejected')),
+  coords       jsonb       DEFAULT '{}'::jsonb,
   ord          int         NOT NULL DEFAULT 0,
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()

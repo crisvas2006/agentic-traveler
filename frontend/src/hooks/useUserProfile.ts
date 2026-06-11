@@ -7,6 +7,7 @@ export interface UserProfile {
   name: string;
   email: string;
   initials: string;
+  location: string | null;
   dnaTags: string[];
   formResponse: Record<string, unknown> | null;
   summary: string;
@@ -25,6 +26,7 @@ const EMPTY: UserProfile = {
   name: "",
   email: "",
   initials: "…",
+  location: null,
   dnaTags: [],
   formResponse: null,
   summary: "",
@@ -98,7 +100,7 @@ export function useUserProfile(): UserProfile {
       const [usersResult, creditsResult] = await Promise.all([
         supabase
           .from("users")
-          .select("name, user_profiles ( profile_data, form_response, summary )")
+          .select("name, location, user_profiles ( profile_data, form_response, summary )")
           .maybeSingle(),
         supabase
           .from("credits")
@@ -151,6 +153,7 @@ export function useUserProfile(): UserProfile {
         name,
         email,
         initials: deriveInitials(name),
+        location: usersResult.data.location || null,
         dnaTags: profileRow?.profile_data?.tags ?? [],
         formResponse,
         summary: profileRow?.summary ?? "",

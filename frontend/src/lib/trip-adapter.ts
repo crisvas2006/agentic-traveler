@@ -279,6 +279,12 @@ export function adaptTrip(raw: RawTrip | null): AdaptedTrip | null {
     liveState: asObj(raw.live_state) as TripLiveState,
     scratchpad: asObj(raw.scratchpad) as TripScratchpad,
     journal: asObj(raw.journal) as TripJournal,
+    destinations: dests.map((d) => ({
+      id: str(d.id) ?? "",
+      name: str(d.name) ?? "",
+      status: str(d.status) ?? "considering",
+      coords: asObj(d.coords),
+    })),
     mood: str(lastMood.label)
       ? { last: str(lastMood.label)!, suggested: "" }
       : undefined,

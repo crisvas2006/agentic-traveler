@@ -143,6 +143,7 @@ export interface Trip {
   liveState?: TripLiveState;
   scratchpad?: TripScratchpad;
   journal?: TripJournal;
+  destinations?: { id: string; name: string; status: string; coords?: any }[];
 }
 
 // Lightweight row for the trip library list (one card per trip).

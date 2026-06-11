@@ -5,17 +5,14 @@ import { useUserProfile, type UserProfile } from "@/hooks/useUserProfile";
 import { useTrip, useTripList } from "@/hooks/useTrip";
 import { ChatProvider } from "@/hooks/useChat";
 import type { Trip, TripDay, TripSummary } from "@/lib/dashboard-data";
-// Map placeholder data — the dashboard map is a NON-GOAL of task 40 and is
-// replaced wholesale by a real MapLibre map in task 49. Until then it renders
-// from these demo days so the canvas stays visually coherent, decoupled from
-// live trip data (live itinerary blocks carry no abstract-canvas pins).
-import { KYOTO_DAYS, TODAY_N as MAP_TODAY_N } from "@/lib/dashboard-fixtures";
 import { WelcomeGrantModal } from "./WelcomeGrantModal";
 import { TopNav } from "./TopNav";
 import { TripLibrary } from "./TripLibrary";
 import { TripDetailPanel } from "./TripDetailPanel";
-import { KyotoMap } from "./KyotoMap";
+import dynamic from "next/dynamic";
 import { ChatStripIcons, ChatPanel } from "./ChatPanel";
+
+const TripMap = dynamic(() => import("./TripMap"), { ssr: false });
 import { SparklesIcon, LibraryIcon } from "./DashIcons";
 import { AvatarButton, ProfileDropdown } from "./ProfileDropdown";
 
@@ -151,9 +148,9 @@ function DesktopShell({
       <div className="flex-1 relative overflow-hidden">
         {/* Map — full bleed canvas (placeholder pending task 49) */}
         <div className={`absolute inset-0 ${chatExpanded ? "hidden" : ""}`}>
-          <KyotoMap days={KYOTO_DAYS} todayN={MAP_TODAY_N} activeDayN={MAP_TODAY_N} theme={theme} weather="rain" />
+          <TripMap trip={trip} days={days} activeDayN={activeDayN} theme={theme} userProfile={userProfile} />
           <div
-            className="absolute inset-0"
+            className="absolute inset-0 pointer-events-none"
             style={{
               background:
                 theme === "dark"
@@ -336,8 +333,8 @@ function MobileShell({
 
           <div className="h-full p-3" style={{ width: "33.3333%" }}>
             <div className="aletheia-card h-full overflow-hidden relative">
-              <KyotoMap days={KYOTO_DAYS} todayN={MAP_TODAY_N} activeDayN={MAP_TODAY_N} theme={theme} weather="rain" />
-              <div className="absolute top-3 left-3">
+              <TripMap trip={trip} days={days} activeDayN={activeDayN} theme={theme} userProfile={userProfile} />
+              <div className="absolute top-3 left-3 pointer-events-none">
                 <MapLegend />
               </div>
             </div>

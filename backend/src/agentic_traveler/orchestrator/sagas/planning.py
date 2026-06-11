@@ -45,6 +45,7 @@ from agentic_traveler.orchestrator.profile_utils import (
 from agentic_traveler.orchestrator.sagas.advisor_turn import compose_advisor_turn
 from agentic_traveler.orchestrator.sagas.destination_brief import ensure_brief
 from agentic_traveler.orchestrator.trip_agent import TripAgent
+from agentic_traveler.tools.geocoder import geocode_destination
 
 logger = logging.getLogger(__name__)
 
@@ -349,9 +350,13 @@ def _proposal_write(
         advisor.pop("pending_proposal", None)
         return _discovery_patch(trip, timeframe=tf, advisor=advisor or None)
     if slot == "destination":
+        coords = geocode_destination(str(value))
+        payload = {"trip_id": trip_id, "name": str(value), "status": "confirmed"}
+        if coords:
+            payload["coords"] = coords
         return SideEffect(
             kind="destination_upsert",
-            payload={"trip_id": trip_id, "name": str(value), "status": "confirmed"},
+            payload=payload,
         )
     return None
 
@@ -1019,9 +1024,13 @@ def _slots_to_side_effects(
     for name in extracted.get("destinations", []):
         if name.strip().lower() in existing_names:
             continue
+        coords = geocode_destination(name.strip())
+        payload = {"trip_id": trip_id, "name": name, "status": "considering"}
+        if coords:
+            payload["coords"] = coords
         effects.append(SideEffect(
             kind="destination_upsert",
-            payload={"trip_id": trip_id, "name": name, "status": "considering"},
+            payload=payload,
         ))
 
     # JSONB section merges, batched into a single trip_patch.
