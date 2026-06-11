@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, createContext, useContext, ReactNode } from "react";
 
 import { useChatRealtime } from "./useChatRealtime";
 import { useChatStream } from "./useChatStream";
@@ -17,14 +17,36 @@ export type ChatMessage = {
   created_at: string;
 };
 
-type HistoryResponse = { messages: ChatMessage[]; has_more: boolean };
+// Sort ascending by ID; negative (optimistic) IDs always trail real ones.
+function sortByIdAsc(msgs: ChatMessage[]): ChatMessage[] {
+  return [...msgs].sort((a, b) => {
+    if (a.id < 0 && b.id >= 0) return 1;
+    if (b.id < 0 && a.id >= 0) return -1;
+    return a.id - b.id;
+  });
+}
+
+type HistoryResponse = { messages: ChatMessage[]; has_more: boolean; has_more_newer?: boolean };
 type SearchResponse = { results: ChatMessage[] };
 
 const INITIAL_LIMIT = 30;
 const PAGE_LIMIT = 50;
 
+const ChatContext = createContext<ReturnType<typeof useChatInternal> | null>(null);
+
+export function ChatProvider({ children }: { children: ReactNode }) {
+  const chat = useChatInternal();
+  return <ChatContext.Provider value={chat}>{children}</ChatContext.Provider>;
+}
+
+export function useChat() {
+  const ctx = useContext(ChatContext);
+  if (!ctx) throw new Error("useChat must be used within a ChatProvider");
+  return ctx;
+}
+
 /**
- * useChat — state, pagination, search, streaming send, and realtime merge for
+ * useChatInternal — state, pagination, search, streaming send, and realtime merge for
  * the dashboard chat.
  *
  * Messages are stored ascending (oldest first). Sending streams the reply via
@@ -33,11 +55,13 @@ const PAGE_LIMIT = 50;
  * arrive out-of-band (a dropped SSE turn recovered from the DB, or Telegram /
  * other tabs), de-duplicated against the ids the SSE stream already finalized.
  */
-export function useChat() {
+function useChatInternal() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
+  const [hasMoreNewer, setHasMoreNewer] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -55,6 +79,26 @@ export function useChat() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  const hasMoreRef = useRef(false);
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  const loadingOlderRef = useRef(false);
+  useEffect(() => {
+    loadingOlderRef.current = loadingOlder;
+  }, [loadingOlder]);
+
+  const hasMoreNewerRef = useRef(false);
+  useEffect(() => {
+    hasMoreNewerRef.current = hasMoreNewer;
+  }, [hasMoreNewer]);
+
+  const loadingNewerRef = useRef(false);
+  useEffect(() => {
+    loadingNewerRef.current = loadingNewer;
+  }, [loadingNewer]);
 
   // ── initial load ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -79,6 +123,7 @@ export function useChat() {
           const asc = [...data.messages].reverse();
           setMessages(asc);
           setHasMore(data.has_more);
+          setHasMoreNewer(data.has_more_newer ?? false);
           const tid = asc.find((m) => m.thread_id)?.thread_id ?? null;
           if (tid) setThreadId(tid);
         }
@@ -101,7 +146,10 @@ export function useChat() {
     // rendered the just-sent bubble. Ignore the web-origin echo; `onDone`
     // reconciles the canonical pair. Telegram / other-tab rows still merge live.
     if (inflightRef.current && m.source === "web") return;
-    setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+    setMessages((prev) => {
+      if (prev.some((x) => x.id === m.id)) return prev;
+      return sortByIdAsc([...prev, m]);
+    });
   }, []);
   useChatRealtime(threadId, {
     onInsert: onRealtimeInsert,
@@ -109,27 +157,86 @@ export function useChat() {
   });
 
   // ── load older page ─────────────────────────────────────────────────────
-  const loadOlder = useCallback(async () => {
-    if (loadingOlder || !hasMore || messages.length === 0) return;
-    const oldestId = messages[0].id;
-    if (oldestId <= 0) return; // optimistic temp ids — never paginate against them
+  const loadOlder = useCallback(async (currentOldestId?: number): Promise<ChatMessage[]> => {
+    const oldestId = currentOldestId ?? messagesRef.current[0]?.id;
+    if (!oldestId || oldestId <= 0) return []; // optimistic temp ids — never paginate against them
+    if (loadingOlderRef.current || !hasMoreRef.current) return [];
+
+    loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
       const resp = await fetch(
         `/api/chat/messages?before=${oldestId}&limit=${PAGE_LIMIT}`,
       );
-      if (!resp.ok) return;
+      if (!resp.ok) return [];
       const data = (await resp.json()) as HistoryResponse;
       if (data.messages.length === 0) {
         setHasMore(false);
-        return;
+        return [];
       }
-      setMessages((prev) => [...[...data.messages].reverse(), ...prev]);
+      
+      const asc = [...data.messages].reverse();
+      setMessages((prev) => {
+        const newIds = new Set(asc.map(m => m.id));
+        const filteredPrev = prev.filter(m => !newIds.has(m.id));
+        return sortByIdAsc([...asc, ...filteredPrev]);
+      });
       setHasMore(data.has_more);
+      return asc;
     } finally {
+      loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [messages, hasMore, loadingOlder]);
+  }, []);
+
+  // ── load newer page ─────────────────────────────────────────────────────
+  const loadNewer = useCallback(async (): Promise<boolean> => {
+    if (loadingNewerRef.current || !hasMoreNewerRef.current || messagesRef.current.length === 0) return false;
+    const newestId = messagesRef.current[messagesRef.current.length - 1].id;
+    if (newestId <= 0) return false;
+
+    loadingNewerRef.current = true;
+    setLoadingNewer(true);
+    try {
+      const resp = await fetch(
+        `/api/chat/messages?after=${newestId}&limit=${PAGE_LIMIT}`,
+      );
+      if (!resp.ok) return false;
+      const data = (await resp.json()) as HistoryResponse;
+      if (data.messages.length === 0) {
+        setHasMoreNewer(false);
+        return false;
+      }
+      
+      const asc = [...data.messages].reverse();
+      setMessages((prev) => {
+        const newIds = new Set(asc.map(m => m.id));
+        const filteredPrev = prev.filter(m => !newIds.has(m.id));
+        return sortByIdAsc([...filteredPrev, ...asc]);
+      });
+      setHasMoreNewer(data.has_more_newer ?? false);
+      return true;
+    } finally {
+      loadingNewerRef.current = false;
+      setLoadingNewer(false);
+    }
+  }, []);
+
+  // ── jump to present ───────────────────────────────────────────────────────
+  const jumpToPresent = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const resp = await fetch(`/api/chat/messages?limit=${INITIAL_LIMIT}`);
+      if (!resp.ok) return;
+      const data = (await resp.json()) as HistoryResponse;
+      const asc = [...data.messages].reverse();
+      setMessages(asc);
+      setHasMore(data.has_more);
+      setHasMoreNewer(data.has_more_newer ?? false);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // ── send (streaming) ──────────────────────────────────────────────────────
   const send = useCallback(
@@ -139,6 +246,10 @@ export function useChat() {
       inflightRef.current = true;
       setPendingReply(true);
       setError(null);
+
+      if (hasMoreNewerRef.current) {
+        await jumpToPresent();
+      }
 
       const tempId = tempIdRef.current--;
       const createdAt = new Date().toISOString();
@@ -211,6 +322,10 @@ export function useChat() {
       inflightRef.current = true;
       setPendingReply(true);
       setError(null);
+
+      if (hasMoreNewerRef.current) {
+        await jumpToPresent();
+      }
 
       const tempId = tempIdRef.current--;
       const createdAt = new Date().toISOString();
@@ -286,14 +401,24 @@ export function useChat() {
   // ── jump to message id ────────────────────────────────────────────────────
   const jumpTo = useCallback(
     async (id: number): Promise<void> => {
+      // If we already have it in the current slice, do nothing.
       if (messagesRef.current.some((m) => m.id === id)) return;
-      for (let i = 0; i < 20; i++) {
-        if (!hasMore) break;
-        await loadOlder();
-        if (messagesRef.current.some((m) => m.id === id)) break;
+      
+      // Otherwise, discard current slice and fetch a window around the target
+      setLoading(true);
+      try {
+        const resp = await fetch(`/api/chat/messages?around=${id}&limit=${PAGE_LIMIT}`);
+        if (!resp.ok) return;
+        const data = (await resp.json()) as HistoryResponse;
+        const asc = [...data.messages].reverse();
+        setMessages(asc);
+        setHasMore(data.has_more);
+        setHasMoreNewer(data.has_more_newer ?? false);
+      } finally {
+        setLoading(false);
       }
     },
-    [hasMore, loadOlder],
+    [],
   );
 
   return {
@@ -301,6 +426,8 @@ export function useChat() {
     loading,
     loadingOlder,
     hasMore,
+    loadingNewer,
+    hasMoreNewer,
     pendingReply,
     error,
     // streaming surface (Task 37)
@@ -311,7 +438,9 @@ export function useChat() {
     sendSelection,
     retry,
     loadOlder,
+    loadNewer,
     search,
     jumpTo,
+    jumpToPresent,
   };
 }

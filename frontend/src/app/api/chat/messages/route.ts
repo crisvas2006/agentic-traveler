@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
 /**
- * GET /api/chat/messages?before=<id>&limit=<n>
+ * GET /api/chat/messages?before=<id>|after=<id>|around=<id>&limit=<n>
  *
  * Cursor-paginated history. Newest-first. Forwards to the FastAPI backend
- * with the user's Supabase access token.
+ * with the user's Supabase access token. All three cursor params must be
+ * forwarded: `before` (older page), `after` (newer page — drives loadNewer),
+ * and `around` (window centered on an id — drives jump-to-search-result).
  */
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -26,8 +28,12 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const params = new URLSearchParams();
   const before = url.searchParams.get("before");
+  const after = url.searchParams.get("after");
+  const around = url.searchParams.get("around");
   const limit = url.searchParams.get("limit");
   if (before) params.set("before", before);
+  if (after) params.set("after", after);
+  if (around) params.set("around", around);
   if (limit) params.set("limit", limit);
 
   try {

@@ -3,6 +3,7 @@
 import { useCallback, useState, useRef, useEffect } from "react";
 import { useUserProfile, type UserProfile } from "@/hooks/useUserProfile";
 import { useTrip, useTripList } from "@/hooks/useTrip";
+import { ChatProvider } from "@/hooks/useChat";
 import type { Trip, TripDay, TripSummary } from "@/lib/dashboard-data";
 // Map placeholder data — the dashboard map is a NON-GOAL of task 40 and is
 // replaced wholesale by a real MapLibre map in task 49. Until then it renders
@@ -470,7 +471,7 @@ export function DashboardShell() {
   };
 
   return (
-    <>
+    <ChatProvider>
       <Backdrop theme={theme} />
 
       <div className="relative z-10 hidden lg:block h-full">
@@ -484,7 +485,7 @@ export function DashboardShell() {
       {showWelcomeModal && (
         <WelcomeGrantModal onGranted={handleGranted} onDismiss={handleDismiss} />
       )}
-    </>
+    </ChatProvider>
   );
 }
 

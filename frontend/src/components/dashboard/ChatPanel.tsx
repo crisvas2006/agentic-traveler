@@ -436,6 +436,8 @@ export function ChatPanel({
     loading,
     loadingOlder,
     hasMore,
+    loadingNewer,
+    hasMoreNewer,
     pendingReply,
     error,
     streamStatus,
@@ -444,9 +446,13 @@ export function ChatPanel({
     sendSelection,
     retry,
     loadOlder,
+    loadNewer,
     search,
     jumpTo,
+    jumpToPresent,
   } = useChat();
+
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
 
   const [draft, setDraft] = useState("");
   // Slot prompts the user has answered this session (id → chosen label), so the
@@ -454,10 +460,19 @@ export function ChatPanel({
   const [answered, setAnswered] = useState<Map<number, string>>(() => new Map());
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const hasMoreNewerRef = useRef(hasMoreNewer);
+  useEffect(() => {
+    hasMoreNewerRef.current = hasMoreNewer;
+  }, [hasMoreNewer]);
   const [searchResults, setSearchResults] = useState<ChatMessage[]>([]);
   const [searching, setSearching] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [flashId, setFlashId] = useState<number | null>(null);
+  // The id we want to scroll to once its row lands in the DOM. The scroll is
+  // driven from a layout effect (not imperatively after `await`) so it rides
+  // React's own commit cycle and retries across renders until the row exists.
+  const [pendingJumpId, setPendingJumpId] = useState<number | null>(null);
   const [colorScheme, setColorScheme] = useState<"light" | "dark">("light");
   const [menu, setMenu] = useState<{
     x: number;
@@ -474,6 +489,14 @@ export function ChatPanel({
   const prevScrollHeightRef = useRef<number>(0);
   const prevMessageCountRef = useRef<number>(0);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // True while a jump-to-message navigation is settling: blocks the infinite-
+  // scroll loader and the streaming/auto-bottom effects from hijacking it.
+  const isJumpingRef = useRef(false);
+  // Holds the timer that releases isJumpingRef after a jump scroll. Kept in a
+  // ref (not an effect cleanup) so nulling pendingJumpId — which re-runs the
+  // scroll effect — can't cancel the release before it fires.
+  const jumpReleaseTimerRef = useRef<number | null>(null);
 
   // Detect system theme to skin the emoji picker.
   useEffect(() => {
@@ -503,6 +526,7 @@ export function ChatPanel({
     const grew = messages.length > prevMessageCountRef.current;
     const prependLikely =
       grew &&
+      !isJumpingRef.current &&
       prevScrollHeightRef.current > 0 &&
       container.scrollHeight > prevScrollHeightRef.current &&
       container.scrollTop < 120;
@@ -510,8 +534,9 @@ export function ChatPanel({
     if (prependLikely) {
       const delta = container.scrollHeight - prevScrollHeightRef.current;
       container.scrollTop = container.scrollTop + delta;
-    } else if (grew) {
+    } else if (grew && !hasMoreNewerRef.current && !isJumpingRef.current) {
       // Newest message arrived — stick to bottom if we were near it.
+      // Guard: never override an in-flight jump-to-message navigation.
       const nearBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight < 200;
       if (nearBottom) {
@@ -524,31 +549,106 @@ export function ChatPanel({
   }, [messages]);
 
   // Initial scroll to bottom after the first load completes.
+  const initialScrollDoneRef = useRef(false);
   useEffect(() => {
-    if (!loading && messages.length > 0) {
+    if (!loading && messages.length > 0 && !initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true;
       bottomAnchorRef.current?.scrollIntoView({ behavior: "auto" });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  }, [loading, messages.length]);
 
   // Keep the streaming reply / status line in view as it grows (only when the
   // user is already near the bottom, so we never yank them up while scrolling).
+  // Guard: never override an in-flight jump-to-message navigation.
   useEffect(() => {
     if (!streamingText && !streamStatus) return;
+    if (isJumpingRef.current) return;
     const c = scrollRef.current;
     if (!c) return;
     const nearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 240;
     if (nearBottom) bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [streamingText, streamStatus]);
 
-  // Infinite scroll up — trigger when within 80px of top.
+  // ── jump-to-message scroll (search result tap) ──────────────────────────
+  // Centers the target row in the scroll viewport once it lands in the DOM.
+  // Runs after every messages commit; if the row isn't mounted yet (jumpTo's
+  // new window is still being fetched/committed) it no-ops and retries on the
+  // next commit. getBoundingClientRect math is used instead of
+  // Element.scrollIntoView so only THIS scroll container moves — scrollIntoView
+  // walks every scrollable ancestor and behaves unpredictably in the nested
+  // flex layout.
+  useLayoutEffect(() => {
+    if (pendingJumpId == null) return;
+    const container = scrollRef.current;
+    const el = messageRefs.current.get(pendingJumpId);
+    if (!container || !el) return; // not mounted yet — wait for the next commit
+
+    const containerRect = container.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const delta =
+      elRect.top - containerRect.top - (container.clientHeight - el.clientHeight) / 2;
+    container.scrollTop += delta;
+
+    setFlashId(pendingJumpId);
+    setPendingJumpId(null);
+    // Release the scroll-load guard once the programmatic scroll settles, so
+    // the scroll event it triggers doesn't kick off a loadOlder/loadNewer.
+    // Timer lives in a ref so the re-run from nulling pendingJumpId (and its
+    // effect cleanup) can't cancel it.
+    if (jumpReleaseTimerRef.current) window.clearTimeout(jumpReleaseTimerRef.current);
+    jumpReleaseTimerRef.current = window.setTimeout(() => {
+      isJumpingRef.current = false;
+      jumpReleaseTimerRef.current = null;
+    }, 300);
+  }, [pendingJumpId, messages]);
+
+  // Clear the jump-release timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (jumpReleaseTimerRef.current) window.clearTimeout(jumpReleaseTimerRef.current);
+    };
+  }, []);
+
+  // Flash highlight auto-clear (decoupled from the scroll effect so re-renders
+  // of pendingJumpId never cut the highlight short).
+  useEffect(() => {
+    if (flashId == null) return;
+    const t = window.setTimeout(() => setFlashId(null), 1600);
+    return () => window.clearTimeout(t);
+  }, [flashId]);
+
+  // Safety net: if the target never materializes (deleted row, empty window),
+  // don't leave the panel stuck in jumping state.
+  useEffect(() => {
+    if (pendingJumpId == null) return;
+    const t = window.setTimeout(() => {
+      setPendingJumpId(null);
+      isJumpingRef.current = false;
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [pendingJumpId]);
+
+  // Infinite scroll up and down
   const onScroll = useCallback(() => {
+    if (isJumpingRef.current) return;
+
     const c = scrollRef.current;
     if (!c) return;
-    if (c.scrollTop < 80 && hasMore && !loadingOlder) {
+    
+    // Near top: load older
+    if (c.scrollTop < 200 && hasMore && !loadingOlder) {
       void loadOlder();
     }
-  }, [hasMore, loadingOlder, loadOlder]);
+    
+    // Near bottom: load newer
+    const distFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+    if (distFromBottom < 200 && hasMoreNewer && !loadingNewer) {
+      void loadNewer();
+    }
+
+    // Show jump-to-present if far up
+    setIsScrolledUp(distFromBottom > 800);
+  }, [hasMore, loadingOlder, loadOlder, hasMoreNewer, loadingNewer, loadNewer]);
 
   // ── send handlers ──────────────────────────────────────────────────────
   const handleSend = useCallback(() => {
@@ -599,7 +699,7 @@ export function ChatPanel({
   const runSearch = useCallback(
     async (q: string) => {
       setSearchQuery(q);
-      if (!q.trim()) {
+      if (q.trim().length < 3) {
         setSearchResults([]);
         return;
       }
@@ -614,32 +714,30 @@ export function ChatPanel({
     [search],
   );
 
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
+  }, []);
+
   const onSearchKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Escape") {
-        setSearchOpen(false);
-        setSearchQuery("");
-        setSearchResults([]);
-      }
+      if (e.key === "Escape") closeSearch();
     },
-    [],
+    [closeSearch],
   );
 
   const handleJumpTo = useCallback(
     async (id: number) => {
+      isJumpingRef.current = true;
+      // Close search first so the overlay doesn't cover the target row.
+      closeSearch();
+      // Ensure the window containing `id` is loaded, then hand off to the
+      // layout effect, which scrolls once the row is actually in the DOM.
       await jumpTo(id);
-      // wait a tick for the row to render
-      requestAnimationFrame(() => {
-        const el = messageRefs.current.get(id);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          setFlashId(id);
-          setTimeout(() => setFlashId(null), 1600);
-        }
-      });
-      setSearchOpen(false);
+      setPendingJumpId(id);
     },
-    [jumpTo],
+    [jumpTo, closeSearch],
   );
 
   // ── context menu (right-click on a bubble) ─────────────────────────────
@@ -737,6 +835,31 @@ export function ChatPanel({
     composerRef.current?.focus();
   }, []);
 
+  // Focus search input without browser-native scroll.
+  // Using autoFocus causes browsers to restore the pre-focus scroll position
+  // when the input unmounts, which snaps the chat back to the bottom.
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) {
+      searchInputRef.current.focus({ preventScroll: true });
+    }
+  }, [searchOpen]);
+
+  // Close search on outside click (the search button's second-press is the
+  // primary dismiss; this catches clicks on messages / header / footer).
+  useEffect(() => {
+    if (!searchOpen) return;
+    const handler = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("[data-search-panel]") || t?.closest("[data-search-btn]")) return;
+      closeSearch();
+    };
+    const tid = setTimeout(() => document.addEventListener("mousedown", handler), 0);
+    return () => {
+      clearTimeout(tid);
+      document.removeEventListener("mousedown", handler);
+    };
+  }, [searchOpen, closeSearch]);
+
   // Close emoji picker on outside click.
   const emojiAnchorRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -788,8 +911,12 @@ export function ChatPanel({
         </div>
         <div className="flex items-center gap-1">
           <button
+            data-search-btn
             type="button"
-            onClick={() => setSearchOpen((v) => !v)}
+            onClick={() => {
+              if (searchOpen) closeSearch();
+              else setSearchOpen(true);
+            }}
             title="Search past conversation"
             className="w-8 h-8 rounded-lg grid place-items-center text-muted-foreground hover:bg-foreground/5 transition"
             aria-label="Search messages"
@@ -820,50 +947,90 @@ export function ChatPanel({
         </div>
       </header>
 
-      {searchOpen && (
-        <div className="border-b border-border px-3 py-2 space-y-2">
-          <input
-            autoFocus
-            value={searchQuery}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              void runSearch(e.target.value)
-            }
-            onKeyDown={onSearchKeyDown}
-            placeholder="Search past conversation…"
-            className="w-full bg-transparent outline-none text-sm px-3 py-2 rounded-lg border border-border focus:border-primary/40 transition"
-          />
-          {searching && (
-            <div className="text-[11px] text-muted-foreground px-1">Searching…</div>
-          )}
-          {!searching && searchQuery && searchResults.length === 0 && (
-            <div className="text-[11px] text-muted-foreground px-1">No matches.</div>
-          )}
-          {searchResults.length > 0 && (
-            <div className="max-h-40 overflow-y-auto space-y-1">
-              {searchResults.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => void handleJumpTo(r.id)}
-                  className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-foreground/5 transition"
-                >
-                  <div className="text-muted-foreground text-[10px] font-mono mb-0.5">
-                    {new Date(r.created_at).toLocaleDateString()} ·{" "}
-                    {r.sender_type === "user" ? "You" : "Aletheia"}
-                  </div>
-                  <div className="line-clamp-2">{r.body}</div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Scrollable area + overlays — relative wrapper owns positioning */}
+      <div className="relative flex-1 min-h-0 flex flex-col">
 
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 relative"
-      >
+        {/* Glassmorphic search overlay — floats on top of messages */}
+        {searchOpen && (
+          <div
+            data-search-panel
+            className="absolute inset-x-0 top-0 z-30"
+            style={{
+              background: "color-mix(in oklab, var(--background) 92%, var(--primary) 8%)",
+              backdropFilter: "blur(24px)",
+              WebkitBackdropFilter: "blur(24px)",
+              borderBottom: "1.5px solid color-mix(in oklab, var(--primary) 30%, var(--border))",
+              boxShadow: "0 6px 24px -4px color-mix(in oklab, var(--foreground) 14%, transparent)",
+            }}
+          >
+            <div className="px-3 py-2.5 space-y-2">
+              <input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  void runSearch(e.target.value)
+                }
+                onKeyDown={onSearchKeyDown}
+                placeholder="Search past conversation… (min 3 chars)"
+                className="w-full bg-transparent outline-none text-sm px-3 py-2 rounded-lg border border-border focus:border-primary/40 transition"
+              />
+              {searching && (
+                <div className="text-[11px] text-muted-foreground px-1">Searching…</div>
+              )}
+              {!searching && searchQuery.trim().length >= 3 && searchResults.length === 0 && (
+                <div className="text-[11px] text-muted-foreground px-1">No matches.</div>
+              )}
+              {searchResults.length > 0 && (
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {searchResults.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => void handleJumpTo(r.id)}
+                      className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-foreground/5 transition"
+                    >
+                      <div className="text-muted-foreground text-[10px] font-mono mb-0.5">
+                        {new Date(r.created_at).toLocaleDateString()} ·{" "}
+                        {r.sender_type === "user" ? "You" : "Aletheia"}
+                      </div>
+                      <div className="line-clamp-2">{r.body}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Jump-to-present — anchored to the bottom of the content area */}
+        {(hasMoreNewer || isScrolledUp) && (
+          <div className="absolute inset-x-0 bottom-3 flex justify-center z-20 pointer-events-none">
+            <button
+              type="button"
+              onClick={() => {
+                if (hasMoreNewer) void jumpToPresent();
+                else bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
+              }}
+              className="pointer-events-auto flex items-center gap-2 px-4 py-2 rounded-full text-white font-bold text-xs shadow-[0_8px_32px_rgba(147,51,234,0.3)] transition hover:scale-[1.03] active:scale-95"
+              style={{
+                background: "linear-gradient(135deg, color-mix(in oklab, var(--primary) 85%, transparent), color-mix(in oklab, #9333ea 85%, transparent))",
+                backdropFilter: "blur(12px)",
+                border: "1px solid rgba(255, 255, 255, 0.15)",
+                animation: "fade-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both",
+              }}
+            >
+              <ChevronDownIcon width={14} height={14} />
+              Jump to Present
+            </button>
+          </div>
+        )}
+
+        {/* Messages */}
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5"
+        >
         {loadingOlder && (
           <div className="text-center text-[11px] text-muted-foreground py-1">
             Loading…
@@ -901,15 +1068,17 @@ export function ChatPanel({
             const interactive =
               m.id === lastAgentId && !answered.has(m.id) && !pendingReply;
             return (
-              <SlotChoices
-                key={m.id}
-                ui={ui}
-                time={formatTime(m.created_at)}
-                interactive={interactive}
-                answeredLabels={answered.get(m.id) ?? null}
-                onSelect={(values, label) => handleSelect(m.id, ui.slot, values, label)}
-                onQuickReply={(sendText, label) => handleQuickReply(m.id, sendText, label)}
-              />
+              // Wrapper registers the ref so handleJumpTo can scroll to this message.
+              <div key={m.id} ref={(el) => registerRef(m.id, el)}>
+                <SlotChoices
+                  ui={ui}
+                  time={formatTime(m.created_at)}
+                  interactive={interactive}
+                  answeredLabels={answered.get(m.id) ?? null}
+                  onSelect={(values, label) => handleSelect(m.id, ui.slot, values, label)}
+                  onQuickReply={(sendText, label) => handleQuickReply(m.id, sendText, label)}
+                />
+              </div>
             );
           }
           // Agent messages render as bubble-less prose; user messages keep bubbles.
@@ -972,7 +1141,8 @@ export function ChatPanel({
         ) : null}
 
         <div ref={bottomAnchorRef} />
-      </div>
+        </div>{/* end scroll area */}
+      </div>{/* end relative wrapper */}
 
       <footer className="border-t border-border p-3 relative">
         {showEmoji && (
