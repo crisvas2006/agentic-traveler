@@ -90,7 +90,10 @@ function Backdrop({ theme }: { theme: "light" | "dark" }) {
           background:
             theme === "dark"
               ? "linear-gradient(135deg, #0a0f1f 0%, var(--background) 60%, #0d1326 100%)"
-              : "linear-gradient(135deg, #eef4ff 0%, var(--background) 50%, #f5f0ff 100%)",
+              // Warm ivory ground — accents mixed INTO the paper so the frosted
+              // glass cards sample a warm tint, not cold pastel (matches the
+              // auth/marketing shells).
+              : "linear-gradient(135deg, color-mix(in oklab, var(--primary) 7%, var(--background)) 0%, var(--background) 50%, color-mix(in oklab, #9333ea 7%, var(--background)) 100%)",
         }}
       />
       <div className="absolute inset-0 grid-bg" />
@@ -139,28 +142,6 @@ function DesktopShell({
   }, [chatExpanded]);
 
   const chatColWidth = chatStyle === "drawer" ? "360px" : "56px";
-
-  // ── Expand icon (⤢ / ⤡) rendered in a hidden lg:flex slot ──────────────
-  const ExpandIcon = ({ expanded }: { expanded: boolean }) => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-         strokeLinecap="round" strokeLinejoin="round" width={14} height={14}>
-      {expanded ? (
-        <>
-          <path d="M8 3v3a2 2 0 0 1-2 2H3" />
-          <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
-          <path d="M3 16h3a2 2 0 0 1 2 2v3" />
-          <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
-        </>
-      ) : (
-        <>
-          <path d="M15 3h6v6" />
-          <path d="M9 21H3v-6" />
-          <path d="M21 3l-7 7" />
-          <path d="M3 21l7-7" />
-        </>
-      )}
-    </svg>
-  );
 
   return (
     <div className="relative w-full h-full flex flex-col overflow-hidden">

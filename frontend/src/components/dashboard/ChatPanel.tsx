@@ -143,7 +143,6 @@ function ChatBubble({
   registerRef: (id: number, el: HTMLDivElement | null) => void;
   onContextMenu: (e: React.MouseEvent, msg: ChatMessage) => void;
 }) {
-  const isMe = msg.sender_type === "user";
   const errored = !!(msg.metadata && (msg.metadata as { error?: boolean }).error);
   const time = useMemo(() => {
     try {

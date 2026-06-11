@@ -268,7 +268,18 @@ planner, advisor turn — and is the single source of truth for formatting rules
 - **Warm ivory web theme** — the light-theme CSS variables shift from plain white
   (`#ffffff`) to a warm ivory paper (`#faf8f3`) with a warm ink foreground
   (`#23201a`), warm card/muted/border tones, matching the reading feel of
-  physical travel planning materials.
+  physical travel planning materials. The theme is applied **uniformly across
+  every surface** — the dashboard (chat, trip library, trip detail, nav, map),
+  the auth shell (login / sign-up / forgot / reset) and all marketing/legal
+  pages. The components themselves were already token-driven, but the *shells*
+  carried cold-mode literals that the token sweep couldn't reach: cold pastel
+  `blue-50`/`purple-50` (and `#eef4ff`/`#f5f0ff`) ambient washes, neutral-grey
+  grids, `rgba(0,0,0,…)` drop shadows, and a few hardcoded `slate-*` booking
+  rows. On the dashboard this matters most through the frosted-glass cards,
+  which sample the ambient wash — a cold ground tinted every panel cool. These
+  now reuse the warm `.aletheia-card` shadow and the theme-aware `.grid-bg`,
+  with every ambient wash mixing the blue→purple accents *into* the paper
+  ground so light mode reads as ink on paper everywhere.
 
 - **Bubble-less agent prose** — agent replies in the web chat no longer appear in
   a glass-card bubble. They render full-width with a compact attribution row

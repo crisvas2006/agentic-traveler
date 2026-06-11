@@ -29,7 +29,27 @@
 }
 
 :root {
-  /* Warm ivory paper theme (task 46 §7.1) */
+  --background: #ffffff;
+  --foreground: #020617;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --muted: #f8fafc;
+  --muted-foreground: #475569;
+  --accent: #f1f5f9;
+  --accent-foreground: #0f172a;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #3b82f6;
+  --popover: #ffffff;
+  --popover-foreground: #020617;
+  --card: #ffffff;
+  --card-foreground: #020617;
+  --radius: 2rem;
+}
+
+html:not(.dark) .theme-ivory {
   --background: #faf8f3;            /* warm ivory paper */
   --foreground: #23201a;            /* warm near-black ink */
   --primary: #2563eb;               /* unchanged ink-blue accent */
@@ -42,12 +62,11 @@
   --accent-foreground: #2a261f;
   --border: #e6e0d3;
   --input: #e6e0d3;
-  --ring: #3b82f6;                  /* unchanged */
+  --ring: #3b82f6;
   --popover: #faf8f3;
   --popover-foreground: #23201a;
   --card: #faf8f3;
   --card-foreground: #23201a;
-  --radius: 2rem;                   /* unchanged */
 }
 
 .dark {

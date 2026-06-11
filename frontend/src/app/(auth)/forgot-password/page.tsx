@@ -171,7 +171,7 @@ function ForgotPasswordForm() {
 export default function ForgotPasswordPage() {
   return (
     <AuthShell marketingContent={<ForgotPasswordMarketing />}>
-      <div className="bg-background/70 backdrop-blur-xl border border-border rounded-[1.75rem] p-8 sm:p-10 shadow-[0_30px_60px_-30px_rgba(0,0,0,0.25)]">
+      <div className="aletheia-card p-8 sm:p-10">
         <Link
           href="/login"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"

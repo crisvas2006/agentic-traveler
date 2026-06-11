@@ -44,13 +44,13 @@ export function BookingCard({ booking, onEdit }: BookingCardProps) {
   }
 
   return (
-    <Card className="flex items-center p-3 gap-3 hover:bg-slate-50 transition-colors">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+    <Card className="flex items-center p-3 gap-3 hover:bg-muted transition-colors">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <Icon className="h-5 w-5" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-900 truncate">{line1}</p>
-        <p className="text-xs text-slate-500 truncate">{line2}</p>
+        <p className="text-sm font-medium text-foreground truncate">{line1}</p>
+        <p className="text-xs text-muted-foreground truncate">{line2}</p>
       </div>
       <Button variant="ghost" size="icon" onClick={() => onEdit(booking)}>
         <MoreVertical className="h-4 w-4" />

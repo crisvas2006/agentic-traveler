@@ -390,7 +390,7 @@ function SignUpForm() {
 export default function SignUpPage() {
   return (
     <AuthShell marketingContent={<SignUpMarketing />}>
-      <div className="bg-background/70 backdrop-blur-xl border border-border rounded-[1.75rem] p-8 sm:p-10 shadow-[0_30px_60px_-30px_rgba(0,0,0,0.25)]">
+      <div className="aletheia-card p-8 sm:p-10">
         <header className="mb-7">
           <h2 className="text-3xl font-extrabold tracking-tight leading-tight">
             Create your{" "}

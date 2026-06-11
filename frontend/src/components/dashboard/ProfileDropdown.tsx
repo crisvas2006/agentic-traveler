@@ -296,7 +296,7 @@ export function ProfileDropdown({
       style={{
         background: "var(--background)",
         boxShadow:
-          "0 4px 6px -1px rgba(0,0,0,.15), 0 20px 40px -10px rgba(0,0,0,.3), 0 1px 0 color-mix(in oklab, var(--foreground) 5%, transparent) inset",
+          "0 4px 6px -1px rgba(35,32,26,.16), 0 20px 40px -10px rgba(35,32,26,.30), 0 1px 0 color-mix(in oklab, var(--foreground) 5%, transparent) inset",
       }}
     >
       <div className="p-2">

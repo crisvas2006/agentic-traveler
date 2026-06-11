@@ -1333,7 +1333,7 @@ export function AccountSettings({ botUsername }: { botUsername: string }) {
 
   if (data.loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center theme-ivory bg-background text-foreground">
         <div className="flex flex-col items-center gap-3 text-muted-foreground">
           <span className="w-6 h-6 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
           <span className="text-sm font-mono uppercase tracking-wider">Loading account…</span>
@@ -1343,7 +1343,7 @@ export function AccountSettings({ botUsername }: { botUsername: string }) {
   }
 
   return (
-    <>
+    <div className="theme-ivory bg-background text-foreground">
       {/* Ambient backdrop — static. Dropped the animate-float + blur-[120px]
           orbs (a perpetual full-layer recomposite for an imperceptible drift)
           in favour of a flat tint + grid. */}
@@ -1404,6 +1404,6 @@ export function AccountSettings({ botUsername }: { botUsername: string }) {
           </footer>
         </main>
       </div>
-    </>
+    </div>
   );
 }

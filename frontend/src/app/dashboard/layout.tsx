@@ -9,7 +9,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
       {/* Full-viewport shell with no scroll at the root level */}
-      <div className="h-[100dvh] w-full overflow-hidden">
+      <div className="h-[100dvh] w-full overflow-hidden theme-ivory">
         {children}
       </div>
     </ThemeProvider>

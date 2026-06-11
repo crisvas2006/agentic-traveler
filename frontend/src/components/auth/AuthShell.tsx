@@ -21,13 +21,15 @@ export function AuthShell({ children, marketingContent }: AuthShellProps) {
         <div className="absolute inset-0 opacity-0 dark:opacity-100 transition-opacity duration-700">
           <BeamsBackground intensity="strong" />
         </div>
+        {/* Warm ivory wash — ink-blue/purple corners mixed INTO the paper
+            ground (not cold pastels), so light mode reads as ink on paper. */}
         <div
           className="absolute inset-0 dark:hidden"
-          style={{ background: "linear-gradient(135deg, #eff6ff 0%, var(--background) 50%, #faf5ff 100%)" }}
+          style={{ background: "linear-gradient(135deg, color-mix(in oklab, var(--primary) 7%, var(--background)) 0%, var(--background) 52%, color-mix(in oklab, #9333ea 7%, var(--background)) 100%)" }}
         />
         <div className="absolute -top-[10%] -left-[5%] w-[42%] h-[42%] rounded-full blur-[120px] animate-float bg-blue-500/10 dark:bg-blue-500/[0.08]" />
         <div className="absolute bottom-[6%] -right-[6%] w-[38%] h-[38%] rounded-full blur-[120px] animate-float-reverse bg-purple-500/10 dark:bg-purple-500/[0.08]" />
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-20" />
+        <div className="absolute inset-0 grid-bg" />
       </div>
 
       {/* Theme toggle */}
@@ -48,7 +50,7 @@ export function AuthShell({ children, marketingContent }: AuthShellProps) {
       <div className="relative z-10 min-h-[100dvh] grid lg:grid-cols-[1.05fr_1fr]">
         {/* Marketing rail — hidden on mobile */}
         <div className="hidden lg:block p-6">
-          <div className="h-full bg-background/70 backdrop-blur-xl border border-border rounded-[1.75rem] overflow-hidden shadow-[0_30px_60px_-30px_rgba(0,0,0,0.25)]">
+          <div className="h-full aletheia-card overflow-hidden">
             <aside className="h-full p-12 flex flex-col justify-between">
               <Link href="/" className="flex items-center gap-2 group w-fit">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform">

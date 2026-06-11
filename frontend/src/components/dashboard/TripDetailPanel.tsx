@@ -253,7 +253,7 @@ function StructuredItineraryLayout({
           </div>
           <div className="flex flex-col gap-1.5 border-l-2 border-primary/20 pl-2">
             {dayBookings.map(b => (
-              <div key={b.id} className="text-xs bg-slate-50 border border-border p-2 rounded-md flex items-center gap-2">
+              <div key={b.id} className="text-xs bg-muted border border-border p-2 rounded-md flex items-center gap-2">
                  <span className="font-semibold">{b.kind === "flight" ? "Flight" : b.kind === "accommodation" ? "Stay" : "Booking"}:</span>
                  <span className="truncate">{b.payload?.airline || b.payload?.name || "Confirmed"}</span>
                  <span className="ml-auto text-muted-foreground">{b.datetime_local?.split("T")[1] || ""}</span>
