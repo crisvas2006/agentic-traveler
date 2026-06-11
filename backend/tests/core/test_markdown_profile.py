@@ -241,9 +241,9 @@ class TestAgentPromptsCanonical:
 
     def _prompts(self):
         """Collect all agent system prompts (import lazily to avoid heavy deps in test env)."""
-        from agentic_traveler.orchestrator.trip_agent import _SYSTEM_PROMPT as trip
-        from agentic_traveler.orchestrator.chat_agent import _SYSTEM_PROMPT as chat
-        from agentic_traveler.orchestrator.planner_agent import _SYSTEM_PROMPT as planner
+        from agentic_traveler.orchestrator.trip_agent import _SYSTEM_PROMPT_BASE as trip
+        from agentic_traveler.orchestrator.chat_agent import _SYSTEM_PROMPT_BASE as chat
+        from agentic_traveler.orchestrator.planner_agent import _SYSTEM_PROMPT_BASE as planner
         from agentic_traveler.orchestrator.sagas.advisor_turn import _SYSTEM_PROMPT as advisor
         return {"trip": trip, "chat": chat, "planner": planner, "advisor": advisor}
 

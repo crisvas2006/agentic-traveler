@@ -17,6 +17,11 @@ from google import genai
 from google.genai import types
 
 from agentic_traveler.core.markdown_profile import CANONICAL_FORMATTING
+from agentic_traveler.core.budget_policy import (
+    build_voice_block,
+    handle_finish_reason,
+    resolve as budget_resolve,
+)
 from agentic_traveler.orchestrator.client_factory import get_client, generate_maybe_stream
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
@@ -27,36 +32,7 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-3.5-flash"
 
-# Reply-length guidance injected per request, driven by
-# user_profiles.profile_data.reply_length_preference. Default is "default"
-# (concise) — conciseness is a product invariant (CLAUDE.md §7.1), so an
-# unset preference still yields a tight reply, not the verbose default the
-# model leans toward on its own.
-_LENGTH_GUIDANCE = {
-    "terse": (
-        "Reply length: VERY BRIEF. At most ~3 short sentences or a tight "
-        "bulleted list (~600 characters). Lead with the answer. No preamble, "
-        "no flourish."
-    ),
-    "default": (
-        "Reply length: CONCISE. Lead with the answer, use compact bullets, and "
-        "skip ornamental phrasing and filler. Aim for under ~1500 characters."
-    ),
-    "verbose": (
-        "Reply length: You may give a fuller, well-organized reply when it "
-        "genuinely helps the traveler. Stay within the 3500-character ceiling."
-    ),
-}
-
-
-def _length_guidance(user_doc: Dict[str, Any]) -> str:
-    """Pick the reply-length directive from the user's stored preference,
-    defaulting to the concise 'default' setting when unset/unknown."""
-    profile_data = (user_doc.get("user_profile") or {}).get("profile_data") or {}
-    pref = (profile_data.get("reply_length_preference") or "default").lower()
-    return _LENGTH_GUIDANCE.get(pref, _LENGTH_GUIDANCE["default"])
-
-_SYSTEM_PROMPT = """\
+_SYSTEM_PROMPT_BASE = """\
 You are a friendly, deeply knowledgeable travel advisor chatting with
 a traveler you know personally.
 
@@ -98,9 +74,12 @@ discovery or inspiration queries. Integrate naturally; no day-by-day lists.
 REAL-TIME DATA: Only call when you need current facts (visa rules, event dates,
 prices, opening hours), call search_web() — don't guess.
 
-""" + CANONICAL_FORMATTING + """
-STRICT LENGTH LIMIT: Never exceed 3500 characters. Curate, don't dump.
-"""
+""" + CANONICAL_FORMATTING
+
+
+def _build_system_prompt(char_cap: int) -> str:
+    """Build the full system prompt with the anti-bloat voice block injected."""
+    return _SYSTEM_PROMPT_BASE + "\n" + build_voice_block(char_cap)
 
 
 class TripAgent:
@@ -152,12 +131,13 @@ class TripAgent:
                 f"</preference_updated>\n"
             )
 
+        budget = budget_resolve("trip_companion", user_doc)
+
         user_content = (
             f"<current_time>{current_time}</current_time>\n"
             f"<user_profile_summary>\n{profile_summary}\n</user_profile_summary>\n"
             f"<conversation_history>\n{conversation_context}\n</conversation_history>\n"
             f"{pref_note}"
-            f"<response_style>\n{_length_guidance(user_doc)}\n</response_style>\n"
             f"<user_message>\n{message}\n</user_message>"
         )
 
@@ -165,13 +145,12 @@ class TripAgent:
         t = time.time()
         try:
             config = types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                max_output_tokens=8192,
+                system_instruction=_build_system_prompt(budget.char_cap),
+                max_output_tokens=budget.max_tokens_ceiling,
                 thinking_config=types.ThinkingConfig(
-                    # 256 is enough for TRIP tool-orchestration (decide
-                    # weather/search, then synthesize). 512 was overkill for
-                    # this case and added latency to every trip turn.
-                    thinking_budget=256,  # tokens
+                    # LOW level (256 tokens) is enough for TRIP tool-orchestration:
+                    # decide weather/search, then synthesize. Budget-driven via policy.
+                    thinking_budget=budget.thinking_budget,
                 ),
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(
                     maximum_remote_calls=6,  # raised from 3: trip requests routinely need 2 searches + weather + extras
@@ -194,6 +173,32 @@ class TripAgent:
             )
             latency_ms = (time.time() - t) * 1000
             grounding_used = has_grounding(response)
+
+            # AC-4: Handle MAX_TOKENS finish reason gracefully.
+            text, ceiling_hit = handle_finish_reason(response, text, "trip_companion")
+            if ceiling_hit:
+                if events:
+                    events.emit("metric", {
+                        "name": "token_ceiling_hit",
+                        "call_type": "trip_companion",
+                    })
+                if not text:
+                    name = user_doc.get("user_name", "there")
+                    return {
+                        "text": f"Sorry {name}, I hit a snag. Please try again in a moment.",
+                        "action": "ERROR",
+                    }
+
+            # AC-5: Emit budget_violation metric if reply is over cap by >15%.
+            if text and budget.char_cap > 0 and len(text) > budget.char_cap * 1.15:
+                overage_pct = int((len(text) - budget.char_cap) / budget.char_cap * 100)
+                if events:
+                    events.emit("metric", {
+                        "name": "budget_violation",
+                        "call_type": "trip_companion",
+                        "overage_pct": overage_pct,
+                    })
+
             return {
                 "text": text,
                 "action": "TRIP_RESULTS",

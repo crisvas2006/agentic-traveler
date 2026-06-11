@@ -19,6 +19,11 @@ from google import genai
 from google.genai import types
 
 from agentic_traveler.core.markdown_profile import CANONICAL_FORMATTING
+from agentic_traveler.core.budget_policy import (
+    build_voice_block,
+    handle_finish_reason,
+    resolve as budget_resolve,
+)
 from agentic_traveler.orchestrator.client_factory import get_client, generate_maybe_stream
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
@@ -29,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-3.5-flash"
 
-_SYSTEM_PROMPT = """\
+_SYSTEM_PROMPT_BASE = """\
 You are a friendly, expert travel planner chatting with a traveler
 you know personally.
 
@@ -74,10 +79,12 @@ REAL-TIME DATA: For time-sensitive logistics (entry requirements,
 seasonal closures, public holiday dates, event schedules) — but NOT weather —
 call search_web(); don't guess. Briefly cite sources.
 
-""" + CANONICAL_FORMATTING + """
-STRICT LENGTH LIMIT: Never exceed 3500 characters. If the user asks
-for "EVERYTHING", provide a curated summary instead.
-"""
+""" + CANONICAL_FORMATTING
+
+
+def _build_system_prompt(char_cap: int) -> str:
+    """Build the full system prompt with the anti-bloat voice block injected."""
+    return _SYSTEM_PROMPT_BASE + "\n" + build_voice_block(char_cap)
 
 
 class PlannerAgent:
@@ -129,6 +136,8 @@ class PlannerAgent:
                 f"</preference_updated>\n"
             )
 
+        budget = budget_resolve("itinerary", user_doc)
+
         user_content = (
             f"<current_time>{current_time}</current_time>\n"
             f"<user_profile_summary>\n{profile_summary}\n</user_profile_summary>\n"
@@ -141,10 +150,12 @@ class PlannerAgent:
         t = time.time()
         try:
             config = types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                max_output_tokens=8192,
+                system_instruction=_build_system_prompt(budget.char_cap),
+                max_output_tokens=budget.max_tokens_ceiling,
                 thinking_config=types.ThinkingConfig(
-                    thinking_budget=256,  # tokens
+                    # MEDIUM level (4096 tokens) for multi-day coherence reasoning.
+                    # Budget-driven via policy.
+                    thinking_budget=budget.thinking_budget,
                 ),
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(
                     maximum_remote_calls=10,  # raised to 10: complex multi-destination itineraries need more searches + weather
@@ -167,6 +178,32 @@ class PlannerAgent:
             )
             latency_ms = (time.time() - t) * 1000
             grounding_used = has_grounding(response)
+
+            # AC-4: Handle MAX_TOKENS finish reason gracefully.
+            text, ceiling_hit = handle_finish_reason(response, text, "itinerary")
+            if ceiling_hit:
+                if events:
+                    events.emit("metric", {
+                        "name": "token_ceiling_hit",
+                        "call_type": "itinerary",
+                    })
+                if not text:
+                    name = user_doc.get("user_name", "there")
+                    return {
+                        "text": f"Sorry {name}, I hit a snag building the itinerary. Please try again.",
+                        "action": "ERROR",
+                    }
+
+            # AC-5: Emit budget_violation metric if reply is over cap by >15%.
+            if text and budget.char_cap > 0 and len(text) > budget.char_cap * 1.15:
+                overage_pct = int((len(text) - budget.char_cap) / budget.char_cap * 100)
+                if events:
+                    events.emit("metric", {
+                        "name": "budget_violation",
+                        "call_type": "itinerary",
+                        "overage_pct": overage_pct,
+                    })
+
             return {
                 "text": text,
                 "action": "PLANNER_RESULTS",

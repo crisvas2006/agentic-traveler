@@ -191,6 +191,17 @@ Core agents (tool-calling architecture):
 
     *   Stores recent messages + compacted summary in Supabase `conversations` table.
 
+11. **Offline LLM Judge**
+
+    *   Samples a share of completed turns and scores reply quality on five dimensions (budget respect, conciseness, personalization subtlety, groundedness, helpfulness).
+    *   Runs asynchronously as a fire-and-forget background thread to never block user turns.
+    *   Emits `reply_judged` metrics to `analytics_events` for offline evaluation.
+
+12. **Centralized Budget Policy**
+
+    *   `core/budget_policy.py` enforces unified character caps and token limits across all models and agents.
+    *   Provides standard profiles (`planner`, `trip`, `chat`, `advisor`, `judge`, `extractor`) to ensure responses fit within web and Telegram UI constraints without individual agents hardcoding limits.
+
 #### Curiosity prompts (Task 42)
 
 What keeps Aletheia from feeling like a TripAdvisor clone is that it sometimes

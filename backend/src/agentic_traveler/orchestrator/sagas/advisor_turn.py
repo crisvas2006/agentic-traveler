@@ -23,6 +23,7 @@ from google.genai import types
 
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.core.markdown_profile import CANONICAL_FORMATTING
+from agentic_traveler.core.budget_policy import resolve as budget_resolve
 from agentic_traveler.orchestrator.client_factory import gemini_generate
 
 logger = logging.getLogger(__name__)
@@ -188,13 +189,14 @@ def compose_advisor_turn(
         parts.append(f"<curiosity_prompt>{curiosity_prompt}</curiosity_prompt>")
 
     try:
+        advisor_budget = budget_resolve("advisor_turn")
         raw = gemini_generate(
             client,
             model=_MODEL,
             contents="\n".join(parts),
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_PROMPT,
-                max_output_tokens=600,
+                max_output_tokens=advisor_budget.max_tokens_ceiling,
                 response_mime_type="application/json",
                 response_schema=_schema(),
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),

@@ -17,6 +17,11 @@ from google import genai
 from google.genai import types
 
 from agentic_traveler.core.markdown_profile import CANONICAL_FORMATTING
+from agentic_traveler.core.budget_policy import (
+    build_voice_block,
+    handle_finish_reason,
+    resolve as budget_resolve,
+)
 from agentic_traveler.orchestrator.client_factory import get_client, generate_maybe_stream
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
@@ -27,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-3.1-flash-lite"
 
-_SYSTEM_PROMPT = """\
+_SYSTEM_PROMPT_BASE = """\
 You are "Agentic Traveler", the user's travel-obsessed best friend.
 
 You know this person deeply. Their personality profile below tells you
@@ -69,6 +74,11 @@ questions or inspiration queries.
 """ + CANONICAL_FORMATTING + """
 Keep it conversational — not a formatted document.
 """
+
+
+def _build_system_prompt(char_cap: int) -> str:
+    """Build the full system prompt with the anti-bloat voice block injected."""
+    return _SYSTEM_PROMPT_BASE + build_voice_block(char_cap)
 
 
 class ChatAgent:
@@ -118,6 +128,8 @@ class ChatAgent:
                 f"</preference_updated>\n"
             )
 
+        budget = budget_resolve("chat_ack", user_doc)
+
         user_content = (
             f"<current_time>{current_time}</current_time>\n"
             f"<user_profile_summary>\n{profile_summary}\n</user_profile_summary>\n"
@@ -130,8 +142,8 @@ class ChatAgent:
         t = time.time()
         try:
             config = types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                max_output_tokens=2000,
+                system_instruction=_build_system_prompt(budget.char_cap),
+                max_output_tokens=budget.max_tokens_ceiling,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(
                     maximum_remote_calls=3,
                 ),
@@ -153,6 +165,32 @@ class ChatAgent:
             )
             latency_ms = (time.time() - t) * 1000
             grounding_used = has_grounding(response)
+
+            # AC-4: Handle MAX_TOKENS finish reason gracefully.
+            text, ceiling_hit = handle_finish_reason(response, text, "chat_ack")
+            if ceiling_hit:
+                if events:
+                    events.emit("metric", {
+                        "name": "token_ceiling_hit",
+                        "call_type": "chat_ack",
+                    })
+                if not text:
+                    name = user_doc.get("user_name", "there")
+                    return {
+                        "text": f"Sorry {name}, I hit a snag. Please try again in a moment.",
+                        "action": "ERROR",
+                    }
+
+            # AC-5: Emit budget_violation metric if reply is over cap by >15%.
+            if text and budget.char_cap > 0 and len(text) > budget.char_cap * 1.15:
+                overage_pct = int((len(text) - budget.char_cap) / budget.char_cap * 100)
+                if events:
+                    events.emit("metric", {
+                        "name": "budget_violation",
+                        "call_type": "chat_ack",
+                        "overage_pct": overage_pct,
+                    })
+
             return {
                 "text": text,
                 "action": "CHAT_RESPONSE",

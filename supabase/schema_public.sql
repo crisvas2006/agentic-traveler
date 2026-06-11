@@ -654,7 +654,7 @@ BEGIN
     INSERT INTO public.metrics_daily (day, metric, dimensions, count, sum_value)
     SELECT v_day,
            event_name,
-           coalesce(payload - 'latency_ms' - 'credits' - 'tokens', '{}'::jsonb) AS dims,
+           coalesce(payload - array['latency_ms', 'credits', 'tokens', 'scores', 'span', 'reply_len', 'purple_prose'], '{}'::jsonb) AS dims,
            count(*),
            sum((payload->>'latency_ms')::numeric)
     FROM public.analytics_events

@@ -5,8 +5,8 @@ Unit tests for two pure helpers introduced in task_54:
   process_inputs reducer that makes a GenerateContentConfig carrying Python
   function tools serializable (the original failure was
   PydanticSerializationError: Unable to serialize unknown type <class 'function'>).
-- trip_agent._length_guidance — maps reply_length_preference to a directive,
-  defaulting to the concise "default" setting.
+- budget_policy.resolve — maps call_type + reply_length_preference to a
+  Budget (Task 47 replacement for the removed trip_agent._length_guidance).
 
 No Gemini/network calls — these are pure functions.
 """
@@ -19,7 +19,7 @@ from agentic_traveler.orchestrator.client_factory import (
     _summarize_config,
     _trace_inputs,
 )
-from agentic_traveler.orchestrator.trip_agent import _LENGTH_GUIDANCE, _length_guidance
+from agentic_traveler.core.budget_policy import resolve as budget_resolve, SCALING
 
 
 def _dummy_tool(location: str, days: int) -> str:
@@ -93,7 +93,11 @@ def test_trace_inputs_without_config_key_is_safe():
     assert safe == {"model": "m", "contents": "c"}
 
 
-# ── _length_guidance ─────────────────────────────────────────────────────────
+# ── budget_policy.resolve (replaces _length_guidance from task_54) ─────────────
+# Task 47: _length_guidance and _LENGTH_GUIDANCE were removed from trip_agent.py
+# and replaced by the centralised BudgetPolicy. These tests verify the same
+# product invariants (explicit prefs respected, unknown → default, conciseness
+# is the default product stance) using the new module.
 
 def _doc(pref):
     """Minimal user_doc with a reply_length_preference (or none if pref is None)."""
@@ -101,28 +105,32 @@ def _doc(pref):
     return {"user_profile": {"profile_data": profile_data}}
 
 
-def test_length_guidance_explicit_preferences():
-    assert _length_guidance(_doc("terse")) == _LENGTH_GUIDANCE["terse"]
-    assert _length_guidance(_doc("default")) == _LENGTH_GUIDANCE["default"]
-    assert _length_guidance(_doc("verbose")) == _LENGTH_GUIDANCE["verbose"]
+def test_budget_resolve_explicit_preferences_scale_correctly():
+    """Terse < default < verbose for trip_companion char_cap."""
+    terse = budget_resolve("trip_companion", _doc("terse")).char_cap
+    default = budget_resolve("trip_companion", _doc("default")).char_cap
+    verbose = budget_resolve("trip_companion", _doc("verbose")).char_cap
+    assert terse < default < verbose
 
 
-def test_length_guidance_is_case_insensitive():
-    assert _length_guidance(_doc("TERSE")) == _LENGTH_GUIDANCE["terse"]
-    assert _length_guidance(_doc("Verbose")) == _LENGTH_GUIDANCE["verbose"]
+def test_budget_resolve_is_case_insensitive():
+    """Preference matching is case-insensitive."""
+    upper = budget_resolve("chat_ack", _doc("TERSE")).char_cap
+    lower = budget_resolve("chat_ack", _doc("terse")).char_cap
+    assert upper == lower
 
 
-def test_length_guidance_defaults_to_concise_when_unset_or_unknown():
-    # unset preference
-    assert _length_guidance(_doc(None)) == _LENGTH_GUIDANCE["default"]
-    # unknown value
-    assert _length_guidance(_doc("rambling")) == _LENGTH_GUIDANCE["default"]
-    # missing user_profile / profile_data entirely
-    assert _length_guidance({}) == _LENGTH_GUIDANCE["default"]
-    assert _length_guidance({"user_profile": None}) == _LENGTH_GUIDANCE["default"]
+def test_budget_resolve_defaults_to_default_when_unset_or_unknown():
+    """Unset or unknown preference → default scaling (x1.0)."""
+    default = budget_resolve("chat_ack", _doc("default")).char_cap
+    assert budget_resolve("chat_ack", _doc(None)).char_cap == default
+    assert budget_resolve("chat_ack", _doc("rambling")).char_cap == default
+    assert budget_resolve("chat_ack", {}).char_cap == default
+    assert budget_resolve("chat_ack", {"user_profile": None}).char_cap == default
 
 
-def test_default_guidance_signals_conciseness():
-    """Guard the product invariant: the default directive must push for brevity."""
-    assert "CONCISE" in _LENGTH_GUIDANCE["default"]
-    assert "VERY BRIEF" in _LENGTH_GUIDANCE["terse"]
+def test_default_scaling_signals_conciseness():
+    """Guard product invariant: default scale is 1.0 (not inflated toward verbose)."""
+    assert SCALING["default"] == 1.0, "Default must not inflate reply length"
+    assert SCALING["terse"] < 1.0, "Terse must be shorter than default"
+    assert SCALING["verbose"] > 1.0, "Verbose must be longer than default"

@@ -35,7 +35,9 @@ from typing import Any, Callable, Dict, Optional
 from agentic_traveler.economy import credit_manager
 from agentic_traveler.guards import off_topic_guard
 from agentic_traveler.analytics import metrics_tracker
+from agentic_traveler.analytics.judge import maybe_judge_turn
 from agentic_traveler.orchestrator.client_factory import begin_usage_capture, get_client
+from agentic_traveler.core.budget_policy import resolve as budget_resolve
 from agentic_traveler.core.observability import (
     traceable,
     attach_run_metadata,
@@ -371,6 +373,7 @@ class OrchestratorAgent:
             telegram_user_id, token_records if not is_error_response else [],
             t_total, events, intent,
             owner_saga=agent_result.get("owner_saga"),
+            _is_generated=not is_error_response,
         )
 
         if is_error_response:
@@ -517,10 +520,12 @@ class OrchestratorAgent:
 
         # Delegated-agent usage (a completed trip may have run the planner)
         # arrives in token_records via the funnel (task 51).
+        # E9: selection turns use _is_generated=False — no judge sampling.
         _save_and_finish(
             self, user_doc, user_id, label, response_text,
             telegram_user_id, token_records, t_total, events, "PLAN",
             owner_saga="PlanningSaga",
+            _is_generated=False,
         )
 
         slot_wire = (
@@ -650,6 +655,15 @@ class OrchestratorAgent:
 
 # ── private helpers ──────────────────────────────────────────────────────────
 
+# Map router intent to BudgetPolicy call_type for judge char_cap resolution.
+_INTENT_TO_CALL_TYPE = {
+    "CHAT": "chat_ack",
+    "TRIP": "trip_companion",
+    "PLAN": "itinerary",
+    "OFF_TOPIC": "chat_ack",
+}
+
+
 def _save_and_finish(
     coordinator: OrchestratorAgent,
     user_doc: Dict[str, Any],
@@ -662,12 +676,37 @@ def _save_and_finish(
     events: EventEmitter,
     intent: str,
     owner_saga: Optional[str] = None,
+    _is_generated: bool = True,
 ) -> None:
-    """Save history, record metrics, and deduct credits."""
+    """Save history, record metrics, deduct credits, and fire the offline judge.
+
+    Args:
+        _is_generated: False for selection turns (deterministic writes with no
+            LLM text) so the judge hook is skipped per E9.
+    """
     if user_id:
         coordinator.conversation_manager.append_and_save(
             user_doc, user_id, message_text, response_text
         )
+
+    # AC-7: Fire judge AFTER history persisted, before metrics flush.
+    # Only for generated (LLM) replies, not selection/deterministic turns (E9).
+    if _is_generated and response_text:
+        call_type = _INTENT_TO_CALL_TYPE.get(intent, "chat_ack")
+        budget = budget_resolve(call_type, user_doc)
+        trip_id = getattr(events, "trip_id", None)
+        try:
+            maybe_judge_turn(
+                reply_text=response_text,
+                intent=intent,
+                char_cap=budget.char_cap,
+                owner_saga=owner_saga,
+                user_id=user_id,
+                trip_id=trip_id,
+                events=events,
+            )
+        except Exception:
+            logger.warning("Judge hook failed to start; ignoring.", exc_info=True)
 
     metrics_tracker.record_interaction(
         user_id=telegram_user_id,
@@ -700,4 +739,3 @@ def _save_and_finish(
     events.flush_metrics()
 
     logger.info("⏱ TOTAL: %s", _elapsed(t_total))
-
