@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from agentic_traveler.analytics import metrics_tracker
 from agentic_traveler.core.sanitize import sanitize_user_input, sanitize_telegram_markdown
+from agentic_traveler.core.markdown_profile import degrade_for_telegram
 from agentic_traveler.guards import off_topic_guard
 from agentic_traveler.interfaces.dependencies import (
     verify_telegram_ip,
@@ -107,6 +108,7 @@ if MOCK_TELEGRAM:
         chat_id: int | str, text: str, reply_markup: dict | None = None,
     ) -> int | None:
         """Mock message sender that bypasses external HTTP requests."""
+        text = degrade_for_telegram(text)
         logger.debug("MOCK_TELEGRAM: sent message to %s: %s", chat_id, text[:60])
         return 888888  # Synthetic message ID
 
@@ -115,6 +117,7 @@ if MOCK_TELEGRAM:
         reply_markup: dict | None = None,
     ) -> None:
         """Mock message editor that bypasses external HTTP requests."""
+        text = degrade_for_telegram(text)
         logger.debug("MOCK_TELEGRAM: edited message %s to %s", message_id, text[:60])
         return
 
@@ -130,6 +133,7 @@ else:
 
         ``reply_markup`` (e.g. an inline keyboard) is attached only to the final
         chunk so a multi-part message keeps its buttons at the bottom (Task 43)."""
+        text = degrade_for_telegram(text)
         text = sanitize_telegram_markdown(text)
         last_message_id = None
         chunk_starts = list(range(0, len(text) or 1, 4096))
@@ -186,6 +190,7 @@ else:
         else:
             text = str(text)
 
+        text = degrade_for_telegram(text)
         text = sanitize_telegram_markdown(text)
         payload: dict = {
             "chat_id": chat_id,

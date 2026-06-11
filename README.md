@@ -247,6 +247,46 @@ Key behaviours:
   (`brief_captured`, `advisor_turn_composed`, `proposal_made/accepted/rejected`)
   feed the proposal-acceptance KPI.
 
+#### Reading experience (Task 46)
+
+A single canonical markdown profile now governs ALL agent output — chat, trip,
+planner, advisor turn — and is the single source of truth for formatting rules:
+
+- **`core/markdown_profile.py`** exposes two surfaces:
+  - `CANONICAL_FORMATTING` — a shared instruction block imported by every agent's
+    `_SYSTEM_PROMPT`, replacing the former per-agent Telegram-specific formatting
+    sections. Agents now emit `**bold**`, `### headings`, `> blockquotes`, and
+    `- lists` — the canonical forms that render correctly in both the web
+    ReactMarkdown renderer and on Telegram after degradation.
+  - `degrade_for_telegram(text)` — converts canonical Markdown → Telegram
+    MarkdownV1: `**bold** → *bold*`, `### Title → *Title*`, `> quote → _quote_`,
+    `- item → • item`, table rows flattened, code fences stripped (content kept).
+    **Deterministic and idempotent** (running twice = running once). Wired in the
+    channel layer (`telegram.py`) before `sanitize_telegram_markdown`, so it runs
+    once per outbound Telegram message on both the real and mock senders.
+
+- **Warm ivory web theme** — the light-theme CSS variables shift from plain white
+  (`#ffffff`) to a warm ivory paper (`#faf8f3`) with a warm ink foreground
+  (`#23201a`), warm card/muted/border tones, matching the reading feel of
+  physical travel planning materials.
+
+- **Bubble-less agent prose** — agent replies in the web chat no longer appear in
+  a glass-card bubble. They render full-width with a compact attribution row
+  (6px gradient dot + muted timestamp) and `1.65` line-height reading typography.
+  User messages keep the gradient-filled bubble.
+
+- **ReactMarkdown component normalisation** — all heading depths (h1–h6) are
+  remapped to `h3` (styled at `1em/600` weight); tables are flattened to plain
+  text spans; images and `<img>` tags return null; code/pre blocks use plain
+  inherited font. This guarantees that forbidden elements never render even if
+  the model emits them.
+
+- **Desktop expand mode** — an expand toggle (⤢/⤡) in the ChatPanel header
+  (hidden on mobile, `lg:grid` on desktop) overlays the chat as a full-width
+  pane with a 720px reading column and hides the map/trip panels. Esc key
+  collapses it. Uses an `is-solid` card variant — no `backdrop-filter` cost
+  over the map background.
+
 #### Real-time architecture (Task 37)
 
 Three composable layers give the web a live feel, all multiplexed through the

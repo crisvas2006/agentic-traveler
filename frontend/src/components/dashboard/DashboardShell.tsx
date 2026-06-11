@@ -118,6 +118,7 @@ function DesktopShell({
 }: ShellViewProps) {
   const [activeDayN, setActiveDayN] = useState(todayN);
   const [chatStyle, setChatStyle] = useState<"strip" | "drawer">("strip");
+  const [chatExpanded, setChatExpanded] = useState(false);
 
   // Reset to the focused trip's "today" when the trip changes. React's
   // adjust-state-during-render pattern (no effect): converges immediately.
@@ -127,7 +128,39 @@ function DesktopShell({
     setActiveDayN(todayN);
   }
 
+  // Esc key collapses expand mode (AC-9 / E10).
+  useEffect(() => {
+    if (!chatExpanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setChatExpanded(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [chatExpanded]);
+
   const chatColWidth = chatStyle === "drawer" ? "360px" : "56px";
+
+  // ── Expand icon (⤢ / ⤡) rendered in a hidden lg:flex slot ──────────────
+  const ExpandIcon = ({ expanded }: { expanded: boolean }) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" width={14} height={14}>
+      {expanded ? (
+        <>
+          <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+          <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+          <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+          <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+        </>
+      ) : (
+        <>
+          <path d="M15 3h6v6" />
+          <path d="M9 21H3v-6" />
+          <path d="M21 3l-7 7" />
+          <path d="M3 21l7-7" />
+        </>
+      )}
+    </svg>
+  );
 
   return (
     <div className="relative w-full h-full flex flex-col overflow-hidden">
@@ -135,7 +168,7 @@ function DesktopShell({
 
       <div className="flex-1 relative overflow-hidden">
         {/* Map — full bleed canvas (placeholder pending task 49) */}
-        <div className="absolute inset-0">
+        <div className={`absolute inset-0 ${chatExpanded ? "hidden" : ""}`}>
           <KyotoMap days={KYOTO_DAYS} todayN={MAP_TODAY_N} activeDayN={MAP_TODAY_N} theme={theme} weather="rain" />
           <div
             className="absolute inset-0"
@@ -148,54 +181,75 @@ function DesktopShell({
           />
         </div>
 
-        <div
-          className="absolute inset-0 grid p-4 gap-4 pointer-events-none"
-          style={{ gridTemplateColumns: `280px 1fr ${chatColWidth}` }}
-        >
-          <div className="pointer-events-auto min-h-0">
-            <TripLibrary
-              summaries={summaries}
-              activeId={activeTripId}
-              onSelect={setActiveTripId}
-              onNew={() => sendMessage("I'd like to plan a new trip.")}
-            />
-          </div>
+        {/* Normal pane layout (hidden when expanded) */}
+        {!chatExpanded && (
+          <div
+            className="absolute inset-0 grid p-4 gap-4 pointer-events-none"
+            style={{ gridTemplateColumns: `280px 1fr ${chatColWidth}` }}
+          >
+            <div className="pointer-events-auto min-h-0">
+              <TripLibrary
+                summaries={summaries}
+                activeId={activeTripId}
+                onSelect={setActiveTripId}
+                onNew={() => sendMessage("I'd like to plan a new trip.")}
+              />
+            </div>
 
-          <div className="relative pointer-events-none">
-            <div className="absolute top-0 right-0 w-[460px] max-w-full max-h-full pointer-events-auto">
-              <div className="h-[calc(100vh-56px-32px)] max-h-full">
-                {trip ? (
-                  <TripDetailPanel
-                    trip={trip}
-                    days={days}
-                    todayN={todayN}
-                    layout="timeline"
-                    density="comfortable"
-                    activeDayN={activeDayN}
-                    setActiveDayN={setActiveDayN}
-                    onSendMessage={sendMessage}
-                  />
-                ) : (
-                  <EmptyTripCanvas onStart={() => sendMessage("I'd like to plan a trip.")} />
-                )}
+            <div className="relative pointer-events-none">
+              <div className="absolute top-0 right-0 w-[460px] max-w-full max-h-full pointer-events-auto">
+                <div className="h-[calc(100vh-56px-32px)] max-h-full">
+                  {trip ? (
+                    <TripDetailPanel
+                      trip={trip}
+                      days={days}
+                      todayN={todayN}
+                      layout="timeline"
+                      density="comfortable"
+                      activeDayN={activeDayN}
+                      setActiveDayN={setActiveDayN}
+                      onSendMessage={sendMessage}
+                    />
+                  ) : (
+                    <EmptyTripCanvas onStart={() => sendMessage("I'd like to plan a trip.")} />
+                  )}
+                </div>
+              </div>
+
+              <div className="absolute bottom-2 left-2 pointer-events-auto">
+                <MapLegend />
               </div>
             </div>
 
-            <div className="absolute bottom-2 left-2 pointer-events-auto">
-              <MapLegend />
+            {chatStyle === "strip" ? (
+              <div className="pointer-events-auto">
+                <ChatStripIcons onExpand={() => setChatStyle("drawer")} />
+              </div>
+            ) : (
+              <div className="pointer-events-auto min-h-0">
+                {/* Expand toggle renders in the header via ChatPanel's onExpand prop */}
+                <ChatPanel
+                  onCollapse={() => setChatStyle("strip")}
+                  onExpand={() => setChatExpanded(true)}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Expand overlay (lg+ only, AC-9). Uses is-solid card — no backdrop-filter
+            cost over the map background (spec §5 performance constraint). */}
+        {chatExpanded && (
+          <div className="absolute inset-0 aletheia-card is-solid flex flex-col overflow-hidden chat-expand-overlay">
+            <div className="flex-1 flex flex-col max-w-[720px] w-full mx-auto min-h-0">
+              <ChatPanel
+                onCollapse={() => setChatExpanded(false)}
+                onExpand={() => setChatExpanded(false)}
+                expandedMode
+              />
             </div>
           </div>
-
-          {chatStyle === "strip" ? (
-            <div className="pointer-events-auto">
-              <ChatStripIcons onExpand={() => setChatStyle("drawer")} />
-            </div>
-          ) : (
-            <div className="pointer-events-auto min-h-0">
-              <ChatPanel onCollapse={() => setChatStyle("strip")} />
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );

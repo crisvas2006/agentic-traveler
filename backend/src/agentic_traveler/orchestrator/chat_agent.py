@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from google import genai
 from google.genai import types
 
+from agentic_traveler.core.markdown_profile import CANONICAL_FORMATTING
 from agentic_traveler.orchestrator.client_factory import get_client, generate_maybe_stream
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
@@ -65,11 +66,8 @@ WEATHER: Only call check_weather() if the user asks about weather directly,
 or has confirmed travel within the next 10 days. Skip for destination
 questions or inspiration queries.
 
-Formatting (Telegram):
-- Use *bold* for emphasis.
-- Use bullet points (•) for lists.
-- Do NOT use headers (#), tables, or code blocks.
-- Keep it conversational — not a formatted document.
+""" + CANONICAL_FORMATTING + """
+Keep it conversational — not a formatted document.
 """
 
 

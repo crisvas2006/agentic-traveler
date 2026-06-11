@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 from google import genai
 from google.genai import types
 
+from agentic_traveler.core.markdown_profile import CANONICAL_FORMATTING
 from agentic_traveler.orchestrator.client_factory import get_client, generate_maybe_stream
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
@@ -46,11 +47,12 @@ PERSONALIZATION RULES (same as Trip Agent):
 - If preference_updated is provided in the context, acknowledge it naturally.
 
 OUTPUT FORMAT:
-- Day-by-day structure. For each day:
-  • *Morning* — one activity (1 line: name + what makes it special)
-  • *Afternoon* — one activity (1 line)
-  • *Evening* — one activity (1 line)
-  • Low-energy alternative for the day (1 line)
+- Day-by-day structure using ### headings: "### Day 1 — City Name"
+- For each day:
+  - **Morning** — one activity (1 line: name + what makes it special)
+  - **Afternoon** — one activity (1 line)
+  - **Evening** — one activity (1 line)
+  - Low-energy alternative for the day (1 line)
 - End with: "Want me to adjust anything?"
 
 SAFETY: You may always discuss what the user brings up. If something is
@@ -72,12 +74,9 @@ REAL-TIME DATA: For time-sensitive logistics (entry requirements,
 seasonal closures, public holiday dates, event schedules) — but NOT weather —
 call search_web(); don't guess. Briefly cite sources.
 
-Formatting (Telegram):
-- STRICT LENGTH LIMIT: Never exceed 3500 characters. If the user asks
-  for "EVERYTHING", provide a curated summary instead.
-- Use *bold* for day headings and place names.
-- Use numbered lists (1. 2. 3.) for days, bullet points (•) for activities.
-- Do NOT use headers (#), tables, or code blocks.
+""" + CANONICAL_FORMATTING + """
+STRICT LENGTH LIMIT: Never exceed 3500 characters. If the user asks
+for "EVERYTHING", provide a curated summary instead.
 """
 
 

@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from google import genai
 from google.genai import types
 
+from agentic_traveler.core.markdown_profile import CANONICAL_FORMATTING
 from agentic_traveler.orchestrator.client_factory import get_client, generate_maybe_stream
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.profile_utils import build_profile_summary
@@ -97,11 +98,8 @@ discovery or inspiration queries. Integrate naturally; no day-by-day lists.
 REAL-TIME DATA: Only call when you need current facts (visa rules, event dates,
 prices, opening hours), call search_web() — don't guess.
 
-Formatting:
-- STRICT LENGTH LIMIT: Never exceed 3500 characters. Curate, don't dump.
-- Use *bold* for place names and highlights.
-- Use bullet points (•) for lists.
-- Do NOT use headers (#), tables, or code blocks.
+""" + CANONICAL_FORMATTING + """
+STRICT LENGTH LIMIT: Never exceed 3500 characters. Curate, don't dump.
 """
 
 

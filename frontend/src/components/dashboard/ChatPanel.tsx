@@ -49,7 +49,88 @@ const SOFT_LIMIT = 3000;
 const WARN_LIMIT = 3500;
 const HARD_LIMIT = 4000;
 
-/* ── Single bubble ─────────────────────────────────────────────────────── */
+/* ── Agent prose (bubble-less, full-width) ─────────────────────────────── */
+
+/**
+ * Canonical markdown component map for agent prose (Task 46 AC-5).
+ * - h1–h6 all render as one visual heading level (h3 styled via chat-md).
+ * - table/thead/tbody/tr/td/th → plain text lines (E1).
+ * - img → null (no images in the markdown profile).
+ * - code/pre → plain span (E1 variant).
+ * - blockquote and links/strong/em are fully supported.
+ */
+const PROSE_COMPONENTS = {
+  // Normalize all heading depths to the single visual level.
+  h1: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => <h3 {...props}>{children}</h3>,
+  h2: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => <h3 {...props}>{children}</h3>,
+  h3: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => <h3 {...props}>{children}</h3>,
+  h4: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => <h3 {...props}>{children}</h3>,
+  h5: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => <h3 {...props}>{children}</h3>,
+  h6: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => <h3 {...props}>{children}</h3>,
+  // Tables: flatten to plain text lines — never render <table>.
+  table: ({ children }: { children?: React.ReactNode }) => <div className="break-words">{children}</div>,
+  thead: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  tbody: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  tr: ({ children }: { children?: React.ReactNode }) => <div className="text-sm">{children}</div>,
+  th: ({ children }: { children?: React.ReactNode }) => <span className="font-semibold mr-2">{children}</span>,
+  td: ({ children }: { children?: React.ReactNode }) => <span className="mr-2">{children}</span>,
+  // Images: suppressed per markdown profile.
+  img: () => null,
+  // Code/pre: rendered as plain inline text.
+  code: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+  pre: ({ children }: { children?: React.ReactNode }) => <div className="break-words">{children}</div>,
+  // Links: open in new tab.
+  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a {...props} target="_blank" rel="noopener noreferrer" />
+  ),
+};
+
+function AgentProse({
+  msg,
+  highlight,
+  registerRef,
+  onContextMenu,
+}: {
+  msg: ChatMessage;
+  highlight: boolean;
+  registerRef: (id: number, el: HTMLDivElement | null) => void;
+  onContextMenu: (e: React.MouseEvent, msg: ChatMessage) => void;
+}) {
+  const time = useMemo(() => {
+    try {
+      return new Date(msg.created_at).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }, [msg.created_at]);
+
+  return (
+    <div
+      ref={(el) => registerRef(msg.id, el)}
+      className={`w-full ${highlight ? "chat-msg-flash" : ""}`}
+    >
+      {/* Attribution row: 6px gradient dot + muted timestamp (spec §7.2) */}
+      <div className="chat-prose-attr" aria-hidden="true">
+        <span className="chat-prose-attr__dot" />
+        <span>{time}</span>
+      </div>
+      <div
+        onContextMenu={(e) => onContextMenu(e, msg)}
+        className="chat-md break-words w-full text-sm text-foreground"
+      >
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={PROSE_COMPONENTS}
+        >
+          {msg.body}
+        </ReactMarkdown>
+      </div>
+    </div>
+  );
+}
 
 function ChatBubble({
   msg,
@@ -75,53 +156,28 @@ function ChatBubble({
     }
   }, [msg.created_at]);
 
+  // Agent messages now use AgentProse (called from the message list below).
+  // ChatBubble only handles user messages.
   return (
     <div
       ref={(el) => registerRef(msg.id, el)}
-      className={`flex ${isMe ? "justify-end" : "justify-start"} ${
+      className={`flex justify-end ${
         highlight ? "chat-msg-flash" : ""
       }`}
     >
       <div
         onContextMenu={(e) => onContextMenu(e, msg)}
-        className={`chat-bubble-interactive max-w-[78%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
-          isMe ? "text-white" : "text-foreground"
-        }`}
-        style={
-          isMe
-            ? {
-                background: errored
-                  ? "linear-gradient(135deg, #b91c1c, #7f1d1d)"
-                  : "linear-gradient(135deg, var(--primary), #9333ea)",
-                borderBottomRightRadius: 6,
-              }
-            : {
-                background: "color-mix(in oklab, var(--foreground) 5%, transparent)",
-                border: "1px solid var(--border)",
-                borderBottomLeftRadius: 6,
-              }
-        }
+        className="chat-bubble-interactive max-w-[78%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed text-white"
+        style={{
+          background: errored
+            ? "linear-gradient(135deg, #b91c1c, #7f1d1d)"
+            : "linear-gradient(135deg, var(--primary), #9333ea)",
+          borderBottomRightRadius: 6,
+        }}
       >
-        {isMe ? (
-          <div className="whitespace-pre-wrap break-words">{msg.body}</div>
-        ) : (
-          <div className="chat-md break-words">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-                  <a {...props} target="_blank" rel="noopener noreferrer" />
-                ),
-              }}
-            >
-              {msg.body}
-            </ReactMarkdown>
-          </div>
-        )}
+        <div className="whitespace-pre-wrap break-words">{msg.body}</div>
         <div
-          className={`text-[10px] mt-1 font-mono select-none ${
-            isMe ? "text-white/60" : "text-muted-foreground"
-          }`}
+          className="text-[10px] mt-1 font-mono select-none text-white/60"
           aria-hidden="true"
         >
           {errored ? "failed to send" : time}
@@ -365,7 +421,17 @@ export function ChatStripIcons({ onExpand }: { onExpand: () => void }) {
 
 /* ── Full chat panel ───────────────────────────────────────────────────── */
 
-export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
+export function ChatPanel({
+  onCollapse,
+  onExpand,
+  expandedMode,
+}: {
+  onCollapse?: () => void;
+  /** lg+ only: expand the chat over the full dashboard. Not shown on mobile. */
+  onExpand?: () => void;
+  /** When true the panel is already in expanded mode; toggle becomes a collapse. */
+  expandedMode?: boolean;
+}) {
   const {
     messages,
     loading,
@@ -731,6 +797,18 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
           >
             <SearchIcon width={14} height={14} />
           </button>
+          {/* Expand / collapse toggle — desktop only (AC-9: no affordance on mobile) */}
+          {onExpand && (
+            <button
+              type="button"
+              onClick={onExpand}
+              title={expandedMode ? "Collapse to pane" : "Expand to full width"}
+              aria-label={expandedMode ? "Collapse chat" : "Expand chat"}
+              className="hidden lg:grid w-8 h-8 rounded-lg place-items-center text-muted-foreground hover:bg-foreground/5 transition"
+            >
+              <ExpandToggleIcon expanded={!!expandedMode} />
+            </button>
+          )}
           {onCollapse && (
             <button
               type="button"
@@ -835,6 +913,18 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
               />
             );
           }
+          // Agent messages render as bubble-less prose; user messages keep bubbles.
+          if (m.sender_type === "agent") {
+            return (
+              <AgentProse
+                key={m.id}
+                msg={m}
+                highlight={flashId === m.id}
+                registerRef={registerRef}
+                onContextMenu={openContextMenu}
+              />
+            );
+          }
           return (
             <ChatBubble
               key={m.id}
@@ -850,28 +940,19 @@ export function ChatPanel({ onCollapse }: { onCollapse?: () => void }) {
             No generic typing dots — only the real intermediary states show
             (Task 37). */}
         {streamingText ? (
-          <div className="flex justify-start">
-            <div
-              className="chat-bubble-interactive max-w-[78%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed text-foreground"
-              style={{
-                background: "color-mix(in oklab, var(--foreground) 5%, transparent)",
-                border: "1px solid var(--border)",
-                borderBottomLeftRadius: 6,
-              }}
-              aria-live="polite"
-            >
-              <div className="chat-md break-words">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-                      <a {...props} target="_blank" rel="noopener noreferrer" />
-                    ),
-                  }}
-                >
-                  {streamingText}
-                </ReactMarkdown>
-              </div>
+          <div className="w-full" aria-live="polite">
+            {/* Attribution row for streaming agent prose */}
+            <div className="chat-prose-attr" aria-hidden="true">
+              <span className="chat-prose-attr__dot" />
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+            </div>
+            <div className="chat-md break-words w-full text-sm text-foreground">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={PROSE_COMPONENTS}
+              >
+                {streamingText}
+              </ReactMarkdown>
             </div>
           </div>
         ) : streamStatus ? (
@@ -1096,6 +1177,30 @@ function RefreshSmallIcon(props: React.SVGProps<SVGSVGElement>) {
       <path d="M21 3v5h-5" />
       <path d="M21 12a9 9 0 0 1-15.5 6.3L3 16" />
       <path d="M3 21v-5h5" />
+    </svg>
+  );
+}
+
+/** Expand ⤢ / collapse ⤡ toggle icon for the chat panel header (AC-9). */
+function ExpandToggleIcon({ expanded, ...props }: { expanded: boolean } & React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" width={14} height={14} {...props}>
+      {expanded ? (
+        <>
+          <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+          <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+          <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+          <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+        </>
+      ) : (
+        <>
+          <path d="M15 3h6v6" />
+          <path d="M9 21H3v-6" />
+          <path d="M21 3l-7 7" />
+          <path d="M3 21l7-7" />
+        </>
+      )}
     </svg>
   );
 }
