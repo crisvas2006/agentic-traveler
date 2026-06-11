@@ -196,11 +196,13 @@ class ChatRepository:
         self,
         user_id: str,
         before_id: Optional[int] = None,
+        after_id: Optional[int] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """
         Return messages in id DESC order, up to `limit`.
-        Cursor: id < before_id (exclusive). Pass None to get the newest page.
+        Cursor: id < before_id (exclusive) OR id > after_id (exclusive).
+        Pass None to get the newest page.
         """
         limit = max(1, min(limit, 100))
         tid = self.get_or_create_direct_ai_thread(user_id)
@@ -209,9 +211,15 @@ class ChatRepository:
             .table("messages")
             .select("id, thread_id, sender_type, sender_user_id, body, source, metadata, created_at")
             .eq("thread_id", tid)
-            .order("id", desc=True)
-            .limit(limit)
         )
+        if after_id is not None:
+            q = q.gt("id", after_id).order("id", desc=False).limit(limit)
+            resp = q.execute()
+            rows = resp.data or []
+            rows.reverse()  # Match standard DESC order
+            return [_shape(r) for r in rows]
+            
+        q = q.order("id", desc=True).limit(limit)
         if before_id is not None:
             q = q.lt("id", before_id)
         resp = q.execute()

@@ -7,6 +7,7 @@ from typing import Optional
 from google import genai
 from agentic_traveler.core.observability import traceable
 from agentic_traveler.orchestrator.tool_events import (
+    get_current_emitter,
     reset_current_emitter,
     set_current_emitter,
 )
@@ -51,9 +52,12 @@ def suppress_usage_capture():
         current_turn_usage.reset(token)
 
 
-def _capture_usage(model: str, response) -> None:
+def _capture_usage(
+    model: str, response, *, latency_ms: Optional[float] = None, call_type: Optional[str] = None
+) -> None:
     """Append `response`'s token usage (and any grounding cost) to the active
-    turn's records. No active turn or no usage metadata → no-op. Never raises."""
+    turn's records, and emit a per-call llm_call_usage metric (AC-2).
+    No active turn or no usage metadata → no-op. Never raises."""
     records = current_turn_usage.get()
     if records is None or response is None:
         return
@@ -61,17 +65,34 @@ def _capture_usage(model: str, response) -> None:
         usage = getattr(response, "usage_metadata", None)
         input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
         output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
+        thinking_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0) if usage else 0
         if input_tokens or output_tokens:
             records.append({
                 "model_name": model,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "total_tokens": input_tokens + output_tokens,
+                "thinking_tokens": thinking_tokens,
             })
             logger.info(
-                "📊 LLM usage | model=%s input_tokens=%d output_tokens=%d",
-                model, input_tokens, output_tokens,
+                "📊 LLM usage | model=%s input_tokens=%d output_tokens=%d thinking_tokens=%d",
+                model, input_tokens, output_tokens, thinking_tokens,
             )
+            # AC-2: emit per-call usage metric via current EventEmitter.
+            emitter = get_current_emitter()
+            if emitter is not None:
+                try:
+                    emitter.emit("metric", {
+                        "name": "llm_call_usage",
+                        "call_type": call_type or "unknown",
+                        "model": model,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "thinking_tokens": thinking_tokens,
+                        "latency_ms": int(latency_ms) if latency_ms is not None else None,
+                    })
+                except Exception:
+                    logger.debug("llm_call_usage emit failed.", exc_info=True)
         # Grounded calls carry a per-prompt cost on top of tokens. Lazy imports:
         # utils pulls in the weather tool, economy pulls Supabase — neither
         # belongs in this module's import graph at startup.
@@ -205,23 +226,27 @@ def _trace_inputs(inputs: dict) -> dict:
 
 
 @traceable(name="gemini.generate_content", process_inputs=_trace_inputs)
-def gemini_generate(client, *, model: str, contents, config):
+def gemini_generate(client, *, model: str, contents, config, call_type: Optional[str] = None):
     """Single traced wrapper around `client.models.generate_content` — every
     Gemini call goes through here so prompts appear in LangSmith traces and
-    token usage lands in the turn's billing records (task 51)."""
+    token usage lands in the turn's billing records (task 51).
+    ``call_type`` is forwarded to the llm_call_usage metric (AC-2)."""
+    t = time.time()
     response = client.models.generate_content(model=model, contents=contents, config=config)
-    _capture_usage(model, response)
+    _capture_usage(model, response, latency_ms=(time.time() - t) * 1000, call_type=call_type)
     return response
 
 
 @traceable(name="gemini.generate_content_stream", process_inputs=_trace_inputs)
-def gemini_generate_stream(client, *, model: str, contents, config, on_delta=None):
+def gemini_generate_stream(client, *, model: str, contents, config, on_delta=None, call_type: Optional[str] = None):
     """Synchronous streaming wrapper around `client.models.generate_content_stream`
     (Task 37). Calls ``on_delta(text)`` for each non-empty text chunk and returns
     ``(last_chunk, full_text)``. The SDK's stream is synchronous and runs
     automatic function calling inline, so tool calls fire (and emit their status)
     during iteration. The last chunk carries cumulative ``usage_metadata`` for
-    the orchestrator's existing token logging."""
+    the orchestrator's existing token logging.
+    ``call_type`` is forwarded to the llm_call_usage metric (AC-2)."""
+    t = time.time()
     full: list[str] = []
     last = None
     for chunk in client.models.generate_content_stream(
@@ -240,7 +265,7 @@ def gemini_generate_stream(client, *, model: str, contents, config, on_delta=Non
             if on_delta is not None:
                 on_delta(text)
     # The final chunk carries the cumulative usage for the whole stream.
-    _capture_usage(model, last)
+    _capture_usage(model, last, latency_ms=(time.time() - t) * 1000, call_type=call_type)
     return last, "".join(full)
 
 
@@ -285,12 +310,14 @@ def _emit_paced(
             time.sleep(delay)
 
 
-def generate_maybe_stream(client, model: str, contents, config, events=None):
+def generate_maybe_stream(client, model: str, contents, config, events=None, call_type: Optional[str] = None):
     """Run a Gemini generation, streaming token deltas through ``events`` when
     the turn is streaming (web SSE), else a single synchronous call. In ALL
     paths the active EventEmitter is bound for the duration so tool functions
     can emit their status (Telegram shows tool status too). Returns
     ``(response, text)`` with the same shape callers already expect.
+
+    ``call_type`` identifies the budget type for llm_call_usage metrics (AC-2).
 
     Streaming strategy:
       * **No tools** → real token-by-token streaming (fastest first token).
@@ -305,11 +332,11 @@ def generate_maybe_stream(client, model: str, contents, config, events=None):
     token = set_current_emitter(events)
     try:
         if not streaming:
-            resp = gemini_generate(client, model=model, contents=contents, config=config)
+            resp = gemini_generate(client, model=model, contents=contents, config=config, call_type=call_type)
             return resp, (getattr(resp, "text", None) or "")
 
         if _config_has_tools(config):
-            resp = gemini_generate(client, model=model, contents=contents, config=config)
+            resp = gemini_generate(client, model=model, contents=contents, config=config, call_type=call_type)
             text = getattr(resp, "text", None) or ""
             if text:
                 _emit_paced(events, text)
@@ -318,6 +345,7 @@ def generate_maybe_stream(client, model: str, contents, config, events=None):
         resp, text = gemini_generate_stream(
             client, model=model, contents=contents, config=config,
             on_delta=lambda txt: events.emit("delta", {"text": txt}),
+            call_type=call_type,
         )
         if text.strip():
             return resp, text
@@ -326,7 +354,7 @@ def generate_maybe_stream(client, model: str, contents, config, events=None):
         logger.warning(
             "Streaming returned empty text (model=%s); one blocking retry.", model,
         )
-        resp = gemini_generate(client, model=model, contents=contents, config=config)
+        resp = gemini_generate(client, model=model, contents=contents, config=config, call_type=call_type)
         text = getattr(resp, "text", None) or ""
         if text:
             events.emit("delta", {"text": text})

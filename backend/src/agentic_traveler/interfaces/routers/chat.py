@@ -241,16 +241,36 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
 @router.get("/messages", response_model=ChatHistoryResponse)
 async def chat_messages(
     before: Optional[int] = Query(default=None, description="Return messages with id < before"),
+    after: Optional[int] = Query(default=None, description="Return messages with id > after"),
+    around: Optional[int] = Query(default=None, description="Return messages around id"),
     limit: int = Query(default=50, ge=1, le=100),
     ctx: WebUserCtx = Depends(verify_supabase_jwt),
 ):
     """Cursor-paginated history. Returns rows in id DESC order (newest first)."""
-    rows = _get_chat_repo().list_messages(ctx.user_id, before_id=before, limit=limit)
-    # `has_more` is true iff we returned a full page — caller paginates further.
-    has_more = len(rows) == limit
+    repo = _get_chat_repo()
+    
+    if around is not None:
+        half_limit = limit // 2
+        # before_id is exclusive, so around + 1 includes `around` if it exists.
+        older = repo.list_messages(ctx.user_id, before_id=around + 1, limit=half_limit + 1)
+        # newer asks for strictly > around
+        newer = repo.list_messages(ctx.user_id, after_id=around, limit=limit - len(older))
+        rows = newer + older
+        has_more = len(older) == half_limit + 1
+        has_more_newer = len(newer) == limit - len(older)
+    elif after is not None:
+        rows = repo.list_messages(ctx.user_id, after_id=after, limit=limit)
+        has_more = True
+        has_more_newer = len(rows) == limit
+    else:
+        rows = repo.list_messages(ctx.user_id, before_id=before, limit=limit)
+        has_more = len(rows) == limit
+        has_more_newer = before is not None
+
     return ChatHistoryResponse(
         messages=[ChatMessageOut(**r) for r in rows],
         has_more=has_more,
+        has_more_newer=has_more_newer,
     )
 
 

@@ -40,6 +40,11 @@ def reset_current_emitter(token: Any) -> None:
         pass
 
 
+def get_current_emitter() -> Optional[Any]:
+    """Return the EventEmitter bound to the current context, or None."""
+    return _current_emitter.get()
+
+
 def emit_tool_status(tool_name: str) -> None:
     """Emit a ``status`` event for a tool invocation, if an emitter is bound and
     the tool maps to a user-visible string. No-op otherwise — safe to call from

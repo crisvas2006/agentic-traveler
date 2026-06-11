@@ -763,6 +763,64 @@ SELECT
     ELSE 'OK'
   END AS realtime_status;
 
+-- 12.4.7  Turn latency P50 / P95 by stage (Task 48 — AC-1)
+-- Reads the last 7 days of turn_stage_timings analytics events and computes
+-- per-stage percentiles directly from the JSONB payload. Refreshed on-demand
+-- (no materialization needed at this traffic level).
+CREATE OR REPLACE VIEW public.vw_turn_latency_p50_p95 AS
+WITH timings AS (
+  SELECT
+    (payload->>'router_ms')::int  AS router_ms,
+    (payload->>'extractor_ms')::int AS extractor_ms,
+    (payload->>'agent_ms')::int   AS agent_ms,
+    (payload->>'persist_ms')::int AS persist_ms,
+    (payload->>'total_ms')::int   AS total_ms,
+    (payload->>'ttft_ms')::int    AS ttft_ms
+  FROM public.analytics_events
+  WHERE event_name = 'turn_stage_timings'
+    AND occurred_at >= now() - interval '7 days'
+)
+SELECT
+  percentile_cont(0.50) WITHIN GROUP (ORDER BY total_ms)     AS total_p50,
+  percentile_cont(0.95) WITHIN GROUP (ORDER BY total_ms)     AS total_p95,
+  percentile_cont(0.50) WITHIN GROUP (ORDER BY router_ms)    AS router_p50,
+  percentile_cont(0.95) WITHIN GROUP (ORDER BY router_ms)    AS router_p95,
+  percentile_cont(0.50) WITHIN GROUP (ORDER BY extractor_ms) AS extractor_p50,
+  percentile_cont(0.95) WITHIN GROUP (ORDER BY extractor_ms) AS extractor_p95,
+  percentile_cont(0.50) WITHIN GROUP (ORDER BY agent_ms)     AS agent_p50,
+  percentile_cont(0.95) WITHIN GROUP (ORDER BY agent_ms)     AS agent_p95,
+  percentile_cont(0.50) WITHIN GROUP (ORDER BY persist_ms)   AS persist_p50,
+  percentile_cont(0.95) WITHIN GROUP (ORDER BY persist_ms)   AS persist_p95,
+  percentile_cont(0.50) WITHIN GROUP (ORDER BY ttft_ms)
+    FILTER (WHERE ttft_ms IS NOT NULL)                        AS ttft_p50,
+  percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)
+    FILTER (WHERE ttft_ms IS NOT NULL)                        AS ttft_p95,
+  count(*)                                                    AS sample_count
+FROM timings;
+
+
+-- 12.4.8  LLM token cost by call_type — 7-day window (Task 48 — AC-2)
+-- Aggregates total tokens and average latency per call_type to identify
+-- the most expensive call categories before and after optimization.
+CREATE OR REPLACE VIEW public.vw_llm_cost_by_call_type AS
+SELECT
+  payload->>'call_type'                              AS call_type,
+  payload->>'model'                                  AS model,
+  count(*)                                           AS calls,
+  sum((payload->>'input_tokens')::int)               AS input_tokens_total,
+  sum((payload->>'output_tokens')::int)              AS output_tokens_total,
+  sum((payload->>'thinking_tokens')::int)            AS thinking_tokens_total,
+  round(avg((payload->>'latency_ms')::numeric), 0)   AS latency_avg_ms,
+  percentile_cont(0.95) WITHIN GROUP (
+    ORDER BY (payload->>'latency_ms')::numeric
+  )                                                  AS latency_p95_ms
+FROM public.analytics_events
+WHERE event_name = 'llm_call_usage'
+  AND occurred_at >= now() - interval '7 days'
+GROUP BY payload->>'call_type', payload->>'model'
+ORDER BY input_tokens_total DESC;
+
+
 -- 12.4.6  Cost per active user — last 30 days
 CREATE OR REPLACE VIEW public.vw_cost_per_user_30d AS
 SELECT

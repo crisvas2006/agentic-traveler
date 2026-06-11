@@ -209,7 +209,7 @@ STATUS_TEXT = {
     ("tool", "check_weather"):     "Checking the weather…",
     ("tool", "search_web"):        "Searching the web…",
     ("tool", "country_intel_fetch"): "Looking up entry rules…",
-    ("composing", None):           "Writing the reply…",
+    ("composing", None):           "Thinking…",
 }
 
 def text_for(phase: str, key: str | None) -> str | None:

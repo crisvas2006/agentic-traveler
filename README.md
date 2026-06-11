@@ -335,7 +335,7 @@ task-35 `EventEmitter` (phases `status` / `delta` / `metric`):
     stays for compatibility.
 *   **Status events.** Rendered from a static `event_text_registry` (no LLM):
     "Understanding what you're asking… / Picking up your trip… / Checking the
-    weather… / Searching the web… / Writing the reply…". Tool status is emitted
+    weather… / Searching the web… / Thinking…". Tool status is emitted
     the moment a tool runs, via a contextvar the tool functions read (so it works
     on both web and Telegram). On Telegram, the first real status becomes the
     placeholder message (no generic "Thinking…"); later statuses edit it
@@ -888,6 +888,7 @@ isort .
 - **Real-time Context Awareness**: Weather-aware suggestions and adaptive itineraries based on current mood and energy.
 - **Safety & Moderation**: Integrated off-topic guard and multi-layer webhook security.
 - **Usage & Metrics Tracking**: Real-time per-user LLM usage and estimated credit cost tracking (where `1 credit = 1 eurocent`) inside the Supabase `usage_tracking` table, alongside weekly global analytics rollups flushed to the `analytics_weekly` table.
+- **Latency & Token Instrumentation** (Task 48): Every turn emits two always-on analytics events: `turn_stage_timings` (router_ms, extractor_ms, agent_ms, persist_ms, total_ms, ttft_ms) and per-LLM-call `llm_call_usage` (call_type, model, input/output/thinking tokens, latency_ms). Queryable via `vw_turn_latency_p50_p95` and `vw_llm_cost_by_call_type` views. Router and slot-extractor run in parallel (saving ~200–400 ms per planning turn). All conversational call types use LOW thinking budget; only `itinerary` uses MEDIUM.
 - **Profile & Preference Sync** — Extracts hard overrides (e.g. "I'm vegan") and persists them via `ProfileAgent`.
 - **Country Intel Saga** — Background fetch of up-to-date entry rules, safety, health, and money facts when a destination is confirmed or requested. Top-ups and promo-code redemption live on the **web** (under Account Settings) — the previous Telegram `/promo <CODE>` command has been removed. When a user runs out of credits, both Telegram and web chat surface a message pointing them back to the web app to redeem or top up.
 - **Interactive CLI & Webhook**: Support for both local development (CLI) and production Telegram bot interactions.

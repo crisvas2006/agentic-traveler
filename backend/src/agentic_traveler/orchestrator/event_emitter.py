@@ -6,8 +6,9 @@ and Telegram; this task wires `metric` to analytics_events.
 """
 
 import logging
+import time
 from collections import deque
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from agentic_traveler.analytics.event_sink import flush_metrics
 
@@ -28,6 +29,13 @@ class EventEmitter:
         self._on_status = on_status
         self._on_delta = on_delta
         self._metric_buffer: deque[dict] = deque()
+        self._turn_start: float = time.time()
+        self._ttft_ms: Optional[float] = None
+
+    @property
+    def ttft_ms(self) -> Optional[float]:
+        """Time-to-first-token in ms for streamed web turns; None for non-streaming."""
+        return self._ttft_ms
 
     @property
     def is_streaming(self) -> bool:
@@ -45,6 +53,8 @@ class EventEmitter:
                 except Exception:
                     logger.warning("status sink failed.", exc_info=True)
         elif phase == "delta":
+            if self._ttft_ms is None:
+                self._ttft_ms = (time.time() - self._turn_start) * 1000
             if self._on_delta:
                 try:
                     # delta payloads carry {"text": "<token chunk>"}

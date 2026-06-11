@@ -67,6 +67,7 @@ def test_capture_appends_record_when_turn_active():
         "input_tokens": 120,
         "output_tokens": 60,
         "total_tokens": 180,
+        "thinking_tokens": 0,
     }]
 
 
@@ -120,6 +121,7 @@ def test_stream_captures_usage_from_last_chunk():
         "input_tokens": 200,
         "output_tokens": 80,
         "total_tokens": 280,
+        "thinking_tokens": 0,
     }]
 
 
@@ -212,4 +214,5 @@ def test_booking_parser_usage_is_captured():
         "input_tokens": 300,
         "output_tokens": 40,
         "total_tokens": 340,
+        "thinking_tokens": 0,
     }]

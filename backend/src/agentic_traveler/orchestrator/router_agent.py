@@ -278,6 +278,7 @@ LATEST USER MESSAGE:
                 self._client,
                 model=_MODEL,
                 contents=user_prompt,
+                call_type="extraction",
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,
                     max_output_tokens=400,

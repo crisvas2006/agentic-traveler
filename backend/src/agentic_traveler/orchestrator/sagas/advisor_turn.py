@@ -194,6 +194,7 @@ def compose_advisor_turn(
             client,
             model=_MODEL,
             contents="\n".join(parts),
+            call_type="advisor_turn",
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_PROMPT,
                 max_output_tokens=advisor_budget.max_tokens_ceiling,

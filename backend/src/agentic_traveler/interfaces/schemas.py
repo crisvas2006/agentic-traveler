@@ -60,7 +60,8 @@ class ChatSendResponse(BaseModel):
 
 class ChatHistoryResponse(BaseModel):
     messages: list[ChatMessageOut]
-    has_more: bool
+    has_more: bool  # backward compat, means has_more_older
+    has_more_newer: bool = False
 
 
 class ChatSearchResponse(BaseModel):

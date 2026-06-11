@@ -170,6 +170,7 @@ class TripAgent:
             )
             response, text = generate_maybe_stream(
                 self._client, _MODEL, user_content, config, events,
+                call_type="trip_companion",
             )
             latency_ms = (time.time() - t) * 1000
             grounding_used = has_grounding(response)

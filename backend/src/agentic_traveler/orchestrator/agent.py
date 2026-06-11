@@ -27,6 +27,8 @@ Token savings vs v1:
     - Off-topic: ~84% fewer input tokens (router only, no sub-agent)
 """
 
+import concurrent.futures
+import contextvars
 import datetime
 import logging
 import time
@@ -251,19 +253,57 @@ class OrchestratorAgent:
         current_time = _current_time_str()
         user_name = user_doc.get("user_name", "Traveler")
 
-        # ── 4. Router — classify intent ─────────────────────────────────────
-        t = time.time()
-        router_result = self._router_agent.classify(
-            message=message_text,
-            user_doc=user_doc,
-            user_id=user_id,
-            telegram_user_id=telegram_user_id,
-            user_name=user_name,
-            current_time=current_time,
-            conversation_context=router_context,
-            token_records=token_records,
-        )
-        logger.info("⏱ Router: %s", _elapsed(t))
+        # ── 4. Router + slot extractor — parallel (AC-5) ────────────────────
+        # Both calls run concurrently. Extractor result is used when intent is
+        # PLAN/TRIP; discarded for CHAT/OFF_TOPIC (E2: cost accepted, ~300 tokens).
+        # On extractor failure, prefetched_slots=None → saga re-runs extraction (E3).
+        # copy_context() propagates current_turn_usage so both calls are billable
+        # (task 51 requirement; parallel thread-pool note in client_factory).
+        ctx = contextvars.copy_context()
+        router_ms: float = 0.0
+        extractor_ms: float = 0.0
+        prefetched_slots: Optional[Dict[str, Any]] = None
+
+        def _run_router() -> tuple[Dict[str, Any], float]:
+            t0 = time.time()
+            result = self._router_agent.classify(
+                message=message_text,
+                user_doc=user_doc,
+                user_id=user_id,
+                telegram_user_id=telegram_user_id,
+                user_name=user_name,
+                current_time=current_time,
+                conversation_context=router_context,
+                token_records=token_records,
+            )
+            return result, (time.time() - t0) * 1000
+
+        def _run_extractor() -> tuple[Dict[str, Any], float]:
+            from agentic_traveler.orchestrator.sagas.slot_extractor import extract_trip_slots
+            t0 = time.time()
+            result = extract_trip_slots(self._client, message_text)
+            return result, (time.time() - t0) * 1000
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _pool:
+            router_future = _pool.submit(ctx.run, _run_router)
+            # Only run extractor when there's actual text to extract from (E8: no-text turns).
+            extractor_future = (
+                _pool.submit(ctx.run, _run_extractor)
+                if message_text.strip() else None
+            )
+            router_result, router_ms = router_future.result()
+            if extractor_future is not None:
+                try:
+                    prefetched_slots, extractor_ms = extractor_future.result(timeout=20)
+                except Exception:
+                    logger.warning(
+                        "Parallel slot extraction failed (E3); saga will re-run extraction.",
+                        exc_info=True,
+                    )
+                    prefetched_slots = None
+                    extractor_ms = 0.0
+
+        logger.info("⏱ Router: %.0fms | Extractor: %.0fms (parallel)", router_ms, extractor_ms)
 
         # Router token usage is captured by the gemini_generate funnel (task 51).
         intent = router_result.get("intent", "CHAT")
@@ -278,6 +318,7 @@ class OrchestratorAgent:
         # ── 5. Handle intent ────────────────────────────────────────────────
 
         # ── 5a. OFF_TOPIC or direct router response ─────────────────────────
+        _pre_agent_timings = {"router_ms": router_ms, "extractor_ms": extractor_ms, "agent_ms": 0.0}
         if intent == "OFF_TOPIC":
             guard_result = off_topic_guard.record_off_topic(user_doc, user_id)
             if guard_result.get("restricted"):
@@ -296,6 +337,7 @@ class OrchestratorAgent:
                 self, user_doc, user_id, message_text, response_text,
                 telegram_user_id, token_records, t_total, events, intent,
                 owner_saga="OffTopicSaga",
+                stage_timings=_pre_agent_timings,
             )
             return {"text": response_text, "action": "RESPONSE", "slot_request": None}
 
@@ -309,6 +351,7 @@ class OrchestratorAgent:
                 self, user_doc, user_id, message_text, router_response,
                 telegram_user_id, token_records, t_total, events, intent,
                 owner_saga="ChatSaga",
+                stage_timings=_pre_agent_timings,
             )
             return {"text": router_response, "action": "RESPONSE", "slot_request": None}
 
@@ -317,6 +360,10 @@ class OrchestratorAgent:
             off_topic_guard.reset(user_id)
 
         # ── 5c. Resolve the active trip + dispatch via the saga dispatcher ──
+        # Pass prefetched slots to sagas that can use them (PlanningSaga).
+        # E2: for CHAT intent, pass None so the saga doesn't use a stale extraction.
+        _slots_for_saga = prefetched_slots if intent in ("PLAN", "TRIP") else None
+        t_agent = time.time()
         agent_result = self._dispatch_sagas(
             intent=intent,
             user_doc=user_doc,
@@ -329,7 +376,9 @@ class OrchestratorAgent:
             entities=router_result.get("entities", {}) or {},
             trip_directive=router_result.get("trip_directive", "unspecified"),
             events=events,
+            prefetched_slots=_slots_for_saga,
         )
+        _agent_ms = (time.time() - t_agent) * 1000
 
         response_text = agent_result.get("text", "")
 
@@ -374,6 +423,7 @@ class OrchestratorAgent:
             t_total, events, intent,
             owner_saga=agent_result.get("owner_saga"),
             _is_generated=not is_error_response,
+            stage_timings={"router_ms": router_ms, "extractor_ms": extractor_ms, "agent_ms": _agent_ms},
         )
 
         if is_error_response:
@@ -521,11 +571,13 @@ class OrchestratorAgent:
         # Delegated-agent usage (a completed trip may have run the planner)
         # arrives in token_records via the funnel (task 51).
         # E9: selection turns use _is_generated=False — no judge sampling.
+        # E8: selection turns have no router/extractor stage (all zeros).
         _save_and_finish(
             self, user_doc, user_id, label, response_text,
             telegram_user_id, token_records, t_total, events, "PLAN",
             owner_saga="PlanningSaga",
             _is_generated=False,
+            stage_timings={"router_ms": 0.0, "extractor_ms": 0.0, "agent_ms": 0.0},
         )
 
         slot_wire = (
@@ -551,6 +603,7 @@ class OrchestratorAgent:
         entities: Dict[str, Any],
         trip_directive: str,
         events: EventEmitter,
+        prefetched_slots: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Resolve the active trip, select the owner saga (+ listeners), run
         them, apply their side effects, and return an agent_result dict shaped
@@ -579,6 +632,10 @@ class OrchestratorAgent:
                     logger.exception("Failed to hydrate trip %s", chosen.get("id"))
 
         # 2. Per-turn state (NOT persisted — task 36 §4.1 #2).
+        # prefetched_slots carries the result of the parallel slot extraction
+        # (AC-5): None = extraction failed or not applicable; {} = ran, found nothing;
+        # {slot: value, ...} = slots extracted. PlanningSaga reads this to skip
+        # its own extract_trip_slots LLM call when a valid prefetch is present.
         state: SagaState = {
             "intent": intent,
             "entities": entities,
@@ -589,6 +646,7 @@ class OrchestratorAgent:
             "message_text": message_text,
             "trip_directive": trip_directive,
             "superseded_trip_title": superseded_title,
+            "prefetched_slots": prefetched_slots,
         }
 
         # 3. Select owner + listeners (deterministic, no LLM).
@@ -677,17 +735,22 @@ def _save_and_finish(
     intent: str,
     owner_saga: Optional[str] = None,
     _is_generated: bool = True,
+    stage_timings: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Save history, record metrics, deduct credits, and fire the offline judge.
 
     Args:
         _is_generated: False for selection turns (deterministic writes with no
             LLM text) so the judge hook is skipped per E9.
+        stage_timings: dict with router_ms, extractor_ms, agent_ms from the
+            caller; persist_ms is measured here. Emits turn_stage_timings (AC-1).
     """
+    t_persist = time.time()
     if user_id:
         coordinator.conversation_manager.append_and_save(
             user_doc, user_id, message_text, response_text
         )
+    persist_ms = (time.time() - t_persist) * 1000
 
     # AC-7: Fire judge AFTER history persisted, before metrics flush.
     # Only for generated (LLM) replies, not selection/deterministic turns (E9).
@@ -727,12 +790,25 @@ def _save_and_finish(
         except Exception:
             logger.exception("Failed to bill and record metrics for turn.")
 
-    latency_ms = int((time.time() - t_total) * 1000)
+    total_ms = int((time.time() - t_total) * 1000)
+
+    # AC-1: emit per-stage breakdown for every completed turn (permanent instrumentation).
+    st = stage_timings or {}
+    events.emit("metric", {
+        "name": "turn_stage_timings",
+        "router_ms": int(st.get("router_ms") or 0),
+        "extractor_ms": int(st.get("extractor_ms") or 0),
+        "agent_ms": int(st.get("agent_ms") or 0),
+        "tools_ms": None,       # E7: measured inside agent span; reported as None until SearchAgent exposes it
+        "persist_ms": int(persist_ms),
+        "total_ms": total_ms,
+        "ttft_ms": int(events.ttft_ms) if events.ttft_ms is not None else None,
+    })
     events.emit("metric", {
         "name": "turn_completed",
         "intent": intent,
         "owner_saga": owner_saga,
-        "latency_ms": latency_ms,
+        "latency_ms": total_ms,
         "credits": total_cost_credits,
         "tokens": sum(r.get("total_tokens", 0) for r in token_records),
     })

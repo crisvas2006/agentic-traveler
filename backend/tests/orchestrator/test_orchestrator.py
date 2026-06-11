@@ -229,12 +229,13 @@ def test_turn_bills_usage_captured_by_nested_calls(mock_user_repo, patched_deps)
     assert resp["action"] == "RESPONSE"
     patched_deps["credits"].record_usage_and_bill.assert_called_once()
     billed = patched_deps["credits"].record_usage_and_bill.call_args.kwargs["token_records"]
-    assert {
-        "model_name": "gemini-3.1-flash-lite",
-        "input_tokens": 300,
-        "output_tokens": 40,
-        "total_tokens": 340,
-    } in billed
+    assert any(
+        r.get("model_name") == "gemini-3.1-flash-lite"
+        and r.get("input_tokens") == 300
+        and r.get("output_tokens") == 40
+        and r.get("total_tokens") == 340
+        for r in billed
+    )
 
 
 def test_error_turn_is_not_billed_even_with_captured_usage(mock_user_repo, patched_deps):

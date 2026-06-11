@@ -513,7 +513,24 @@ class PlanningSaga:
         if not suppress_extraction:
             try:
                 pending_slot = state.get("pending_slot")
-                extracted = extract_trip_slots(self._client, message, pending_slot=pending_slot)
+                # AC-5: use prefetched extraction from the parallel orchestrator call when
+                # available. The "skip" fast-path still applies (it depends on pending_slot
+                # which wasn't available at prefetch time). E3: prefetched_slots=None means
+                # extraction failed — fall back to the LLM call as before.
+                msg_clean = message.strip().lower()
+                if msg_clean == "skip" and pending_slot:
+                    # pending_slot skip fast-path: always apply regardless of prefetch.
+                    extracted = (
+                        {"travelers": {"composition": "skip"}}
+                        if pending_slot == "travelers"
+                        else {pending_slot: "skip"}
+                    )
+                else:
+                    prefetched = state.get("prefetched_slots")
+                    if prefetched is not None:
+                        extracted = prefetched  # E2: may be {} if CHAT result (discarded upstream)
+                    else:
+                        extracted = extract_trip_slots(self._client, message, pending_slot=pending_slot)
                 # AC-1/AC-6: when the message is a QUESTION about a knowledge slot
                 # ("september, what's the best time?"), don't let the bare value
                 # short-circuit the advisory turn — drop it so the composer
