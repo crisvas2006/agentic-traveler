@@ -56,6 +56,26 @@ $ARGUMENTS
    Use the `AskUserQuestion` tool for clarifications with discrete options.
    Open-ended questions can be asked inline.
 
+5a. **If the task originates from a bug, trace the root cause FIRST.** Before
+    designing any feature, read the actual failing code path and name the
+    root-cause component in §1 with `file:line` evidence. A spec that describes
+    a desired feature but never fixes the reported defect is a failed spec —
+    the loop bug in an earlier draft of task 52 went un-addressed because the
+    spec jumped straight to the feature. Distinguish "the fix" from "the
+    feature" explicitly when they coexist.
+
+5b. **Establish lineage / prior art.** Grep `specs/` for related prior specs
+    (same subsystem, adjacent feature names). Cite them in a `> Spec lineage:`
+    header and list the **reusable building blocks they already shipped**
+    (functions, schema fields, state machines, metrics) so the implementer
+    *extends* them rather than re-deriving. Re-inventing an existing helper is
+    a review-time blocker.
+
+5c. **Record the chosen approach + rejected alternatives.** When more than one
+    viable approach exists (e.g. deterministic vs. LLM, sync vs. async), state
+    in the spec which was chosen, which were rejected, and the one-line reason.
+    This stops an agentic coder from silently swapping approaches mid-build.
+
 6. **Fill the spec.** Required sections must all be filled. Conditional
    sections (§9.1 – §9.4) are filled **only** if applicable to this task —
    otherwise omit them entirely (don't leave empty stubs). §10 Findings is
@@ -78,6 +98,23 @@ $ARGUMENTS
    Use absolute repo paths and tag each as `[create]` / `[modify]` /
    `[delete]`. Don't omit this — implementers compare it against the actual
    diff at review time.
+
+9a. **Verify every §4 path against the repo before finalizing.** Glob/Grep to
+    confirm each `[modify]`/`[delete]` path actually exists and each `[create]`
+    path does not. **Never invent filenames** — trace the real ones. (A task 52
+    draft listed `frontend/src/interfaces/schemas.ts` and `ChatHeader.tsx`,
+    neither of which exists; the chat header lives inside `ChatPanel.tsx` and
+    chat types are inline in hooks.) When a guessed path is wrong, find the real
+    one and annotate surprising cases inline.
+
+9b. **Trace the full client → proxy → backend chain.** For any web-chat or
+    client → Next.js Route Handler → FastAPI feature, §4 **must** list the route
+    handler(s) on the path, and an AC must assert the new field/param is
+    forwarded **end-to-end**. Route handlers that reconstruct query params or
+    bodies silently drop anything not explicitly forwarded (a real bug this
+    project hit: the `messages` GET handler dropped `around=`/`after=` until
+    patched). Tag a handler `[verify]` (not `[modify]`) when it forwards the
+    whole body unchanged — but still name it so the implementer confirms it.
 
 10. **Don't implement.** After the spec is written:
     - Save it to `specs/task_<feature_name>.md`.
@@ -102,6 +139,13 @@ A spec is good enough to ship when:
   apply to every task, but you've considered each.
 - The conditional sections present are the *right* ones; absent sections are
   absent for a real reason, not because you forgot.
+- Every §4 path was verified to exist (or is a deliberate `[create]`), and any
+  client→proxy→backend path names the route handler(s) it crosses (§9a, §9b).
+- If the task is bug-driven, §1 names the root cause with `file:line` evidence
+  (§5a); if it has prior art, §lineage cites it and lists what to reuse (§5b).
+- For LLM-touching tasks, §9.2 states the **per-turn token-cost delta** and
+  justifies it against `CLAUDE.md §10` (default to adding none; if an approach
+  adds cost on every turn, say so and defend it or pick the cheaper path).
 
 If you can't meet that bar from the user's description alone, ask more
 questions before writing.
