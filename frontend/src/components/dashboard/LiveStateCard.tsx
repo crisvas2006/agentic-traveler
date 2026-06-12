@@ -13,13 +13,49 @@ import { SparklesIcon } from "./DashIcons";
  * write here.
  */
 
-const MOODS: { label: string; energy: number; emoji: string }[] = [
+export const MOODS: { label: string; energy: number; emoji: string }[] = [
   { label: "drained", energy: 1, emoji: "🥱" },
-  { label: "tired", energy: 2, emoji: "😌" },
-  { label: "steady", energy: 3, emoji: "🙂" },
-  { label: "good", energy: 4, emoji: "😄" },
+  { label: "tired",   energy: 2, emoji: "😌" },
+  { label: "steady",  energy: 3, emoji: "🙂" },
+  { label: "good",    energy: 4, emoji: "😄" },
   { label: "buzzing", energy: 5, emoji: "🤩" },
 ];
+
+/** Shared mood-button grid. Used by LiveStateCard and the chat ephemeral picker. */
+export function MoodGrid({
+  picked,
+  onPick,
+}: {
+  picked?: string | null;
+  onPick: (label: string, energy: number) => void;
+}) {
+  return (
+    <div className="flex gap-1.5">
+      {MOODS.map((m) => {
+        const active = picked === m.label;
+        return (
+          <button
+            key={m.label}
+            type="button"
+            onClick={() => onPick(m.label, m.energy)}
+            title={m.label}
+            className="flex-1 flex flex-col items-center gap-1 py-2 rounded-xl border transition-all hover:scale-[1.04]"
+            style={
+              active
+                ? { background: "linear-gradient(135deg, var(--primary), #9333ea)", borderColor: "transparent", color: "#fff" }
+                : { borderColor: "var(--border)", background: "color-mix(in oklab, var(--background) 50%, transparent)" }
+            }
+          >
+            <span className="text-lg leading-none">{m.emoji}</span>
+            <span className={`text-[9px] font-semibold uppercase tracking-wide ${active ? "text-white/90" : "text-muted-foreground"}`}>
+              {m.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function LiveStateCard({
   liveState, today, onMood,
@@ -57,30 +93,7 @@ export function LiveStateCard({
       {/* Mood check-in */}
       <div className="mb-3">
         <p className="text-sm font-semibold mb-2">How are you feeling today?</p>
-        <div className="flex gap-1.5">
-          {MOODS.map((m) => {
-            const active = picked === m.label;
-            return (
-              <button
-                key={m.label}
-                type="button"
-                onClick={() => handlePick(m.label, m.energy)}
-                title={m.label}
-                className="flex-1 flex flex-col items-center gap-1 py-2 rounded-xl border transition-all hover:scale-[1.04]"
-                style={
-                  active
-                    ? { background: "linear-gradient(135deg, var(--primary), #9333ea)", borderColor: "transparent", color: "#fff" }
-                    : { borderColor: "var(--border)", background: "color-mix(in oklab, var(--background) 50%, transparent)" }
-                }
-              >
-                <span className="text-lg leading-none">{m.emoji}</span>
-                <span className={`text-[9px] font-semibold uppercase tracking-wide ${active ? "text-white/90" : "text-muted-foreground"}`}>
-                  {m.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        <MoodGrid picked={picked} onPick={handlePick} />
       </div>
 
       {/* Today's anchor */}

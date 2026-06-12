@@ -270,3 +270,65 @@ def test_error_turn_is_not_billed_even_with_captured_usage(mock_user_repo, patch
     agent.process_request("123", "anything")
 
     patched_deps["credits"].record_usage_and_bill.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# task 50 — capability launch (deterministic dispatch, router skipped)
+# ---------------------------------------------------------------------------
+
+def test_capability_launch_skips_router_and_dispatches(mock_user_repo, patched_deps):
+    """A known intent-kind capability id feeds a synthesized router output
+    straight into the dispatcher — no RouterAgent call — and emits
+    capability_launched (AC-7). Uses a temporary CAPABILITY_INTENTS entry so
+    the test remains valid even when no intent-kind capabilities exist in
+    production yet."""
+    import agentic_traveler.orchestrator.capabilities as cap_module
+
+    test_intent_map = {
+        "test_saga_cap": {
+            "intent": "TRIP",
+            "entities": {"booking_shaped": True},
+            "trip_directive": "unspecified",
+        }
+    }
+    mock_user_repo.get_user_by_id.return_value = {"user_name": "Alice"}
+    owner = _owner(patched_deps, "BookingInputSaga", "Found a flight. Add it?")
+
+    with patch.object(cap_module, "CAPABILITY_INTENTS", test_intent_map), \
+         patch("agentic_traveler.orchestrator.agent.CAPABILITY_INTENTS", test_intent_map), \
+         patch("agentic_traveler.orchestrator.agent.EventEmitter") as mock_ee:
+        agent = OrchestratorAgent(user_repo=mock_user_repo)
+        resp = agent.process_request_for_user(
+            "user-1", "I'd like to do the saga thing", capability="test_saga_cap",
+        )
+
+    # The RouterAgent LLM call is skipped entirely.
+    patched_deps["router"].return_value.classify.assert_not_called()
+    # The synthesized intent + entities reached the dispatcher unchanged.
+    select_args = patched_deps["dispatcher"].return_value.select.call_args.args
+    assert select_args[0] == "TRIP"
+    assert select_args[1].get("booking_shaped") is True
+    # The owning saga produced the reply.
+    owner.run.assert_called_once()
+    assert resp["action"] == "RESPONSE"
+    # capability_launched metric emitted once.
+    metric_payloads = [
+        c.args[1] for c in mock_ee.return_value.emit.call_args_list
+        if c.args and c.args[0] == "metric"
+    ]
+    assert any(
+        p.get("name") == "capability_launched" and p.get("capability") == "test_saga_cap"
+        for p in metric_payloads
+    )
+
+
+def test_capability_intents_map_matches_known_intent_kind_ids():
+    """Sync guard (spec §5): the backend trust-boundary map lists exactly the
+    intent-kind capability ids the frontend registry launches
+    (frontend/src/lib/capabilities.ts). Adding an intent-kind capability means
+    updating BOTH this map and the registry."""
+    from agentic_traveler.orchestrator.capabilities import CAPABILITY_INTENTS
+
+    # Currently empty: add_booking was changed to draft-kind (pre-fills composer).
+    # Update this set when a new intent-kind capability is added to the registry.
+    assert set(CAPABILITY_INTENTS) == set()

@@ -16,6 +16,11 @@ import TextareaAutosize from "react-textarea-autosize";
 
 import { useChat, type ChatMessage } from "@/hooks/useChat";
 import type { UiBlock, UiOption } from "@/hooks/useChatStream";
+import type { AvailabilityState } from "@/lib/capabilities";
+import { track } from "@/lib/metrics";
+import { CapabilitySheet } from "./CapabilitySheet";
+import { CapabilityChips } from "./CapabilityChips";
+import { MoodGrid } from "./LiveStateCard";
 import {
   SparklesIcon,
   ChatIcon,
@@ -424,12 +429,16 @@ export function ChatPanel({
   onCollapse,
   onExpand,
   expandedMode,
+  availability = { hasTrip: false },
 }: {
   onCollapse?: () => void;
   /** lg+ only: expand the chat over the full dashboard. Not shown on mobile. */
   onExpand?: () => void;
   /** When true the panel is already in expanded mode; toggle becomes a collapse. */
   expandedMode?: boolean;
+  /** Capability availability (trip presence/phase, telegram) for the ✨ launcher
+   *  and the empty-state chips (Task 50). */
+  availability?: AvailabilityState;
 }) {
   const {
     messages,
@@ -450,11 +459,27 @@ export function ChatPanel({
     search,
     jumpTo,
     jumpToPresent,
+    ephemeralPicker,
+    dismissEphemeral,
+    registerComposerSetter,
   } = useChat();
 
   const [isScrolledUp, setIsScrolledUp] = useState(false);
 
+  // ✨ capability launcher (Task 50).
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const openSheet = useCallback(() => {
+    track("capability_sheet_opened", { surface: "composer" });
+    setSheetOpen(true);
+  }, []);
+
   const [draft, setDraft] = useState("");
+
+  // Register setDraft with the chat context so useCapabilityLaunch can
+  // pre-fill the composer for `draft`-kind capabilities (Task 50).
+  useEffect(() => {
+    registerComposerSetter(setDraft);
+  }, [registerComposerSetter]);
   // Slot prompts the user has answered this session (id → chosen label), so the
   // tapped chips immediately render as answered before the next reply lands.
   const [answered, setAnswered] = useState<Map<number, string>>(() => new Map());
@@ -1049,8 +1074,15 @@ export function ChatPanel({
         )}
 
         {!loading && messages.length === 0 && !error && (
-          <div className="text-center text-sm text-muted-foreground py-8">
-            Say hi to your travel companion <span aria-hidden>👋</span>
+          <div className="py-8 space-y-4">
+            <div className="text-center text-sm text-muted-foreground">
+              Say hi to your travel companion <span aria-hidden>👋</span>
+            </div>
+            <CapabilityChips
+              context="empty_chat"
+              availability={availability}
+              onOpenSheet={openSheet}
+            />
           </div>
         )}
 
@@ -1140,6 +1172,18 @@ export function ChatPanel({
           </div>
         ) : null}
 
+        {/* Ephemeral mood picker (Task 50). Local-only; dismissed on selection or
+            when the sheet is re-opened. Disappears on page refresh by design. */}
+        {ephemeralPicker === "mood" && (
+          <MoodPickerCard
+            onPick={(label, energy) => {
+              void send(`Mood check-in: feeling ${label} today (energy ${energy}/5).`);
+              dismissEphemeral();
+            }}
+            onDismiss={dismissEphemeral}
+          />
+        )}
+
         <div ref={bottomAnchorRef} />
         </div>{/* end scroll area */}
       </div>{/* end relative wrapper */}
@@ -1166,10 +1210,21 @@ export function ChatPanel({
         >
           <button
             type="button"
+            onClick={openSheet}
+            disabled={pendingReply}
+            title="What can I help with?"
+            aria-label="What can I help with?"
+            className="w-8 h-8 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-foreground/5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <SparklesIcon width={16} height={16} />
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowEmoji((v) => !v)}
             title="Insert emoji"
             aria-label="Insert emoji"
-            className="w-8 h-8 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-foreground/5 transition"
+            className="hidden lg:grid w-8 h-8 rounded-lg place-items-center text-muted-foreground hover:text-primary hover:bg-foreground/5 transition"
           >
             <SmileIcon width={16} height={16} />
           </button>
@@ -1218,6 +1273,12 @@ export function ChatPanel({
           onResend={() => handleResend(menu.msg)}
         />
       )}
+
+      <CapabilitySheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        availability={availability}
+      />
     </aside>
   );
 }
@@ -1313,6 +1374,35 @@ function SearchIcon(props: React.SVGProps<SVGSVGElement>) {
       <circle cx="11" cy="11" r="7" />
       <path d="m20 20-3.5-3.5" />
     </svg>
+  );
+}
+
+// ── Ephemeral mood picker (Task 50) ──────────────────────────────────────────
+// Reuses MoodGrid from LiveStateCard so both surfaces look identical.
+function MoodPickerCard({
+  onPick,
+  onDismiss,
+}: {
+  onPick: (label: string, energy: number) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      className="mx-auto mb-3 w-full max-w-sm rounded-2xl border border-border p-4"
+      style={{ background: "color-mix(in oklab, var(--foreground) 3%, transparent)" }}
+      role="group"
+      aria-label="Mood check-in"
+    >
+      <p className="mb-2 text-sm font-semibold">How are you feeling today?</p>
+      <MoodGrid onPick={onPick} />
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="mt-2 block w-full text-center text-[11px] text-muted-foreground hover:text-foreground transition"
+      >
+        Dismiss
+      </button>
+    </div>
   );
 }
 

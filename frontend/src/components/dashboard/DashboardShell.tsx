@@ -11,6 +11,8 @@ import { TripLibrary } from "./TripLibrary";
 import { TripDetailPanel } from "./TripDetailPanel";
 import dynamic from "next/dynamic";
 import { ChatStripIcons, ChatPanel } from "./ChatPanel";
+import { CapabilityChips } from "./CapabilityChips";
+import type { AvailabilityState } from "@/lib/capabilities";
 
 const TripMap = dynamic(() => import("./TripMap"), { ssr: false });
 import { SparklesIcon, LibraryIcon } from "./DashIcons";
@@ -40,7 +42,13 @@ function MapLegend() {
 }
 
 /* ── Empty-trip onboarding canvas (frontend_dashboard_design.md §7) ── */
-function EmptyTripCanvas({ onStart }: { onStart: () => void }) {
+function EmptyTripCanvas({
+  availability,
+  onLaunched,
+}: {
+  availability: AvailabilityState;
+  onLaunched?: () => void;
+}) {
   const cards = [
     { title: "Discover", body: "Find where to go from your travel DNA." },
     { title: "Plan", body: "Shape a day-by-day trip, your pace." },
@@ -66,14 +74,9 @@ function EmptyTripCanvas({ onStart }: { onStart: () => void }) {
           </div>
         ))}
       </div>
-      <button
-        type="button"
-        onClick={onStart}
-        className="mt-7 px-5 py-2.5 rounded-full text-white font-bold text-sm transition hover:scale-[1.03]"
-        style={{ background: "linear-gradient(135deg, var(--primary), #9333ea)" }}
-      >
-        Plan your first trip →
-      </button>
+      <div className="mt-7">
+        <CapabilityChips context="no_trip" availability={availability} onLaunched={onLaunched} />
+      </div>
     </div>
   );
 }
@@ -110,12 +113,13 @@ interface ShellViewProps {
   theme: "light" | "dark";
   userProfile: UserProfile;
   sendMessage: (text: string) => void;
+  availability: AvailabilityState;
 }
 
 /* ── Desktop layout ── */
 function DesktopShell({
   trip, days, todayN, summaries, activeTripId, setActiveTripId,
-  theme, userProfile, sendMessage,
+  theme, userProfile, sendMessage, availability,
 }: ShellViewProps) {
   const [activeDayN, setActiveDayN] = useState(todayN);
   const [chatStyle, setChatStyle] = useState<"strip" | "drawer">("strip");
@@ -190,7 +194,10 @@ function DesktopShell({
                       onSendMessage={sendMessage}
                     />
                   ) : (
-                    <EmptyTripCanvas onStart={() => sendMessage("I'd like to plan a trip.")} />
+                    <EmptyTripCanvas
+                      availability={availability}
+                      onLaunched={() => setChatStyle("drawer")}
+                    />
                   )}
                 </div>
               </div>
@@ -210,6 +217,7 @@ function DesktopShell({
                 <ChatPanel
                   onCollapse={() => setChatStyle("strip")}
                   onExpand={() => setChatExpanded(true)}
+                  availability={availability}
                 />
               </div>
             )}
@@ -225,6 +233,7 @@ function DesktopShell({
                 onCollapse={() => setChatExpanded(false)}
                 onExpand={() => setChatExpanded(false)}
                 expandedMode
+                availability={availability}
               />
             </div>
           </div>
@@ -237,7 +246,7 @@ function DesktopShell({
 /* ── Mobile layout (3-pane swipe) ── */
 function MobileShell({
   trip, days, todayN, summaries, activeTripId, setActiveTripId,
-  theme, userProfile, sendMessage,
+  theme, userProfile, sendMessage, availability,
 }: ShellViewProps) {
   const [pane, setPane] = useState(1); // 0=library, 1=trip, 2=map
   const [chatOpen, setChatOpen] = useState(false);
@@ -327,7 +336,10 @@ function MobileShell({
                 onSendMessage={sendMessage}
               />
             ) : (
-              <EmptyTripCanvas onStart={() => { sendMessage("I'd like to plan a trip."); setChatOpen(true); }} />
+              <EmptyTripCanvas
+                availability={availability}
+                onLaunched={() => setChatOpen(true)}
+              />
             )}
           </div>
 
@@ -370,7 +382,7 @@ function MobileShell({
 
       {chatOpen && (
         <div className="absolute inset-0 z-50 flex flex-col animate-fade-up" style={{ background: "var(--background)" }}>
-          <ChatPanel onCollapse={() => setChatOpen(false)} />
+          <ChatPanel onCollapse={() => setChatOpen(false)} availability={availability} />
         </div>
       )}
     </div>
@@ -390,6 +402,15 @@ export function DashboardShell() {
   }
 
   const { trip, days, todayN, loading } = useTrip(activeTripId);
+  // Capability availability (Task 50): read from already-loaded client state —
+  // no extra fetch (spec §5). telegram_linked isn't exposed by the profile yet,
+  // so link_telegram stays visible (E6).
+  const availability: AvailabilityState = {
+    hasTrip: !!trip,
+    tripPhase: trip?.phase,
+    // Shown in the sheet group labels: "For your trip · Kyoto" (Task 50).
+    tripName: trip?.title ?? undefined,
+  };
 
   // Send a message into the chat thread (idea chips, mood, journal prompts,
   // "plan a trip" CTAs). Fire-and-forget: the persisted turn + reply surface
@@ -464,7 +485,7 @@ export function DashboardShell() {
 
   const viewProps: ShellViewProps = {
     trip, days, todayN, loading, summaries, activeTripId, setActiveTripId,
-    theme, userProfile, sendMessage,
+    theme, userProfile, sendMessage, availability,
   };
 
   return (

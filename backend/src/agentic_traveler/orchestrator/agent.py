@@ -40,6 +40,7 @@ from agentic_traveler.analytics import metrics_tracker
 from agentic_traveler.analytics.judge import maybe_judge_turn
 from agentic_traveler.orchestrator.client_factory import begin_usage_capture, get_client
 from agentic_traveler.core.budget_policy import resolve as budget_resolve
+from agentic_traveler.orchestrator.capabilities import CAPABILITY_INTENTS
 from agentic_traveler.core.observability import (
     traceable,
     attach_run_metadata,
@@ -168,6 +169,7 @@ class OrchestratorAgent:
         status_callback: Optional[Callable[[dict], None]] = None,
         delta_callback: Optional[Callable[[dict], None]] = None,
         selection: Optional[Dict[str, Any]] = None,
+        capability: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Web entry point. The user is already resolved by Supabase JWT → users.id;
@@ -201,6 +203,7 @@ class OrchestratorAgent:
             message_text=message_text,
             status_callback=status_callback,
             delta_callback=delta_callback,
+            capability=capability,
         )
 
     def _process_user_doc(
@@ -211,6 +214,7 @@ class OrchestratorAgent:
         message_text: str,
         status_callback: Optional[Callable[[dict], None]] = None,
         delta_callback: Optional[Callable[[dict], None]] = None,
+        capability: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Shared post-lookup pipeline. Used by both the Telegram and web entry
@@ -264,46 +268,71 @@ class OrchestratorAgent:
         extractor_ms: float = 0.0
         prefetched_slots: Optional[Dict[str, Any]] = None
 
-        def _run_router() -> tuple[Dict[str, Any], float]:
-            t0 = time.time()
-            result = self._router_agent.classify(
-                message=message_text,
-                user_doc=user_doc,
-                user_id=user_id,
-                telegram_user_id=telegram_user_id,
-                user_name=user_name,
-                current_time=current_time,
-                conversation_context=router_context,
-                token_records=token_records,
+        # Task 50: a capability launch maps deterministically to the router output
+        # that makes its owning saga win, so we skip the RouterAgent LLM call and
+        # feed the synthesized result into the same downstream dispatch. Unknown
+        # ids never reach here (rejected 422 at the route). The label arrives as
+        # `message_text` and persists like any user message.
+        cap_intent = CAPABILITY_INTENTS.get(capability) if capability else None
+        if cap_intent is not None:
+            router_result = {
+                "intent": cap_intent["intent"],
+                "entities": dict(cap_intent.get("entities", {})),
+                "trip_directive": cap_intent.get("trip_directive", "unspecified"),
+                "response": None,
+                "preference_raw": None,
+            }
+            events.emit("metric", {
+                "name": "capability_launched",
+                "capability": capability,
+                "kind": "intent",
+                "surface": "web",
+            })
+            logger.info(
+                "Capability launch: %s → intent=%s (router skipped)",
+                capability, router_result["intent"],
             )
-            return result, (time.time() - t0) * 1000
+        else:
+            def _run_router() -> tuple[Dict[str, Any], float]:
+                t0 = time.time()
+                result = self._router_agent.classify(
+                    message=message_text,
+                    user_doc=user_doc,
+                    user_id=user_id,
+                    telegram_user_id=telegram_user_id,
+                    user_name=user_name,
+                    current_time=current_time,
+                    conversation_context=router_context,
+                    token_records=token_records,
+                )
+                return result, (time.time() - t0) * 1000
 
-        def _run_extractor() -> tuple[Dict[str, Any], float]:
-            from agentic_traveler.orchestrator.sagas.slot_extractor import extract_trip_slots
-            t0 = time.time()
-            result = extract_trip_slots(self._client, message_text)
-            return result, (time.time() - t0) * 1000
+            def _run_extractor() -> tuple[Dict[str, Any], float]:
+                from agentic_traveler.orchestrator.sagas.slot_extractor import extract_trip_slots
+                t0 = time.time()
+                result = extract_trip_slots(self._client, message_text)
+                return result, (time.time() - t0) * 1000
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _pool:
-            router_future = _pool.submit(ctx.run, _run_router)
-            # Only run extractor when there's actual text to extract from (E8: no-text turns).
-            extractor_future = (
-                _pool.submit(ctx.run, _run_extractor)
-                if message_text.strip() else None
-            )
-            router_result, router_ms = router_future.result()
-            if extractor_future is not None:
-                try:
-                    prefetched_slots, extractor_ms = extractor_future.result(timeout=20)
-                except Exception:
-                    logger.warning(
-                        "Parallel slot extraction failed (E3); saga will re-run extraction.",
-                        exc_info=True,
-                    )
-                    prefetched_slots = None
-                    extractor_ms = 0.0
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _pool:
+                router_future = _pool.submit(ctx.run, _run_router)
+                # Only run extractor when there's actual text to extract from (E8: no-text turns).
+                extractor_future = (
+                    _pool.submit(ctx.run, _run_extractor)
+                    if message_text.strip() else None
+                )
+                router_result, router_ms = router_future.result()
+                if extractor_future is not None:
+                    try:
+                        prefetched_slots, extractor_ms = extractor_future.result(timeout=20)
+                    except Exception:
+                        logger.warning(
+                            "Parallel slot extraction failed (E3); saga will re-run extraction.",
+                            exc_info=True,
+                        )
+                        prefetched_slots = None
+                        extractor_ms = 0.0
 
-        logger.info("⏱ Router: %.0fms | Extractor: %.0fms (parallel)", router_ms, extractor_ms)
+            logger.info("⏱ Router: %.0fms | Extractor: %.0fms (parallel)", router_ms, extractor_ms)
 
         # Router token usage is captured by the gemini_generate funnel (task 51).
         intent = router_result.get("intent", "CHAT")

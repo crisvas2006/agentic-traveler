@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 
 from agentic_traveler.core.sanitize import sanitize_user_input
 from agentic_traveler.interfaces.dependencies import WebUserCtx, verify_supabase_jwt
+from agentic_traveler.orchestrator.capabilities import CAPABILITY_INTENTS
 from agentic_traveler.interfaces.schemas import (
     ChatHistoryResponse,
     ChatMessageOut,
@@ -82,6 +83,12 @@ async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_s
     body = sanitize_user_input(payload.body)
     if not body:
         raise HTTPException(status_code=400, detail="Empty message")
+    # Task 50: a capability launch carries a backend capability id. Validate it
+    # against our OWN map (trust boundary — the client registry is never trusted)
+    # BEFORE any persistence, so an unknown id is rejected with no side effects.
+    capability = payload.capability
+    if capability is not None and capability not in CAPABILITY_INTENTS:
+        raise HTTPException(status_code=422, detail=f"Unknown capability: {capability}")
     selection = payload.selection.model_dump() if payload.selection else None
 
     repo = _get_chat_repo()
@@ -100,6 +107,7 @@ async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_s
             user_id=ctx.user_id,
             message_text=body,
             selection=selection,
+            capability=capability,
         )
     except Exception:
         logger.exception("Orchestrator failed for web user %s", ctx.user_id)

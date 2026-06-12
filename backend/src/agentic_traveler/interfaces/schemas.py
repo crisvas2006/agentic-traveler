@@ -40,6 +40,12 @@ class ChatSendRequest(BaseModel):
     # is the human-readable chosen label (shown in the bubble) and `selection`
     # carries the structured answer applied deterministically (Task 43).
     selection: SelectionIn | None = None
+    # When present, the message is a tapped capability launch (Task 50): `body` is
+    # the human-readable label (shown in the bubble) and `capability` is a backend
+    # capability id. The orchestrator maps it directly to its saga, skipping the
+    # RouterAgent. Re-validated server-side against CAPABILITY_INTENTS (the client
+    # registry is never trusted); an unknown id is rejected 422.
+    capability: str | None = Field(default=None, max_length=64)
 
 
 class ChatMessageOut(BaseModel):

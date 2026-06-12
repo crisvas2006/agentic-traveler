@@ -4,6 +4,7 @@ CountryIntelSaga — Background fetcher for country safety, visa, health, etc.
 
 import asyncio
 import logging
+import threading
 from typing import Any, Optional, Tuple
 
 from agentic_traveler.analytics import metrics_tracker
@@ -80,16 +81,16 @@ class CountryIntelSaga(BaseSaga):
             confirmed = [d for d in destinations if d.get("status") == "confirmed" and d.get("iso_country")]
             if confirmed:
                 logger.info("CountryIntelSaga (owner) triggering refresh for %s", confirmed[0]["name"])
-                # We do this asynchronously so we can return a response to the user immediately
-                asyncio.create_task(
-                    self._run_fetch_async(
-                        trip["id"],
-                        user_doc["id"],
-                        confirmed[0]["iso_country"],
-                        confirmed[0]["name"],
-                        month_name=self._get_trip_month(trip),
-                    )
+                # Fire-and-forget from a sync worker thread: spawn a daemon thread with
+                # its own event loop so asyncio.create_task isn't called on a non-loop thread.
+                coro = self._run_fetch_async(
+                    trip["id"],
+                    user_doc["id"],
+                    confirmed[0]["iso_country"],
+                    confirmed[0]["name"],
+                    month_name=self._get_trip_month(trip),
                 )
+                threading.Thread(target=asyncio.run, args=(coro,), daemon=True).start()
                 
                 return SagaResult(text=f"I'll check the latest facts for {confirmed[0]['name']}. The intel strip will update shortly.")
         
@@ -120,15 +121,14 @@ class CountryIntelSaga(BaseSaga):
         # Run async fetch
         for dest in confirmed:
             logger.info("CountryIntelSaga (listener) queueing fetch for %s", dest["name"])
-            asyncio.create_task(
-                self._run_fetch_async(
-                    trip["id"],
-                    user_doc["id"],
-                    dest["iso_country"],
-                    dest["name"],
-                    month_name,
-                )
+            coro = self._run_fetch_async(
+                trip["id"],
+                user_doc["id"],
+                dest["iso_country"],
+                dest["name"],
+                month_name,
             )
+            threading.Thread(target=asyncio.run, args=(coro,), daemon=True).start()
 
     async def _run_fetch_async(self, trip_id: str, user_id: str, iso_country: str, country_name: str, month_name: str):
         """Runs the fetch synchronously inside the executor."""

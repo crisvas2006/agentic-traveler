@@ -62,6 +62,21 @@ function useChatInternal() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingNewer, setLoadingNewer] = useState(false);
   const [hasMoreNewer, setHasMoreNewer] = useState(false);
+
+  // Ephemeral mood picker: local-only, gone on refresh (Task 50).
+  const [ephemeralPicker, setEphemeralPicker] = useState<"mood" | null>(null);
+  const injectMoodPicker = useCallback(() => setEphemeralPicker("mood"), []);
+  const dismissEphemeral = useCallback(() => setEphemeralPicker(null), []);
+
+  // Composer draft setter: ChatPanel registers its setDraft here so that
+  // capability launches with kind="draft" can pre-fill the textarea from outside.
+  const composerDraftSetterRef = useRef<((text: string) => void) | null>(null);
+  const registerComposerSetter = useCallback((fn: (text: string) => void) => {
+    composerDraftSetterRef.current = fn;
+  }, []);
+  const setComposerDraft = useCallback((text: string) => {
+    composerDraftSetterRef.current?.(text);
+  }, []);
   const [pendingReply, setPendingReply] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -375,6 +390,71 @@ function useChatInternal() {
     [],
   );
 
+  // ── send a tapped capability launch (Task 50) ─────────────────────────────
+  // Intent-kind launches go through the non-streaming /chat/send with a
+  // `capability` id: the backend maps it straight to its saga (no RouterAgent).
+  // The `label` shows as the user bubble; the reply carries any next-prompt ui.
+  // Mirrors sendSelection (same optimistic + reconcile shape) — see §10.2 of
+  // task_50 for the noted DRY opportunity between the two.
+  const sendCapability = useCallback(
+    async (capability: string, label: string): Promise<void> => {
+      if (inflightRef.current) return;
+      inflightRef.current = true;
+      setPendingReply(true);
+      setError(null);
+
+      if (hasMoreNewerRef.current) {
+        await jumpToPresent();
+      }
+
+      const tempId = tempIdRef.current--;
+      const createdAt = new Date().toISOString();
+      setMessages((prev) => [
+        ...prev,
+        { id: tempId, sender_type: "user", body: label, source: "web", created_at: createdAt },
+      ]);
+
+      try {
+        const resp = await fetch("/api/chat/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body: label, capability }),
+        });
+        if (!resp.ok) throw new Error("send failed");
+        const data = (await resp.json()) as {
+          user_message: ChatMessage;
+          reply: ChatMessage;
+        };
+        const tid = data.user_message?.thread_id ?? null;
+        if (tid) setThreadId((cur) => cur ?? tid);
+        if (data.user_message?.id != null) finalizedIdsRef.current.add(data.user_message.id);
+        if (data.reply?.id != null) finalizedIdsRef.current.add(data.reply.id);
+
+        setMessages((prev) => {
+          const without = prev.filter(
+            (m) =>
+              m.id !== tempId &&
+              m.id !== data.user_message?.id &&
+              m.id !== data.reply?.id,
+          );
+          const out = [...without];
+          if (data.user_message) out.push(data.user_message);
+          if (data.reply) out.push(data.reply);
+          return out;
+        });
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, metadata: { error: true } } : m)),
+        );
+        setError("Couldn't send. Please try again.");
+      } finally {
+        inflightRef.current = false;
+        setPendingReply(false);
+      }
+    },
+    [],
+  );
+
   // ── retry a failed message ──────────────────────────────────────────────
   const retry = useCallback(async (id: number): Promise<void> => {
     const failed = messagesRef.current.find((m) => m.id === id);
@@ -436,11 +516,18 @@ function useChatInternal() {
     streaming: stream.streaming,
     send,
     sendSelection,
+    sendCapability,
     retry,
     loadOlder,
     loadNewer,
     search,
     jumpTo,
     jumpToPresent,
+    // Task 50 capability surface
+    ephemeralPicker,
+    injectMoodPicker,
+    dismissEphemeral,
+    registerComposerSetter,
+    setComposerDraft,
   };
 }

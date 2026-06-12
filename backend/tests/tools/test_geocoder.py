@@ -1,6 +1,4 @@
 from unittest import mock
-import pytest
-import httpx
 from httpx import Response
 from agentic_traveler.tools.geocoder import geocode_destination
 

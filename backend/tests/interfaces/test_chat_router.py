@@ -113,3 +113,43 @@ def test_send_selection_passes_through_and_persists_label(client):
     assert resp.json()["user_message"]["body"] == "Slow — room to breathe"
     # The next prompt's chips ride back on the reply.
     assert resp.json()["reply"]["metadata"]["ui"]["slot"] == "structure"
+
+
+# ── Task 50: capability launch ───────────────────────────────────────────────
+
+
+def test_send_capability_passes_through_to_orchestrator(client):
+    repo = _fake_repo()
+    orch = _orch({"text": "Sure!", "action": "RESPONSE", "slot_request": None})
+    # Inject a temporary intent-kind capability for the test (production map
+    # may be empty when no intent-kind capabilities exist).
+    import agentic_traveler.interfaces.routers.chat as chat_router_mod
+    test_map = {"test_cap": {"intent": "TRIP", "entities": {}}}
+    with patch.object(chat_router, "_get_chat_repo", return_value=repo), \
+         patch.object(chat_router, "_get_orchestrator", return_value=orch), \
+         patch.object(chat_router_mod, "CAPABILITY_INTENTS", test_map):
+        resp = client.post("/chat/send", json={
+            "body": "Do the thing",
+            "capability": "test_cap",
+        })
+    assert resp.status_code == 200
+    # The known capability id reached the orchestrator.
+    kwargs = orch.process_request_for_user.call_args.kwargs
+    assert kwargs["capability"] == "test_cap"
+    # The label persists as the user-message body (shown in the bubble).
+    assert resp.json()["user_message"]["body"] == "Do the thing"
+
+
+def test_send_unknown_capability_rejected_422_no_side_effects(client):
+    repo = _fake_repo()
+    orch = _orch({"text": "x", "action": "RESPONSE", "slot_request": None})
+    with patch.object(chat_router, "_get_chat_repo", return_value=repo), \
+         patch.object(chat_router, "_get_orchestrator", return_value=orch):
+        resp = client.post("/chat/send", json={
+            "body": "I'd like to add a booking",
+            "capability": "nonexistent_capability",
+        })
+    # Rejected before any persistence (AC-7 / E1): nothing saved, no orchestrator run.
+    assert resp.status_code == 422
+    repo.append_user_message.assert_not_called()
+    orch.process_request_for_user.assert_not_called()

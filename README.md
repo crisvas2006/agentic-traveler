@@ -375,6 +375,44 @@ The dashboard's trip view is fully live (no mock data on the runtime path):
   the hand-coded Kyoto trip now lives in `lib/dashboard-fixtures.ts` (tests +
   the map placeholder only), not the runtime data path.
 
+#### Capability surface (Task 50)
+
+A single capability **registry** makes everything the product can do visible and
+one-tap launchable, instead of features being discoverable only by guessing the
+right thing to type.
+
+- **One registry, many surfaces.** `frontend/src/lib/capabilities.ts` is the sole
+  source of truth — each entry has an id, name, icon, one-liner, a 2–3-sentence
+  "how it works", a journey-stage `group`, a `launch`, optional availability/hide
+  rules, and an optional `example`. It feeds the ✨ launcher sheet, the contextual
+  chips, and (Task 53) the in-app `/guide` manual. Copy and launch behavior are
+  never duplicated per surface.
+- **✨ launcher sheet** (`CapabilitySheet`) opens from the chat composer: one
+  grouped bottom sheet with every available capability visible (group headers +
+  rows), an inline "how it works" expand per row, and disabled rows that show
+  their reason (e.g. "Needs an active trip"). A "See everything →" footer links to
+  the manual.
+- **Contextual chips** (`CapabilityChips`) appear in exactly two moments — the
+  empty chat state and the no-trip dashboard — showing ≤3 availability-filtered
+  suggestions from the same registry.
+- **Launch kinds** (`useCapabilityLaunch`):
+  - `message` → sent through the normal chat path as if typed (persists as a user
+    bubble).
+  - `intent` → `POST /chat/send { body, capability }`; the orchestrator maps the
+    id straight to its saga via `CAPABILITY_INTENTS`
+    (`orchestrator/capabilities.py`), **skipping the RouterAgent LLM call**. The id
+    is re-validated server-side (the client registry is never trusted) — an unknown
+    id is rejected `422` with no side effects.
+  - `link` → client-side navigation (e.g. `/settings#telegram`); no chat message.
+- **To add a capability**: add one object to `CAPABILITIES` in `capabilities.ts`
+  (pick a `group`, `icon` lucide name, `launch`, and — if it should only show in
+  some states — an `availability` rule). For an `intent`-kind launch, also add the
+  id to `CAPABILITY_INTENTS` in the backend (a test guards the two stay in sync).
+- **Metrics**: `capability_sheet_opened` and `capability_launched{id,kind,surface}`
+  land in `analytics_events`. Message/link launches and sheet-opens emit from the
+  client via `POST /metrics/event` (allowlisted, JWT-auth'd); intent launches emit
+  server-side — one emitter per kind, no double counting.
+
 #### Current Model Stack
 
 The system uses a tiered model approach to balance reasoning quality and cost:

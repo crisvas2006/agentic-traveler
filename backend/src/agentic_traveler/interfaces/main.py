@@ -15,6 +15,7 @@ from agentic_traveler.analytics import metrics_tracker  # noqa: E402
 from agentic_traveler.core.logging_config import setup_logging  # noqa: E402
 from agentic_traveler.interfaces.routers.admin import router as admin_router  # noqa: E402
 from agentic_traveler.interfaces.routers.chat import router as chat_router  # noqa: E402
+from agentic_traveler.interfaces.routers.metrics import router as metrics_router  # noqa: E402
 from agentic_traveler.interfaces.routers.tally import router as tally_router  # noqa: E402
 from agentic_traveler.interfaces.routers.telegram import router as telegram_router  # noqa: E402
 from agentic_traveler.interfaces.routers.trips import router as trips_router  # noqa: E402
@@ -61,6 +62,7 @@ app.include_router(telegram_router, tags=["Telegram"])
 app.include_router(tally_router, tags=["Tally"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin"])
 app.include_router(chat_router)
+app.include_router(metrics_router)
 app.include_router(trips_router)
 
 @app.get("/health", tags=["System"])
