@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useState, useRef, useEffect } from "react";
+import { useCallback, useState, useRef, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useUserProfile, type UserProfile } from "@/hooks/useUserProfile";
 import { useTrip, useTripList } from "@/hooks/useTrip";
-import { ChatProvider } from "@/hooks/useChat";
+import { ChatProvider, useChat } from "@/hooks/useChat";
 import type { Trip, TripDay, TripSummary } from "@/lib/dashboard-data";
 import { WelcomeGrantModal } from "./WelcomeGrantModal";
 import { TopNav } from "./TopNav";
@@ -12,11 +13,68 @@ import { TripDetailPanel } from "./TripDetailPanel";
 import dynamic from "next/dynamic";
 import { ChatStripIcons, ChatPanel } from "./ChatPanel";
 import { CapabilityChips } from "./CapabilityChips";
+import { CAPABILITIES } from "@/lib/capabilities";
 import type { AvailabilityState } from "@/lib/capabilities";
 
 const TripMap = dynamic(() => import("./TripMap"), { ssr: false });
 import { SparklesIcon, LibraryIcon } from "./DashIcons";
 import { AvatarButton, ProfileDropdown } from "./ProfileDropdown";
+
+// ── ?launch=<id> one-shot consumer (Task 53 / spec §7 Step 3) ─────────────────
+// Reads the search param, fires the matching capability send, then clears the
+// URL with router.replace. A ref guards against double-fire on re-render.
+// Must be inside ChatProvider so it can call useChat() for setComposerDraft.
+// Wrapped in Suspense because useSearchParams suspends in Next.js App Router.
+function LaunchFromParamInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { send, sendCapability, setComposerDraft, injectMoodPicker, openChatPanel } = useChat();
+  const fired = useRef(false);
+
+  useEffect(() => {
+    const id = searchParams.get("launch");
+    if (!id || fired.current) return;
+    fired.current = true;
+
+    const cap = CAPABILITIES.find((c) => c.id === id);
+    // Always clear the param first — unknown id, link-kind, and all others.
+    router.replace("/dashboard");
+
+    if (!cap) return; // spec E5: unknown id → clear param, no send
+
+    if (cap.launch.kind === "link") {
+      router.push(cap.launch.href); // spec E8: link-kind navigates directly
+      return;
+    }
+
+    // Defer one tick: sibling shell useEffect hooks (registerOpenChatPanel,
+    // registerComposerSetter) run after LaunchFromParamInner in React's
+    // depth-first effect order, so we must yield before calling into them.
+    setTimeout(() => {
+      if (cap.launch.kind === "message") {
+        void send(cap.launch.text);
+      } else if (cap.launch.kind === "intent") {
+        void sendCapability(cap.id, cap.launch.label);
+      } else if (cap.launch.kind === "draft") {
+        setComposerDraft(cap.launch.text);
+      } else if (cap.launch.kind === "ephemeral_mood") {
+        injectMoodPicker();
+      }
+      openChatPanel();
+    }, 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally runs once on mount only
+
+  return null;
+}
+
+function LaunchFromParam() {
+  return (
+    <Suspense>
+      <LaunchFromParamInner />
+    </Suspense>
+  );
+}
 
 /* ── Map legend ── */
 function MapLegend() {
@@ -124,6 +182,11 @@ function DesktopShell({
   const [activeDayN, setActiveDayN] = useState(todayN);
   const [chatStyle, setChatStyle] = useState<"strip" | "drawer">("strip");
   const [chatExpanded, setChatExpanded] = useState(false);
+
+  const { registerOpenChatPanel } = useChat();
+  useEffect(() => {
+    registerOpenChatPanel("desktop", () => setChatStyle("drawer"));
+  }, [registerOpenChatPanel]);
 
   // Reset to the focused trip's "today" when the trip changes. React's
   // adjust-state-during-render pattern (no effect): converges immediately.
@@ -251,6 +314,11 @@ function MobileShell({
   const [pane, setPane] = useState(1); // 0=library, 1=trip, 2=map
   const [chatOpen, setChatOpen] = useState(false);
   const [activeDayN, setActiveDayN] = useState(todayN);
+
+  const { registerOpenChatPanel } = useChat();
+  useEffect(() => {
+    registerOpenChatPanel("mobile", () => setChatOpen(true));
+  }, [registerOpenChatPanel]);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const avatarBtnRef = useRef<HTMLDivElement>(null);
@@ -490,6 +558,9 @@ export function DashboardShell() {
 
   return (
     <ChatProvider>
+      {/* One-shot consumer for /guide → /dashboard?launch=<id> handoff (Task 53). */}
+      <LaunchFromParam />
+
       <Backdrop theme={theme} />
 
       <div className="relative z-10 hidden lg:block h-full">

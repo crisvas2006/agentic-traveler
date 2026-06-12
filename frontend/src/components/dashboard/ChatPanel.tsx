@@ -594,6 +594,13 @@ export function ChatPanel({
     if (nearBottom) bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [streamingText, streamStatus]);
 
+  // Scroll to bottom when the ephemeral picker is injected — it renders after
+  // all messages so neither the initial-scroll nor the streaming-scroll fires.
+  useEffect(() => {
+    if (!ephemeralPicker) return;
+    bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [ephemeralPicker]);
+
   // ── jump-to-message scroll (search result tap) ──────────────────────────
   // Centers the target row in the scroll viewport once it lands in the DOM.
   // Runs after every messages commit; if the row isn't mounted yet (jumpTo's

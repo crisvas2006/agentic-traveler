@@ -590,7 +590,7 @@ function CreditsSection({
   const [topUpOpen, setTopUpOpen] = useState(false);
 
   return (
-    <section className="aletheia-card p-7">
+    <section id="credits" className="aletheia-card p-7 scroll-mt-20">
       <SectionHeader
         icon={CoinIcon}
         eyebrow="02 · Credits"
@@ -756,7 +756,7 @@ function SecuritySection({
   };
 
   return (
-    <section className="aletheia-card p-7">
+    <section id="telegram" className="aletheia-card p-7 scroll-mt-20">
       <SectionHeader
         icon={ShieldIcon}
         eyebrow="04 · Security"
@@ -938,18 +938,67 @@ function useThemeMode() {
   return { isDark, toggle };
 }
 
+const REPLY_LENGTH_OPTIONS = [
+  { value: "terse" as const, label: "Terse", description: "Short, direct" },
+  { value: "default" as const, label: "Default", description: "Balanced" },
+  { value: "verbose" as const, label: "Verbose", description: "Detailed" },
+];
+
+function useReplyLength() {
+  const [value, setValue] = useState<"terse" | "default" | "verbose">(() => {
+    if (typeof window === "undefined") return "default";
+    return (localStorage.getItem("aletheia_reply_length") as "terse" | "default" | "verbose") ?? "default";
+  });
+  const set = (v: "terse" | "default" | "verbose") => {
+    localStorage.setItem("aletheia_reply_length", v);
+    setValue(v);
+  };
+  return { value, set };
+}
+
 function MiscSection() {
   const { isDark, toggle } = useThemeMode();
+  const { value: replyLength, set: setReplyLength } = useReplyLength();
 
   return (
-    <section className="aletheia-card p-7">
+    <section id="reply-length" className="aletheia-card p-7 scroll-mt-20">
       <SectionHeader
         icon={CogIcon}
         eyebrow="05 · Preferences"
         title="App preferences"
-        subtitle="Theme and language settings."
+        subtitle="Theme, language and reply length."
       />
       <div>
+        {/* Reply length */}
+        <FieldRow
+          label="Reply length"
+          action={
+            <div
+              className="flex rounded-lg border border-border p-0.5 gap-0.5"
+              style={{ background: "color-mix(in oklab, var(--foreground) 4%, transparent)" }}
+            >
+              {REPLY_LENGTH_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setReplyLength(opt.value)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    replyLength === opt.value
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          }
+        >
+          <span>
+            {REPLY_LENGTH_OPTIONS.find((o) => o.value === replyLength)?.description ?? "Balanced"}
+          </span>
+        </FieldRow>
+
         {/* Theme */}
         <FieldRow
           label="Theme"
@@ -1263,6 +1312,22 @@ export function AccountSettings({ botUsername }: { botUsername: string }) {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Scroll to the hash anchor once data is loaded (hash links from capability guide).
+  // Uses window.scrollTo with a calculated offset so elements near the bottom of
+  // the page scroll correctly even when there's not enough content below them for
+  // scrollIntoView({ block: "start" }) to work.
+  useEffect(() => {
+    if (data.loading) return;
+    const hash = window.location.hash;
+    if (!hash) return;
+    setTimeout(() => {
+      const el = document.querySelector(hash) as HTMLElement | null;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top + window.scrollY - 80;
+      window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    }, 100);
+  }, [data.loading]);
 
   // Ephemeral polling to detect successful Telegram linking (starts only when redirected)
   useEffect(() => {

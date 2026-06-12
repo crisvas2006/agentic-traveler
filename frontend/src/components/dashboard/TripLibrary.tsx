@@ -12,17 +12,9 @@ function TripCard({ trip, active, onClick }: { trip: TripSummary; active: boolea
       onClick={onClick}
       className={`group w-full text-left rounded-2xl border transition-all overflow-hidden ${
         active
-          ? "border-transparent shadow-lg"
-          : "border-border hover:border-primary/30 hover:bg-foreground/[0.02]"
+          ? "border-transparent shadow-lg bg-[color-mix(in_oklab,var(--primary)_10%,var(--background))] shadow-[0_8px_24px_-12px_color-mix(in_oklab,var(--primary)_50%,transparent)]"
+          : "border-border hover:border-primary/30 hover:bg-foreground/[0.02] bg-[color-mix(in_oklab,var(--background)_70%,transparent)]"
       }`}
-      style={
-        active
-          ? {
-              background: "color-mix(in oklab, var(--primary) 10%, var(--background))",
-              boxShadow: "0 8px 24px -12px color-mix(in oklab, var(--primary) 50%, transparent)",
-            }
-          : { background: "color-mix(in oklab, var(--background) 70%, transparent)" }
-      }
     >
       {/* Cover tile */}
       <div
@@ -31,7 +23,8 @@ function TripCard({ trip, active, onClick }: { trip: TripSummary; active: boolea
           background: `linear-gradient(135deg, hsl(${cover.hue} 60% ${cover.tone === "warm" ? 52 : 48}%) 0%, hsl(${(cover.hue + 30) % 360} 70% ${cover.tone === "warm" ? 38 : 36}%) 100%)`,
         }}
       >
-        <span className="absolute -bottom-1 -right-1 text-[42px] font-black tracking-tight leading-none text-white/30 select-none whitespace-nowrap">
+        <div className="absolute inset-0 bg-black/0 dark:bg-black/25 pointer-events-none transition-colors" />
+        <span className="absolute -bottom-1 -right-1 text-[42px] font-black tracking-tight leading-none text-white/40 dark:text-white/20 select-none whitespace-nowrap">
           {cover.label}
         </span>
         <div className="absolute top-2 left-2.5">

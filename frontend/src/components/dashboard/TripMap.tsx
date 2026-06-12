@@ -52,15 +52,10 @@ export default function TripMap({ trip, days, activeDayN, theme, userProfile }: 
       m.remove();
       map.current = null;
     };
-  }, [trip]);
+  }, []);
 
-  // Update style based on theme
-  useEffect(() => {
-    if (!map.current) return;
-    getMapStyle(theme).then((style) => {
-      map.current?.setStyle(style);
-    });
-  }, [theme]);
+  // Map style is now fixed to Liberty for all themes, 
+  // so we no longer need to call setStyle when theme changes.
 
   // Handle Trip/Day Selection and Markers
   useEffect(() => {

@@ -1,10 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { TripSummary } from "@/lib/dashboard-data";
 import type { UserProfile } from "@/hooks/useUserProfile";
 import { StatusChip } from "./DashChips";
-import { SparklesIcon, BellIcon, DNAIcon, ChevronDownIcon } from "./DashIcons";
+import { SparklesIcon, DNAIcon, ChevronDownIcon } from "./DashIcons";
+import { BookOpen } from "lucide-react";
 import { AvatarButton, ProfileDropdown } from "./ProfileDropdown";
 
 interface TopNavProps {
@@ -15,6 +17,7 @@ interface TopNavProps {
 }
 
 export function TopNav({ summaries, activeId, onTripSelect, userProfile }: TopNavProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const active = summaries.find((t) => t.id === activeId) ?? summaries[0];
   const [profileOpen, setProfileOpen] = useState(false);
@@ -99,11 +102,12 @@ export function TopNav({ summaries, activeId, onTripSelect, userProfile }: TopNa
         </button>
         <button
           type="button"
-          title="Notifications"
-          className="relative w-9 h-9 rounded-full grid place-items-center text-muted-foreground hover:text-primary hover:bg-foreground/5 transition"
+          title="Capability guide"
+          aria-label="See everything Aletheia can do"
+          onClick={() => router.push("/guide")}
+          className="w-9 h-9 rounded-full grid place-items-center text-muted-foreground hover:text-primary hover:bg-foreground/5 transition"
         >
-          <BellIcon width={16} height={16} />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500" />
+          <BookOpen width={16} height={16} />
         </button>
         <div className="w-px h-5 bg-border mx-1" />
 

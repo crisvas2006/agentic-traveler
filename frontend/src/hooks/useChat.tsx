@@ -55,13 +55,27 @@ export function useChat() {
  * arrive out-of-band (a dropped SSE turn recovered from the DB, or Telegram /
  * other tabs), de-duplicated against the ids the SSE stream already finalized.
  */
+
+// ── Module-level message cache ────────────────────────────────────────────────
+// Survives Next.js client-side navigation (e.g. /dashboard → /guide → back)
+// but is cleared on full page reload. ChatProvider reads this on mount so
+// messages appear instantly without a loading spinner. The realtime subscription
+// keeps the list live once mounted.
+type MsgCacheEntry = {
+  messages: ChatMessage[];
+  hasMore: boolean;
+  hasMoreNewer: boolean;
+  threadId: string | null;
+};
+let _msgCache: MsgCacheEntry | null = null;
+
 function useChatInternal() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => _msgCache?.messages ?? []);
+  const [loading, setLoading] = useState(() => _msgCache === null);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+  const [hasMore, setHasMore] = useState(() => _msgCache?.hasMore ?? false);
   const [loadingNewer, setLoadingNewer] = useState(false);
-  const [hasMoreNewer, setHasMoreNewer] = useState(false);
+  const [hasMoreNewer, setHasMoreNewer] = useState(() => _msgCache?.hasMoreNewer ?? false);
 
   // Ephemeral mood picker: local-only, gone on refresh (Task 50).
   const [ephemeralPicker, setEphemeralPicker] = useState<"mood" | null>(null);
@@ -77,9 +91,22 @@ function useChatInternal() {
   const setComposerDraft = useCallback((text: string) => {
     composerDraftSetterRef.current?.(text);
   }, []);
+
+  // Open-chat-panel: desktop and mobile shells register their opener by key.
+  // LaunchFromParamInner calls openChatPanel() after firing a capability so
+  // the user sees the panel open automatically on arrival from /guide.
+  const openChatPanelFnsRef = useRef<Record<string, () => void>>({});
+  const registerOpenChatPanel = useCallback((key: string, fn: () => void) => {
+    openChatPanelFnsRef.current[key] = fn;
+  }, []);
+  const openChatPanel = useCallback(() => {
+    const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+    openChatPanelFnsRef.current[isDesktop ? "desktop" : "mobile"]?.();
+  }, []);
+
   const [pendingReply, setPendingReply] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [threadId, setThreadId] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(() => _msgCache?.threadId ?? null);
 
   const stream = useChatStream();
 
@@ -116,6 +143,10 @@ function useChatInternal() {
   }, [loadingNewer]);
 
   // ── initial load ────────────────────────────────────────────────────────
+  // Always runs — even when _msgCache exists — so the Supabase client makes a
+  // request on every mount, keeping the auth session active and ensuring other
+  // hooks (useTripList, useUserProfile) aren't broken by a stale session on
+  // back-navigation. When cache exists: no spinner, messages update silently.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -128,7 +159,8 @@ function useChatInternal() {
               body?.detail?.message ?? "Complete your travel profile to start chatting.";
             if (!cancelled) setError(msg);
           } else {
-            if (!cancelled) setError("Couldn't load your conversation.");
+            // Only surface the error when we have no cached data to fall back on.
+            if (!cancelled && !_msgCache) setError("Couldn't load your conversation.");
           }
           return;
         }
@@ -141,9 +173,10 @@ function useChatInternal() {
           setHasMoreNewer(data.has_more_newer ?? false);
           const tid = asc.find((m) => m.thread_id)?.thread_id ?? null;
           if (tid) setThreadId(tid);
+          _msgCache = { messages: asc, hasMore: data.has_more, hasMoreNewer: data.has_more_newer ?? false, threadId: tid };
         }
       } catch {
-        if (!cancelled) setError("Network error.");
+        if (!cancelled && !_msgCache) setError("Network error.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -152,6 +185,15 @@ function useChatInternal() {
       cancelled = true;
     };
   }, []);
+
+  // ── cache sync ────────────────────────────────────────────────────────────
+  // Keep _msgCache current so re-mounts (post-navigation) get the latest state.
+  useEffect(() => {
+    if (messages.length > 0) {
+      _msgCache = { messages, hasMore, hasMoreNewer, threadId };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, hasMore, hasMoreNewer, threadId]);
 
   // ── realtime merge (recovery + cross-channel) ─────────────────────────────
   const onRealtimeInsert = useCallback((m: ChatMessage) => {
@@ -529,5 +571,7 @@ function useChatInternal() {
     dismissEphemeral,
     registerComposerSetter,
     setComposerDraft,
+    registerOpenChatPanel,
+    openChatPanel,
   };
 }

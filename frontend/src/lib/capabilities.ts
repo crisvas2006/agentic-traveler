@@ -89,7 +89,7 @@ export const GROUP_SHOWS_TRIP: Record<CapabilityGroup, boolean> = {
   plan: false,
   trip: true,
   during: true,
-  after: false,
+  after: true,
   account: false,
 };
 
@@ -216,7 +216,7 @@ export const CAPABILITIES: Capability[] = [
     howItWorks:
       "Prefer short answers or more detail? Set your reply length in settings and every flow respects it from then on.",
     group: "account",
-    launch: { kind: "link", href: "/settings" },
+    launch: { kind: "link", href: "/settings#reply-length" },
   },
   {
     id: "link_telegram",
@@ -235,10 +235,9 @@ export const CAPABILITIES: Capability[] = [
     icon: "Gift",
     oneLiner: "Have a code? Add credits.",
     howItWorks:
-      "Got a promo code? Share it with me and I'll apply the credits to your balance.",
-    example: "I have a promo code",
+      "Got a promo code? Enter it in the Credits section of your settings to add balance.",
     group: "account",
-    launch: { kind: "message", text: "I have a promo code" },
+    launch: { kind: "link", href: "/settings#credits" },
   },
 ];
 

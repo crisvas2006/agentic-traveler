@@ -374,3 +374,20 @@ body {
   mask-image: radial-gradient(ellipse 80% 50% at 50% 50%, #000 70%, transparent 100%);
   opacity: 0.2;
 }
+
+/* Global scrollbar styling to ensure it respects the active theme */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--foreground) 20%, transparent);
+  border: 2px solid var(--background);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--foreground) 35%, transparent);
+}
