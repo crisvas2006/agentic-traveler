@@ -167,26 +167,39 @@ interface ShellViewProps {
   loading: boolean;
   summaries: TripSummary[];
   activeTripId: string | null;
-  setActiveTripId: (id: string) => void;
+  setActiveTripId: (id: string | null) => void;
   theme: "light" | "dark";
   userProfile: UserProfile;
   sendMessage: (text: string) => void;
   availability: AvailabilityState;
+  // Task 52 — trip-focus bridge.
+  getFocusedTripId: () => string | null;
+  applyFocus: (id: string | null) => void;
+  clearFocus: () => void;
 }
 
 /* ── Desktop layout ── */
 function DesktopShell({
   trip, days, todayN, summaries, activeTripId, setActiveTripId,
   theme, userProfile, sendMessage, availability,
+  getFocusedTripId, applyFocus, clearFocus,
 }: ShellViewProps) {
   const [activeDayN, setActiveDayN] = useState(todayN);
   const [chatStyle, setChatStyle] = useState<"strip" | "drawer">("strip");
   const [chatExpanded, setChatExpanded] = useState(false);
 
-  const { registerOpenChatPanel } = useChat();
+  const { registerOpenChatPanel, registerFocusBridge } = useChat();
   useEffect(() => {
     registerOpenChatPanel("desktop", () => setChatStyle("drawer"));
   }, [registerOpenChatPanel]);
+  useEffect(() => {
+    registerFocusBridge(getFocusedTripId, applyFocus);
+  }, [registerFocusBridge, getFocusedTripId, applyFocus]);
+
+  // The chip shows the focused trip's primary destination (Task 52 AC-11).
+  const focusedTrip = activeTripId
+    ? { id: activeTripId, destination: summaries.find((s) => s.id === activeTripId)?.destination ?? "Trip" }
+    : null;
 
   // Reset to the focused trip's "today" when the trip changes. React's
   // adjust-state-during-render pattern (no effect): converges immediately.
@@ -255,6 +268,7 @@ function DesktopShell({
                       activeDayN={activeDayN}
                       setActiveDayN={setActiveDayN}
                       onSendMessage={sendMessage}
+                      onClose={() => { setActiveTripId(null); clearFocus(); }}
                     />
                   ) : (
                     <EmptyTripCanvas
@@ -281,6 +295,9 @@ function DesktopShell({
                   onCollapse={() => setChatStyle("strip")}
                   onExpand={() => setChatExpanded(true)}
                   availability={availability}
+                  focusedTrip={focusedTrip}
+                  onOpenTrip={() => setChatExpanded(false)}
+                  onClearFocus={clearFocus}
                 />
               </div>
             )}
@@ -297,6 +314,9 @@ function DesktopShell({
                 onExpand={() => setChatExpanded(false)}
                 expandedMode
                 availability={availability}
+                focusedTrip={focusedTrip}
+                onOpenTrip={() => setChatExpanded(false)}
+                onClearFocus={clearFocus}
               />
             </div>
           </div>
@@ -310,15 +330,23 @@ function DesktopShell({
 function MobileShell({
   trip, days, todayN, summaries, activeTripId, setActiveTripId,
   theme, userProfile, sendMessage, availability,
+  getFocusedTripId, applyFocus, clearFocus,
 }: ShellViewProps) {
   const [pane, setPane] = useState(1); // 0=library, 1=trip, 2=map
   const [chatOpen, setChatOpen] = useState(false);
   const [activeDayN, setActiveDayN] = useState(todayN);
 
-  const { registerOpenChatPanel } = useChat();
+  const { registerOpenChatPanel, registerFocusBridge } = useChat();
   useEffect(() => {
     registerOpenChatPanel("mobile", () => setChatOpen(true));
   }, [registerOpenChatPanel]);
+  useEffect(() => {
+    registerFocusBridge(getFocusedTripId, applyFocus);
+  }, [registerFocusBridge, getFocusedTripId, applyFocus]);
+
+  const focusedTrip = activeTripId
+    ? { id: activeTripId, destination: summaries.find((s) => s.id === activeTripId)?.destination ?? "Trip" }
+    : null;
   const [profileOpen, setProfileOpen] = useState(false);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const avatarBtnRef = useRef<HTMLDivElement>(null);
@@ -402,6 +430,7 @@ function MobileShell({
                 activeDayN={activeDayN}
                 setActiveDayN={setActiveDayN}
                 onSendMessage={sendMessage}
+                onClose={() => { setActiveTripId(null); clearFocus(); }}
               />
             ) : (
               <EmptyTripCanvas
@@ -450,7 +479,13 @@ function MobileShell({
 
       {chatOpen && (
         <div className="absolute inset-0 z-50 flex flex-col animate-fade-up" style={{ background: "var(--background)" }}>
-          <ChatPanel onCollapse={() => setChatOpen(false)} availability={availability} />
+          <ChatPanel
+            onCollapse={() => setChatOpen(false)}
+            availability={availability}
+            focusedTrip={focusedTrip}
+            onOpenTrip={() => { setPane(1); setChatOpen(false); }}
+            onClearFocus={clearFocus}
+          />
         </div>
       )}
     </div>
@@ -462,12 +497,28 @@ export function DashboardShell() {
   const { summaries, defaultActiveId } = useTripList();
   const [activeTripId, setActiveTripId] = useState<string | null>(null);
 
-  // Adopt the resolved default trip once it loads, without clobbering a user
-  // choice. Adjust-state-during-render (no effect): the guard makes it
-  // converge after the first non-null default.
-  if (activeTripId === null && defaultActiveId !== null) {
+  // Adopt the resolved default trip ONCE on first load, without clobbering a
+  // later user choice — including an explicit "clear focus" to null (Task 52
+  // AC-12). The ref makes the adoption fire exactly once, so closing the panel
+  // (setActiveTripId(null)) no longer bounces straight back to the default.
+  const [adoptedDefault, setAdoptedDefault] = useState(false);
+  if (!adoptedDefault && activeTripId === null && defaultActiveId !== null) {
+    setAdoptedDefault(true);
     setActiveTripId(defaultActiveId);
   }
+
+  // Trip-focus bridge plumbing (Task 52). A ref tracks the latest focus so the
+  // getter the chat layer rides on every message is never stale; applyFocus is
+  // diff-guarded (same id → no state change → no panel remount, AC-10).
+  const activeTripIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeTripIdRef.current = activeTripId;
+  }, [activeTripId]);
+  const getFocusedTripId = useCallback(() => activeTripIdRef.current, []);
+  const applyFocus = useCallback((newId: string | null) => {
+    setActiveTripId((cur) => (newId && newId !== cur ? newId : cur));
+  }, []);
+  const clearFocus = useCallback(() => setActiveTripId(null), []);
 
   const { trip, days, todayN, loading } = useTrip(activeTripId);
   // Capability availability (Task 50): read from already-loaded client state —
@@ -487,7 +538,7 @@ export function DashboardShell() {
     void fetch("/api/chat/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: text }),
+      body: JSON.stringify({ body: text, focused_trip_id: activeTripIdRef.current }),
     }).catch(() => {});
   }, []);
 
@@ -554,6 +605,7 @@ export function DashboardShell() {
   const viewProps: ShellViewProps = {
     trip, days, todayN, loading, summaries, activeTripId, setActiveTripId,
     theme, userProfile, sendMessage, availability,
+    getFocusedTripId, applyFocus, clearFocus,
   };
 
   return (

@@ -39,11 +39,18 @@ export type StreamDone = {
   threadId: string | null;
   text: string;
   ui: UiBlock | null;
+  // The trip the backend resolved as the TripPanel focus, or null (Task 52).
+  focusTripId: string | null;
 };
 
 type RunHandlers = {
   onDone?: (d: StreamDone) => void;
   onError?: () => void;
+};
+
+type RunOptions = {
+  /** The trip currently open in the TripPanel (rides the request — Task 52). */
+  focusedTripId?: string | null;
 };
 
 type Frame = { event: string | null; data: Record<string, unknown> | null };
@@ -144,7 +151,7 @@ export function useChatStream() {
   }, [clearTimer]);
 
   const run = useCallback(
-    async (body: string, handlers: RunHandlers = {}): Promise<void> => {
+    async (body: string, handlers: RunHandlers = {}, opts: RunOptions = {}): Promise<void> => {
       abort();
       resetPacing();
       setStreamingText("");
@@ -159,7 +166,7 @@ export function useChatStream() {
         const resp = await fetch("/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body }),
+          body: JSON.stringify({ body, focused_trip_id: opts.focusedTripId ?? null }),
           signal: ctrl.signal,
         });
 
@@ -198,6 +205,7 @@ export function useChatStream() {
                 threadId: (data?.thread_id as string | null) ?? null,
                 text: (data?.text as string | undefined) ?? acc,
                 ui: (data?.ui as UiBlock | null) ?? null,
+                focusTripId: (data?.focus_trip_id as string | null) ?? null,
               });
             }
           }

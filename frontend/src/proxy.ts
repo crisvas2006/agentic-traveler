@@ -30,8 +30,8 @@ export default async function proxy(request: NextRequest) {
     // getUser() validates the JWT server-side — never use getSession() here.
     const { data: { user } } = await supabase.auth.getUser()
 
-    // Protect /dashboard — redirect unauthenticated visitors to /login
-    if (request.nextUrl.pathname.startsWith('/dashboard') && !user) {
+    // Protect /dashboard and /guide — redirect unauthenticated visitors to /login
+    if ((request.nextUrl.pathname.startsWith('/dashboard') || request.nextUrl.pathname.startsWith('/guide')) && !user) {
       const url = request.nextUrl.clone()
       url.pathname = '/login'
       return NextResponse.redirect(url)

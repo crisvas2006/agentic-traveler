@@ -46,6 +46,11 @@ class ChatSendRequest(BaseModel):
     # RouterAgent. Re-validated server-side against CAPABILITY_INTENTS (the client
     # registry is never trusted); an unknown id is rejected 422.
     capability: str | None = Field(default=None, max_length=64)
+    # The trip currently open in the dashboard TripPanel (or None when closed —
+    # Task 52). Ephemeral per request; the orchestrator uses it as the strong
+    # default anchor for trip resolution and echoes the resolved id back in
+    # ChatMessageOut.metadata.focus_trip_id. Telegram never sends it.
+    focused_trip_id: str | None = Field(default=None, max_length=64)
 
 
 class ChatMessageOut(BaseModel):

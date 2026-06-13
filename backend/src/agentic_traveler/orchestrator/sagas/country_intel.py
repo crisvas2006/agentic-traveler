@@ -30,21 +30,41 @@ class CountryIntelSaga(BaseSaga):
         trip: Optional[dict[str, Any]],
         state: SagaState,
     ) -> Tuple[bool, bool]:
-        """Return (can_act, wants_to_own)."""
+        """Return (can_act, wants_to_own).
+
+        CountryIntelSaga is a *background fetcher* for the trip's intel strip, not
+        a conversational agent. It owns a turn ONLY when it can do a real grounded
+        refresh — i.e. the resolved trip carries a confirmed destination with an
+        ISO country. Without one it never owns, so the conversational sagas
+        (Discovery / Planning / Chat) answer the question instead of the saga
+        returning a dead-end fallback string (task 52 AC-1 — the greedy-ownership
+        loop fix)."""
         # Listen for newly confirmed destinations in this turn.
         side_effects = entities.get("side_effects_seen", [])
         if any(s.get("kind") == "destination_upsert" and s.get("payload", {}).get("status") == "confirmed" for s in side_effects):
             return True, False
-            
+
         # Also check if destination_just_confirmed boolean is passed
         if any(s.get("destination_just_confirmed") for s in side_effects):
             return True, False
 
-        # Owner: when the user explicitly asks an intel question
-        if entities.get("intel_question"):
+        # Owner: only when the user asks an intel question AND a real grounded
+        # answer exists (a confirmed destination with an iso_country to fetch for).
+        if entities.get("intel_question") and self._has_confirmed_destination(trip):
             return True, True
 
         return False, False
+
+    @staticmethod
+    def _has_confirmed_destination(trip: Optional[dict[str, Any]]) -> bool:
+        """True when the trip has at least one confirmed destination carrying an
+        ISO country code — the precondition for a grounded intel fetch."""
+        if not trip:
+            return False
+        return any(
+            d.get("status") == "confirmed" and d.get("iso_country")
+            for d in (trip.get("destinations") or [])
+        )
 
     @traceable(name="saga.country_intel.run")
     def run(
@@ -74,27 +94,30 @@ class CountryIntelSaga(BaseSaga):
         conv: dict[str, Any],
         events: Any,
     ) -> SagaResult:
-        # Handle explicit question: could do a live fetch or use existing intel
-        # For simplicity, if we have a trip, we trigger an async refresh on the first confirmed destination
-        if trip:
-            destinations = trip.get("destinations", [])
-            confirmed = [d for d in destinations if d.get("status") == "confirmed" and d.get("iso_country")]
-            if confirmed:
-                logger.info("CountryIntelSaga (owner) triggering refresh for %s", confirmed[0]["name"])
-                # Fire-and-forget from a sync worker thread: spawn a daemon thread with
-                # its own event loop so asyncio.create_task isn't called on a non-loop thread.
-                coro = self._run_fetch_async(
-                    trip["id"],
-                    user_doc["id"],
-                    confirmed[0]["iso_country"],
-                    confirmed[0]["name"],
-                    month_name=self._get_trip_month(trip),
-                )
-                threading.Thread(target=asyncio.run, args=(coro,), daemon=True).start()
-                
-                return SagaResult(text=f"I'll check the latest facts for {confirmed[0]['name']}. The intel strip will update shortly.")
-        
-        return SagaResult(text="I can look up travel facts for you. Which country are you planning to visit?")
+        # Owner mode: trigger an async grounded refresh on the first confirmed
+        # destination and acknowledge it. should_activate guarantees a confirmed
+        # destination exists here, so the old "which country?" fallback is gone —
+        # a question with no confirmed destination never reaches this saga as an
+        # owner (task 52 AC-1). The empty SagaResult below is unreachable defensive
+        # code: it is NOT a user-facing fallback string.
+        destinations = (trip or {}).get("destinations", [])
+        confirmed = [d for d in destinations if d.get("status") == "confirmed" and d.get("iso_country")]
+        if confirmed:
+            logger.info("CountryIntelSaga (owner) triggering refresh for %s", confirmed[0]["name"])
+            # Fire-and-forget from a sync worker thread: spawn a daemon thread with
+            # its own event loop so asyncio.create_task isn't called on a non-loop thread.
+            coro = self._run_fetch_async(
+                trip["id"],
+                user_doc["id"],
+                confirmed[0]["iso_country"],
+                confirmed[0]["name"],
+                month_name=self._get_trip_month(trip),
+            )
+            threading.Thread(target=asyncio.run, args=(coro,), daemon=True).start()
+
+            return SagaResult(text=f"I'll check the latest facts for {confirmed[0]['name']}. The intel strip will update shortly.")
+
+        return SagaResult()
 
     def _fetch_for_confirmed_destination(
         self,

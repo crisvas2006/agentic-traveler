@@ -532,6 +532,38 @@ Tools and technologies:
         `saga_entered` / `saga_exited` /
         `slot_filled` metrics by default.
 
+    *   **Trip-context sync (web):** the dashboard sends the trip open in the
+        TripPanel as `focused_trip_id` on every chat message; the orchestrator
+        uses it as the strong default anchor for trip resolution, and the reply
+        echoes the resolved trip back as `metadata.focus_trip_id`. The panel
+        follows the backend **only when the id actually changes** (a same-trip
+        echo never remounts or resets scroll). When a message clearly names a
+        *different* trip's destination, focus drifts to it — matched against
+        destination-enriched trip summaries using the Router's already-extracted
+        entities, so there is **zero added token cost** (no trip list ever enters
+        a prompt). A subtle "📍 \<destination\>" chip in the chat header shows the
+        focused trip; its **X** clears focus and closes the panel (the next
+        message then carries `focused_trip_id=null`). Focus is ephemeral —
+        nothing is persisted across reloads. Telegram sends no focus and falls
+        back to the existing heuristic.
+
+    *   **Relaxed, consented trip creation:** a casual travel question ("what is
+        a trip in Rome like?") is answered conversationally and creates **no**
+        trip — the app no longer silently acquires a trip object on idle
+        curiosity. A trip is created only on a clear `PLAN` intent, a `new`
+        directive, or an explicit go-signal ("let's plan a trip to Rome"); when
+        the user only *softly* signals wanting to go ("I'm thinking of going to
+        Rome"), `DiscoverySaga` asks a one-line confirmation ("Want me to start a
+        trip for Rome?") before creating anything. The confirmation is stateless
+        — its reply re-classifies next turn and drives the actual creation.
+
+    *   **CountryIntelSaga is a background fetcher, not a chatbot:** it owns a
+        turn **only** when it can do a real grounded refresh (the resolved trip
+        has a confirmed destination with an ISO country). A general intel
+        question with no such trip is answered by the conversational sagas
+        instead of the saga returning a dead-end "which country?" string — fixing
+        a reply loop where ordinary questions got stuck on that fallback.
+
     *   **Tappable slot prompts (web + Telegram):** categorical questions render
         as one self-contained card — the question and its option chips in a single
         agent bubble — on the web chat, and as an inline keyboard on Telegram.

@@ -62,11 +62,14 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _reply_metadata(action, latency_ms: int, slot_request) -> dict:
-    """Build the agent message's ``metadata``: always the action + latency, plus
+def _reply_metadata(action, latency_ms: int, slot_request, focus_trip_id=None) -> dict:
+    """Build the agent message's ``metadata``: always the action + latency +
+    ``focus_trip_id`` (the resolved TripPanel focus, or None — Task 52 AC-9), plus
     a ``ui`` block (multiple-choice / quick-reply chips, Task 43) when the reply
     carries tappable choices. Replies without choices leave ``ui`` unset."""
-    metadata: dict = {"action": action, "latency_ms": latency_ms}
+    metadata: dict = {
+        "action": action, "latency_ms": latency_ms, "focus_trip_id": focus_trip_id,
+    }
     ui = ui_block_from_wire(slot_request)
     if ui:
         metadata["ui"] = ui
@@ -108,6 +111,7 @@ async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_s
             message_text=body,
             selection=selection,
             capability=capability,
+            focused_trip_id=payload.focused_trip_id,
         )
     except Exception:
         logger.exception("Orchestrator failed for web user %s", ctx.user_id)
@@ -132,6 +136,7 @@ async def chat_send(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify_s
             metadata=_reply_metadata(
                 agent_result.get("action"), latency_ms,
                 agent_result.get("slot_request"),
+                focus_trip_id=agent_result.get("focus_trip_id"),
             ),
         )
     except Exception:
@@ -177,6 +182,7 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
         t = time.time()
         action = None
         slot_request = None
+        focus_trip_id = None
         try:
             result = await asyncio.to_thread(
                 _get_orchestrator().process_request_for_user,
@@ -184,12 +190,14 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
                 body,
                 lambda p: push("status", p),   # status_callback → SSE `status` events
                 lambda p: push("delta", p),    # delta_callback → real token `delta` events
+                focused_trip_id=payload.focused_trip_id,
             )
             text = result.get("text") or (
                 "I had trouble coming up with a response just now. Please try again."
             )
             action = result.get("action")
             slot_request = result.get("slot_request")
+            focus_trip_id = result.get("focus_trip_id")
         except Exception:
             logger.exception("Streaming orchestrator failed for user %s", ctx.user_id)
             push("status", {"phase": "error", "text": "Something glitched. Please try again."})
@@ -202,7 +210,9 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
         try:
             agent_row = repo.append_agent_message(
                 ctx.user_id, text, source="web", thread_id=thread_id,
-                metadata=_reply_metadata(action, latency_ms, slot_request),
+                metadata=_reply_metadata(
+                    action, latency_ms, slot_request, focus_trip_id=focus_trip_id,
+                ),
             )
             message_id = agent_row["id"]
         except Exception:
@@ -223,6 +233,9 @@ async def chat_stream(payload: ChatSendRequest, ctx: WebUserCtx = Depends(verify
             "latency_ms": latency_ms,
             "text": text,
             "ui": ui,
+            # The resolved TripPanel focus (or None) so the client can switch the
+            # panel without a Realtime round-trip (Task 52 AC-9).
+            "focus_trip_id": focus_trip_id,
         })
 
     driver_task = asyncio.create_task(driver())

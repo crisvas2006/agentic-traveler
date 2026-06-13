@@ -127,6 +127,70 @@ def test_plan_intent_dispatches_via_saga(mock_user_repo, patched_deps):
 
 
 # ---------------------------------------------------------------------------
+# task 52 — focused_trip_id threading, relaxed creation, focus echo
+# ---------------------------------------------------------------------------
+
+def test_casual_trip_creates_no_trip(mock_user_repo, patched_deps):
+    """AC-13: a casual TRIP question with no trip context creates NO trip row and
+    echoes focus_trip_id=None (the panel must not change)."""
+    mock_user_repo.get_user_by_id.return_value = {"user_name": "Alice"}
+    _route(patched_deps, intent="TRIP")
+    _owner(patched_deps, "DiscoverySaga", "Rome is lovely in spring.")
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    resp = agent.process_request_for_user("user-1", "what is a trip in Rome like?")
+    patched_deps["trip_repo"].return_value.upsert_trip.assert_not_called()
+    assert resp["focus_trip_id"] is None
+
+
+def test_plan_intent_creates_trip(mock_user_repo, patched_deps):
+    """AC-14: an explicit PLAN turn creates the trip and echoes its id."""
+    mock_user_repo.get_user_by_id.return_value = {"user_name": "Alice"}
+    _route(patched_deps, intent="PLAN")
+    _owner(patched_deps, "PlanningSaga", "Where are you dreaming of going?")
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    resp = agent.process_request_for_user("user-1", "plan me a trip")
+    patched_deps["trip_repo"].return_value.upsert_trip.assert_called_once()
+    assert resp["focus_trip_id"] == "trip-1"
+
+
+def test_trip_with_go_signal_creates_trip(mock_user_repo, patched_deps):
+    """AC-14: an explicit go-signal on a TRIP turn still creates the trip."""
+    mock_user_repo.get_user_by_id.return_value = {"user_name": "Alice"}
+    _route(patched_deps, intent="TRIP")
+    _owner(patched_deps, "DiscoverySaga", "Great — let's shape it.")
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    resp = agent.process_request_for_user("user-1", "let's plan a trip to Rome")
+    patched_deps["trip_repo"].return_value.upsert_trip.assert_called_once()
+    assert resp["focus_trip_id"] == "trip-1"
+
+
+def test_focused_trip_id_threads_into_resolution(mock_user_repo, patched_deps):
+    """AC-4/AC-9: focused_trip_id selects the in-focus trip and the resolved id is
+    echoed back as focus_trip_id."""
+    mock_user_repo.get_user_by_id.return_value = {"user_name": "Alice"}
+    _route(patched_deps, intent="TRIP")
+    _owner(patched_deps, "PlanningSaga", "About your Spain trip…")
+    sm = MagicMock()
+    sm.model_dump.return_value = {
+        "id": "focus-1", "status": "planning", "title": "Spain trip",
+        "reference_date": None, "vision_summary": None,
+        "updated_at": "2027-01-01", "destinations": [],
+    }
+    patched_deps["trip_repo"].return_value.list_trip_summaries.return_value = [sm]
+    patched_deps["trip_repo"].return_value.get_trip.return_value.model_dump.return_value = {
+        "id": "focus-1", "status": "planning",
+    }
+    agent = OrchestratorAgent(user_repo=mock_user_repo)
+    resp = agent.process_request_for_user(
+        "user-1", "how's the weather there?", focused_trip_id="focus-1",
+    )
+    patched_deps["trip_repo"].return_value.get_trip.assert_called_once_with("focus-1")
+    # No creation (the trip already exists) and the resolved id is echoed.
+    patched_deps["trip_repo"].return_value.upsert_trip.assert_not_called()
+    assert resp["focus_trip_id"] == "focus-1"
+
+
+# ---------------------------------------------------------------------------
 # task 43 — selection entrypoint (deterministic tap, no router/extraction)
 # ---------------------------------------------------------------------------
 

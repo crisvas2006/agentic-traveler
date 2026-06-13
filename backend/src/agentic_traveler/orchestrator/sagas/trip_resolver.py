@@ -11,6 +11,7 @@ Priority (proposal §5.5):
 
 from __future__ import annotations
 
+import datetime
 from typing import Any, Optional
 
 # Tokens that are too generic to identify a trip by name.
@@ -36,22 +37,100 @@ def resolve_trip_focus(
     message: str,
     entities: Optional[dict[str, Any]],
     directive: str,
+    focused_trip_id: Optional[str] = None,
 ) -> tuple[Optional[dict[str, Any]], Optional[str], bool]:
     """Decide which trip a planning turn is about, honouring the Router's
-    ``trip_directive`` (task 44).
+    ``trip_directive`` (task 44) and the frontend's ``focused_trip_id`` (the trip
+    open in the dashboard TripPanel — task 52).
 
-    Returns ``(chosen_summary, superseded_title, create_new)``:
-      * ``directive == "new"`` → ``(None, <most-recent established title or None>,
-        True)`` — ignore existing trips; the orchestrator creates a fresh one and
-        the saga can acknowledge the trip set aside.
-      * otherwise → ``(resolve_active_trip(...), None, False)`` — unchanged
-        resolution (explicit name > active > ready > most-recent).
+    Returns ``(chosen_summary, superseded_title, create_new)``. Resolution layers,
+    in priority order:
+      1. ``directive == "new"`` → ``(None, <most-recent established title or None>,
+         True)`` — ignore existing trips; a fresh one is created downstream.
+      2. **Destination match** (zero token cost): when the router already
+         extracted ``entities.destinations`` and one or more trips carry a
+         matching destination name / title, focus that trip — drifting away from
+         ``focused_trip_id`` only when the message clearly points elsewhere
+         (AC-6). Multiple matches are tie-broken by recency-of-relevance (AC-7).
+      3. **Frontend focus**: the ``focused_trip_id`` trip, when it belongs to the
+         user (a stale/forged id is ignored — AC-8).
+      4. **Heuristic**: the pre-existing ``resolve_active_trip`` (active → ready →
+         most-recent), which may return ``None`` — answering without forcing focus.
     """
     if directive == "new":
         established = [s for s in summaries if is_established(s)] if summaries else []
         prior = _most_recent(established) if established else None
         return None, (prior.get("title") if prior else None), True
+
+    summaries = summaries or []
+    dests = [
+        d.strip().lower()
+        for d in ((entities or {}).get("destinations") or [])
+        if isinstance(d, str) and d.strip()
+    ]
+    if dests:
+        matches = [s for s in summaries if _summary_matches_destinations(s, dests)]
+        if matches:
+            # No-jolt: when the already-focused trip is itself a match, keep it
+            # (don't remount the panel); only switch when the message points at a
+            # different trip (AC-6).
+            if focused_trip_id:
+                focused_match = next(
+                    (s for s in matches if s.get("id") == focused_trip_id), None
+                )
+                if focused_match:
+                    return focused_match, None, False
+            return _tiebreak(matches), None, False
+
+    if focused_trip_id:
+        focused = next(
+            (s for s in summaries if s.get("id") == focused_trip_id), None
+        )
+        if focused:  # AC-8: a focus id not among the user's trips is ignored.
+            return focused, None, False
+
     return resolve_active_trip(summaries, message, entities), None, False
+
+
+def _summary_matches_destinations(
+    summary: dict[str, Any], dests_lower: list[str]
+) -> bool:
+    """True when any router-extracted destination matches the trip's destination
+    names or its title (case-insensitive substring, both directions). Empty
+    candidates are skipped so a title-less trip never matches everything."""
+    candidates = [
+        (d.get("name") or "").strip().lower()
+        for d in (summary.get("destinations") or [])
+    ]
+    title = (summary.get("title") or "").strip().lower()
+    if title:
+        candidates.append(title)
+    candidates = [c for c in candidates if c]
+    for d in dests_lower:
+        for c in candidates:
+            if d == c or d in c or c in d:
+                return True
+    return False
+
+
+def _tiebreak(matches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pick one trip from several destination matches (AC-7): an ``active`` trip
+    wins (it's underway) → else the nearest upcoming ``reference_date`` → else the
+    most recent past one → else the most-recently-updated (deterministic)."""
+    if len(matches) == 1:
+        return matches[0]
+    actives = [s for s in matches if (s.get("status") or "").lower() == "active"]
+    if actives:
+        return _most_recent(actives)
+    today = datetime.date.today().isoformat()
+    dated = [s for s in matches if s.get("reference_date")]
+    upcoming = [s for s in dated if (s.get("reference_date") or "") >= today]
+    if upcoming:
+        return min(upcoming, key=lambda s: s.get("reference_date") or "")
+    past = [s for s in dated if (s.get("reference_date") or "") < today]
+    if past:
+        return max(past, key=lambda s: s.get("reference_date") or "")
+    return _most_recent(matches)
 
 
 def resolve_active_trip(

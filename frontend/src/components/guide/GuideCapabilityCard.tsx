@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Lock, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type Capability, availabilityOf, type AvailabilityState } from "@/lib/capabilities";
@@ -15,7 +16,8 @@ export function GuideCapabilityCard({ capability: c, availability }: Props) {
   const router = useRouter();
   const avail = availabilityOf(c, availability);
   const disabled = avail !== true;
-  const Icon = capabilityIcon(c.icon);
+  // eslint-disable-next-line react-hooks/static-components
+  const Icon = useMemo(() => capabilityIcon(c.icon), [c.icon]);
 
   function handleLaunch() {
     if (disabled) return;

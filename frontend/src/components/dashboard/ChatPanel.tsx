@@ -20,6 +20,7 @@ import type { AvailabilityState } from "@/lib/capabilities";
 import { track } from "@/lib/metrics";
 import { CapabilitySheet } from "./CapabilitySheet";
 import { CapabilityChips } from "./CapabilityChips";
+import { FocusedTripChip } from "./DashChips";
 import { MoodGrid } from "./LiveStateCard";
 import {
   SparklesIcon,
@@ -430,6 +431,9 @@ export function ChatPanel({
   onExpand,
   expandedMode,
   availability = { hasTrip: false },
+  focusedTrip = null,
+  onOpenTrip,
+  onClearFocus,
 }: {
   onCollapse?: () => void;
   /** lg+ only: expand the chat over the full dashboard. Not shown on mobile. */
@@ -439,6 +443,13 @@ export function ChatPanel({
   /** Capability availability (trip presence/phase, telegram) for the ✨ launcher
    *  and the empty-state chips (Task 50). */
   availability?: AvailabilityState;
+  /** The trip currently driving the conversation's context (Task 52). Shown as a
+   *  clickable chip in the header; null hides it. */
+  focusedTrip?: { id: string; destination: string } | null;
+  /** Open/reveal the TripPanel for the focused trip (chip body tap). */
+  onOpenTrip?: () => void;
+  /** Clear focus AND close the TripPanel (chip X tap, AC-12). */
+  onClearFocus?: () => void;
 }) {
   const {
     messages,
@@ -940,6 +951,15 @@ export function ChatPanel({
               online
             </div>
           </div>
+          {/* Focused-trip context chip (Task 52 AC-11/AC-12) — teaches that the
+              open trip drives the conversation; its X clears focus + closes the panel. */}
+          {focusedTrip && (
+            <FocusedTripChip
+              destination={focusedTrip.destination}
+              onOpen={onOpenTrip}
+              onClear={onClearFocus}
+            />
+          )}
         </div>
         <div className="flex items-center gap-1">
           <button

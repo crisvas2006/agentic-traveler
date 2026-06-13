@@ -47,12 +47,13 @@ def _repo():
 
 
 def test_stream_emits_status_then_delta_then_done():
-    def fake_process(user_id, body, status_callback, delta_callback):
+    def fake_process(user_id, body, status_callback, delta_callback, **kwargs):
         status_callback({"phase": "router", "text": "Understanding what you're asking…"})
         status_callback({"phase": "saga_selected", "saga": "PlanningSaga", "text": "Picking up your trip…"})
         delta_callback({"text": "Iceland in late "})
         delta_callback({"text": "January is magical."})
-        return {"text": "Iceland in late January is magical.", "action": "RESPONSE"}
+        return {"text": "Iceland in late January is magical.", "action": "RESPONSE",
+                "focus_trip_id": "trip-9"}
 
     orch = MagicMock()
     orch.process_request_for_user.side_effect = fake_process
@@ -74,9 +75,10 @@ def test_stream_emits_status_then_delta_then_done():
     # Ordering: all statuses precede the first delta; done is last.
     first_delta = names.index("delta")
     assert all(n == "status" for n in names[:first_delta])
-    # done carries the persisted message_id.
+    # done carries the persisted message_id + the resolved TripPanel focus (AC-9).
     done_data = events[-1][1]
     assert '"message_id": 42' in done_data
+    assert '"focus_trip_id": "trip-9"' in done_data
     # The reply text is delivered across the delta chunks.
     delta_text = "".join(
         d.split('"text":', 1)[1] for e, d in events if e == "delta"
@@ -89,7 +91,7 @@ def test_stream_emits_status_then_delta_then_done():
 def test_stream_persists_reply_before_streaming_for_recovery():
     # The agent reply must be persisted (so Realtime can recover it) even though
     # the deltas stream afterwards.
-    def fake_process(user_id, body, status_callback, delta_callback):
+    def fake_process(user_id, body, status_callback, delta_callback, **kwargs):
         return {"text": "Hello there", "action": "RESPONSE"}
 
     orch = MagicMock()

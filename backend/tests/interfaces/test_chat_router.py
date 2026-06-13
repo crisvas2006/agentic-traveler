@@ -140,6 +140,50 @@ def test_send_capability_passes_through_to_orchestrator(client):
     assert resp.json()["user_message"]["body"] == "Do the thing"
 
 
+# ── Task 52: focused_trip_id passthrough + focus_trip_id echo ────────────────
+
+
+def test_send_forwards_focused_trip_id_to_orchestrator(client):
+    """AC-4: the route forwards focused_trip_id to the orchestrator."""
+    repo = _fake_repo()
+    orch = _orch({"text": "Sure!", "action": "RESPONSE", "slot_request": None,
+                  "focus_trip_id": "spain-1"})
+    with patch.object(chat_router, "_get_chat_repo", return_value=repo), \
+         patch.object(chat_router, "_get_orchestrator", return_value=orch):
+        resp = client.post("/chat/send", json={
+            "body": "what can I see in Barcelona?", "focused_trip_id": "spain-1",
+        })
+    assert resp.status_code == 200
+    kwargs = orch.process_request_for_user.call_args.kwargs
+    assert kwargs["focused_trip_id"] == "spain-1"
+
+
+def test_send_embeds_focus_trip_id_in_metadata(client):
+    """AC-9: the reply metadata carries the resolved focus_trip_id."""
+    repo = _fake_repo()
+    orch = _orch({"text": "Sure!", "action": "RESPONSE", "slot_request": None,
+                  "focus_trip_id": "spain-1"})
+    with patch.object(chat_router, "_get_chat_repo", return_value=repo), \
+         patch.object(chat_router, "_get_orchestrator", return_value=orch):
+        resp = client.post("/chat/send", json={
+            "body": "hi", "focused_trip_id": "spain-1",
+        })
+    assert resp.json()["reply"]["metadata"]["focus_trip_id"] == "spain-1"
+
+
+def test_send_focus_trip_id_null_when_no_trip(client):
+    """AC-9: focus_trip_id is explicitly null (not absent) when no trip resolved."""
+    repo = _fake_repo()
+    orch = _orch({"text": "Sure!", "action": "RESPONSE", "slot_request": None,
+                  "focus_trip_id": None})
+    with patch.object(chat_router, "_get_chat_repo", return_value=repo), \
+         patch.object(chat_router, "_get_orchestrator", return_value=orch):
+        resp = client.post("/chat/send", json={"body": "hi"})
+    md = resp.json()["reply"]["metadata"]
+    assert "focus_trip_id" in md
+    assert md["focus_trip_id"] is None
+
+
 def test_send_unknown_capability_rejected_422_no_side_effects(client):
     repo = _fake_repo()
     orch = _orch({"text": "x", "action": "RESPONSE", "slot_request": None})

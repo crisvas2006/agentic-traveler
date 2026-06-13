@@ -42,13 +42,19 @@ _KNOWN_TRIP_FIELDS = frozenset({
 # ---------------------------------------------------------------------------
 
 class TripSummary(BaseModel):
-    """Minimal trip shape used to populate LLM context without full data."""
+    """Minimal trip shape used to populate LLM context without full data.
+
+    ``destinations`` carries the lightweight destination rows from the
+    ``trip_destinations`` relation (``name``/``iso_country``/``status``) so the
+    trip resolver can match a turn to a trip by destination without hydrating the
+    full trip (task 52 AC-5). ``reference_date`` doubles as the tie-break date."""
     id: str
     title: str | None = None
     status: str
     reference_date: str | None = None
     vision_summary: str | None = None
     updated_at: str
+    destinations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TripDestination(BaseModel):
@@ -212,7 +218,10 @@ class TripRepository:
         try:
             resp = (
                 db.table("trips")
-                .select("id, title, status, reference_date, vision_summary, updated_at")
+                .select(
+                    "id, title, status, reference_date, vision_summary, updated_at, "
+                    "trip_destinations(name, iso_country, status)"
+                )
                 .eq("user_id", user_id)
                 .order("reference_date", desc=True, nullsfirst=False)
                 .order("updated_at", desc=True)
@@ -223,7 +232,7 @@ class TripRepository:
             return []
 
         rows = resp.data or []
-        return [TripSummary(**r) for r in rows]
+        return [_summary_from_row(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Parent — writes
@@ -662,3 +671,13 @@ class TripRepository:
 def _now_iso() -> str:
     """Return current UTC time as ISO-8601 string (Supabase-compatible)."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _summary_from_row(row: dict[str, Any]) -> TripSummary:
+    """Build a TripSummary from a trips row that embeds the nested
+    ``trip_destinations`` relation (PostgREST returns it under the table name).
+    Map that relation onto ``destinations`` so callers see a flat list."""
+    data = dict(row)
+    nested = data.pop("trip_destinations", None) or []
+    data["destinations"] = [d for d in nested if isinstance(d, dict)]
+    return TripSummary(**data)

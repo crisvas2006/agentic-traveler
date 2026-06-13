@@ -56,6 +56,7 @@ from agentic_traveler.orchestrator.sagas.planning import (
     proposal_selection_to_side_effect,
     slot_values_to_side_effect,
 )
+from agentic_traveler.orchestrator.sagas.discovery import has_go_signal
 from agentic_traveler.orchestrator.sagas.trip_resolver import (
     resolve_active_trip,
     resolve_trip_focus,
@@ -170,6 +171,7 @@ class OrchestratorAgent:
         delta_callback: Optional[Callable[[dict], None]] = None,
         selection: Optional[Dict[str, Any]] = None,
         capability: Optional[str] = None,
+        focused_trip_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Web entry point. The user is already resolved by Supabase JWT → users.id;
@@ -178,7 +180,12 @@ class OrchestratorAgent:
         When ``selection`` is present (a tapped multiple-choice chip, Task 43)
         the deterministic selection pipeline runs instead of the router.
 
-        Returns {"text": str, "action": str, "slot_request": dict | None}.
+        ``focused_trip_id`` is the trip open in the dashboard TripPanel (or None
+        when the panel is closed — task 52). It is the strong default anchor for
+        trip resolution and is echoed back as ``focus_trip_id`` in the result.
+
+        Returns {"text": str, "action": str, "slot_request": dict | None,
+        "focus_trip_id": str | None}.
         """
         attach_run_metadata(user_id_hash=hash_user_id(user_id), surface="web")
         user_doc = self.user_tool.get_user_by_id(user_id)
@@ -204,6 +211,7 @@ class OrchestratorAgent:
             status_callback=status_callback,
             delta_callback=delta_callback,
             capability=capability,
+            focused_trip_id=focused_trip_id,
         )
 
     def _process_user_doc(
@@ -215,11 +223,15 @@ class OrchestratorAgent:
         status_callback: Optional[Callable[[dict], None]] = None,
         delta_callback: Optional[Callable[[dict], None]] = None,
         capability: Optional[str] = None,
+        focused_trip_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Shared post-lookup pipeline. Used by both the Telegram and web entry
         points so credit gating, off-topic enforcement, dispatch, and history
         save behave identically across channels.
+
+        ``focused_trip_id`` (web only; Telegram passes None) anchors trip
+        resolution to the trip open in the TripPanel (task 52).
         """
         t_total = time.time()
         # Task 51: every gemini_generate call this turn — whichever agent,
@@ -368,7 +380,8 @@ class OrchestratorAgent:
                 owner_saga="OffTopicSaga",
                 stage_timings=_pre_agent_timings,
             )
-            return {"text": response_text, "action": "RESPONSE", "slot_request": None}
+            return {"text": response_text, "action": "RESPONSE", "slot_request": None,
+                    "focus_trip_id": None}
 
         # If the router provided a direct response (e.g., a credit-balance answer)
         # Only short-circuit for CHAT intent — TRIP and PLAN must always reach
@@ -382,7 +395,8 @@ class OrchestratorAgent:
                 owner_saga="ChatSaga",
                 stage_timings=_pre_agent_timings,
             )
-            return {"text": router_response, "action": "RESPONSE", "slot_request": None}
+            return {"text": router_response, "action": "RESPONSE", "slot_request": None,
+                    "focus_trip_id": None}
 
         # ── 5b. Travel intents — reset off-topic counter ────────────────────
         if user_id:
@@ -406,6 +420,7 @@ class OrchestratorAgent:
             trip_directive=router_result.get("trip_directive", "unspecified"),
             events=events,
             prefetched_slots=_slots_for_saga,
+            focused_trip_id=focused_trip_id,
         )
         _agent_ms = (time.time() - t_agent) * 1000
 
@@ -470,7 +485,10 @@ class OrchestratorAgent:
             if slot_request is not None and not is_error_response
             else None
         )
-        return {"text": response_text, "action": "RESPONSE", "slot_request": slot_wire}
+        return {
+            "text": response_text, "action": "RESPONSE", "slot_request": slot_wire,
+            "focus_trip_id": agent_result.get("focus_trip_id"),
+        }
 
     # ── selection (Task 43 — deterministic tapped choice, no router/LLM) ─────
 
@@ -633,10 +651,14 @@ class OrchestratorAgent:
         trip_directive: str,
         events: EventEmitter,
         prefetched_slots: Optional[Dict[str, Any]] = None,
+        focused_trip_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Resolve the active trip, select the owner saga (+ listeners), run
         them, apply their side effects, and return an agent_result dict shaped
-        like the old `_dispatch` so downstream token logging is unchanged."""
+        like the old `_dispatch` so downstream token logging is unchanged.
+
+        The returned dict carries ``focus_trip_id`` — the resolved/created trip id
+        (or None) — so the channel layer can echo it to the UI (task 52)."""
         # 1. Resolve which trip this turn is about, honouring the Router's
         #    trip_directive (task 44): "new" ignores existing trips (a fresh one
         #    is created below) and reports which trip, if any, was set aside.
@@ -651,7 +673,8 @@ class OrchestratorAgent:
                 logger.exception("Failed to list trip summaries for user %s", user_id)
                 summaries = []
             chosen, superseded_title, _create_new = resolve_trip_focus(
-                summaries, message_text, entities, trip_directive
+                summaries, message_text, entities, trip_directive,
+                focused_trip_id=focused_trip_id,
             )
             if chosen:
                 try:
@@ -682,12 +705,19 @@ class OrchestratorAgent:
         owner, listeners = self._dispatcher.select(intent, entities, trip, state)
         _emit_status(events, "saga_selected", getattr(owner, "name", None))
 
-        # 4. Create a fresh DREAMING trip when there's no trip in focus and the
-        #    owner needs one — either the zero-trip path, or a "new" directive
-        #    that deliberately set the existing trip aside (task 44).
-        if trip is None and user_id and getattr(owner, "name", "") in (
-            "PlanningSaga", "DiscoverySaga"
-        ):
+        # 4. Create a fresh DREAMING trip only on CONSENTED intent (task 52):
+        #    an explicit PLAN, a "new" directive (task 44), or a go-signal phrase.
+        #    Casual TRIP exploration creates nothing — DiscoverySaga answers with
+        #    trip=None and stages nothing, so a user idly asking about Rome never
+        #    silently acquires a trip (AC-13). The confirm-before-create path
+        #    (AC-14) lives in DiscoverySaga and keeps trip=None on purpose.
+        wants_trip = getattr(owner, "name", "") in ("PlanningSaga", "DiscoverySaga")
+        consented = (
+            intent == "PLAN"
+            or trip_directive == "new"
+            or has_go_signal(message_text)
+        )
+        if trip is None and user_id and wants_trip and consented:
             try:
                 trip = self._trip_repo.upsert_trip(user_id, {}).model_dump()
                 state["trip_id"] = trip.get("id")
@@ -723,6 +753,9 @@ class OrchestratorAgent:
             "_search_responses": result._search_responses,
             "owner_saga": getattr(owner, "name", ""),
             "slot_request": result.slot_request,
+            # The resolved/created trip id (or None) — echoed to the UI as the
+            # TripPanel focus (task 52 AC-9).
+            "focus_trip_id": state.get("trip_id"),
         }
 
     def _apply_side_effects(self, user_id: Optional[str], side_effects: list) -> None:

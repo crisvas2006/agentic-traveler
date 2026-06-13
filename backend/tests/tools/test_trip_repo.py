@@ -197,6 +197,45 @@ class TestListTripSummaries:
         assert len(result) == 1
         assert isinstance(result[0], TripSummary)
         assert result[0].title == "Kyoto Spring"
+        # No nested relation in the row → destinations defaults to empty (task 52).
+        assert result[0].destinations == []
+
+    def test_summaries_include_destinations_from_relation(self):
+        """AC-5: each summary carries its destinations (name/iso_country/status)
+        from the trip_destinations relation, so the resolver can match a trip by
+        destination — no schema change, just a widened SELECT + mapping."""
+        summary_rows = [
+            {
+                "id": "trip-1",
+                "title": "Spain trip",
+                "status": "active",
+                "reference_date": "2027-04-01",
+                "vision_summary": None,
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "trip_destinations": [
+                    {"name": "Barcelona", "iso_country": "ES", "status": "confirmed"},
+                    {"name": "Madrid", "iso_country": "ES", "status": "considering"},
+                ],
+            }
+        ]
+        db = MagicMock()
+        db.table.return_value.select.return_value.eq.return_value \
+            .order.return_value.order.return_value.execute.return_value \
+            = MagicMock(data=summary_rows)
+        with patch("agentic_traveler.tools.trip_repo.get_db", return_value=db):
+            repo = TripRepository()
+            result = repo.list_trip_summaries("user-1")
+
+        # The widened SELECT must actually request the relation (else prod returns
+        # no destinations even though the mock provides them).
+        select_arg = db.table.return_value.select.call_args.args[0]
+        assert "trip_destinations" in select_arg
+
+        assert len(result) == 1
+        s = result[0]
+        assert [d["name"] for d in s.destinations] == ["Barcelona", "Madrid"]
+        assert s.destinations[0]["iso_country"] == "ES"
+        assert s.destinations[0]["status"] == "confirmed"
 
 
 # ---------------------------------------------------------------------------

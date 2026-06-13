@@ -17,6 +17,13 @@ export type ChatMessage = {
   created_at: string;
 };
 
+// Read the backend-resolved TripPanel focus off a persisted reply's metadata
+// (the non-streaming /chat/send path — Task 52). Null when absent.
+function _focusOf(reply: ChatMessage | undefined): string | null {
+  const fid = (reply?.metadata as { focus_trip_id?: string | null } | undefined)?.focus_trip_id;
+  return fid ?? null;
+}
+
 // Sort ascending by ID; negative (optimistic) IDs always trail real ones.
 function sortByIdAsc(msgs: ChatMessage[]): ChatMessage[] {
   return [...msgs].sort((a, b) => {
@@ -103,6 +110,20 @@ function useChatInternal() {
     const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
     openChatPanelFnsRef.current[isDesktop ? "desktop" : "mobile"]?.();
   }, []);
+
+  // Trip-focus bridge (Task 52): the dashboard shell registers a getter for the
+  // trip currently open in the TripPanel (rides every outgoing message as
+  // `focused_trip_id`) and a diff-guarded applier for the reply's resolved
+  // `focus_trip_id` (switches the panel only when it actually changes — AC-10).
+  const focusGetterRef = useRef<() => string | null>(() => null);
+  const onFocusTripRef = useRef<(id: string | null) => void>(() => {});
+  const registerFocusBridge = useCallback(
+    (getFocusedTripId: () => string | null, onFocusTrip: (id: string | null) => void) => {
+      focusGetterRef.current = getFocusedTripId;
+      onFocusTripRef.current = onFocusTrip;
+    },
+    [],
+  );
 
   const [pendingReply, setPendingReply] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -316,10 +337,12 @@ function useChatInternal() {
       ]);
 
       await stream.run(body, {
-        onDone: ({ messageId, userMessageId, threadId: tid, text: replyText, ui }) => {
+        onDone: ({ messageId, userMessageId, threadId: tid, text: replyText, ui, focusTripId }) => {
           if (tid) setThreadId((cur) => cur ?? tid);
           if (userMessageId != null) finalizedIdsRef.current.add(userMessageId);
           if (messageId != null) finalizedIdsRef.current.add(messageId);
+          // Follow the backend's resolved focus (diff-guarded in the shell).
+          onFocusTripRef.current(focusTripId);
 
           setMessages((prev) => {
             // Drop the optimistic row and any rows Realtime may already have
@@ -360,7 +383,7 @@ function useChatInternal() {
           );
           setError("Couldn't send. Please try again.");
         },
-      });
+      }, { focusedTripId: focusGetterRef.current() });
 
       inflightRef.current = false;
       setPendingReply(false);
@@ -395,7 +418,10 @@ function useChatInternal() {
         const resp = await fetch("/api/chat/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body: label, selection: { slot, values } }),
+          body: JSON.stringify({
+            body: label, selection: { slot, values },
+            focused_trip_id: focusGetterRef.current(),
+          }),
         });
         if (!resp.ok) throw new Error("send failed");
         const data = (await resp.json()) as {
@@ -406,6 +432,7 @@ function useChatInternal() {
         if (tid) setThreadId((cur) => cur ?? tid);
         if (data.user_message?.id != null) finalizedIdsRef.current.add(data.user_message.id);
         if (data.reply?.id != null) finalizedIdsRef.current.add(data.reply.id);
+        onFocusTripRef.current(_focusOf(data.reply));
 
         setMessages((prev) => {
           const without = prev.filter(
@@ -460,7 +487,9 @@ function useChatInternal() {
         const resp = await fetch("/api/chat/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body: label, capability }),
+          body: JSON.stringify({
+            body: label, capability, focused_trip_id: focusGetterRef.current(),
+          }),
         });
         if (!resp.ok) throw new Error("send failed");
         const data = (await resp.json()) as {
@@ -471,6 +500,7 @@ function useChatInternal() {
         if (tid) setThreadId((cur) => cur ?? tid);
         if (data.user_message?.id != null) finalizedIdsRef.current.add(data.user_message.id);
         if (data.reply?.id != null) finalizedIdsRef.current.add(data.reply.id);
+        onFocusTripRef.current(_focusOf(data.reply));
 
         setMessages((prev) => {
           const without = prev.filter(
@@ -573,5 +603,7 @@ function useChatInternal() {
     setComposerDraft,
     registerOpenChatPanel,
     openChatPanel,
+    // Task 52 trip-focus bridge
+    registerFocusBridge,
   };
 }

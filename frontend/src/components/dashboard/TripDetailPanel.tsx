@@ -463,7 +463,7 @@ function KanbanLayout({
 }
 
 /* ── Panel header ── */
-function PanelHeader({ trip, day, totalDays }: { trip: Trip; day?: TripDay; totalDays?: number }) {
+function PanelHeader({ trip, day, totalDays, onClose }: { trip: Trip; day?: TripDay; totalDays?: number; onClose?: () => void }) {
   const [from, to] = trip.dateRange.split(" – ");
   
   let label = trip.dayLabel;
@@ -476,8 +476,21 @@ function PanelHeader({ trip, day, totalDays }: { trip: Trip; day?: TripDay; tota
   }
 
   return (
-    <header className="px-5 pt-5 pb-3 border-b border-border">
-      <div className="flex items-start justify-between gap-3">
+    <header className="px-5 pt-5 pb-3 border-b border-border relative">
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute top-4 right-4 text-rose-500 hover:text-rose-600 transition-colors p-1 z-10"
+          aria-label="Close trip"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      )}
+      <div className="flex items-start justify-between gap-3 pr-8">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground">
@@ -504,11 +517,6 @@ function PanelHeader({ trip, day, totalDays }: { trip: Trip; day?: TripDay; tota
               {trip.weather.note ? ` · ${trip.weather.note}` : ""}
             </div>
           )}
-          {(trip.bookings?.length ?? 0) > 0 && (
-            <div className="text-[10px] font-medium text-primary mt-1">
-              {trip.bookings?.length} booking{trip.bookings?.length !== 1 ? "s" : ""} saved
-            </div>
-          )}
         </div>
       </div>
     </header>
@@ -529,6 +537,8 @@ interface TripDetailPanelProps {
   setActiveDayN: (n: number) => void;
   /** Send a message into the chat (idea chips, mood, journal prompts). */
   onSendMessage?: (text: string) => void;
+  /** Callback to close the trip and return to empty state. */
+  onClose?: () => void;
 }
 
 export function TripDetailPanel({
@@ -538,6 +548,7 @@ export function TripDetailPanel({
   activeDayN,
   setActiveDayN,
   onSendMessage,
+  onClose,
 }: TripDetailPanelProps) {
   const [editingBooking, setEditingBooking] = useState<Partial<TripBooking> | null>(null);
   const [isLogisticsOpen, setIsLogisticsOpen] = useState(false);
@@ -563,7 +574,7 @@ export function TripDetailPanel({
         className="aletheia-card flex flex-col h-full overflow-hidden relative"
         style={{ background: "var(--background)" }}
       >
-        <PanelHeader trip={trip} day={day} totalDays={days.length} />
+        <PanelHeader trip={trip} day={day} totalDays={days.length} onClose={onClose} />
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
         {/* 1. Vision banner */}
