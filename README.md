@@ -165,6 +165,17 @@ Core agents (tool-calling architecture):
 7.  **Profile Agent**
 
     *   Converts raw Tally form responses into a structured "Traveler DNA" profile.
+    *   **Living DNA spine (Task 54):** the Traveler DNA also grows from chat. A shared
+        *question bank* (`orchestrator/profile_questions.py` mirrored by
+        `frontend/src/lib/profile-questions.ts`) carries a `binding` per question —
+        `profile` (a stable trait, answered once) or `flow_state` (a current-state
+        question re-asked each flow run, the "different I's"). Each saga declares the
+        questions it needs (`requires_profile` / `asks_flow_state`); `profile_coverage`
+        computes the still-missing gap. A tapped profile chip
+        (`SlotRequest.target="profile"`) is re-validated against the bank and recorded
+        into `profile_data.answered_questions` via `POST /profile/answer` with **zero
+        LLM** (a free-text reaction costs one `flash-lite`). `synthesize_from_answers`
+        occasionally re-derives tags / dimension scores / summary from those answers.
 
 8.  **Booking Input Saga** — unstructured booking parser
 
@@ -890,7 +901,7 @@ Main components:
 
     *   `users`: identity record — `id` (UUID), `telegram_id`, `submission_id`, `name`, `location`, `source`, timestamps.
 
-    *   `user_profiles`: AI-generated Traveler DNA — `profile_data` (JSONB: `tags`, `personality_dimensions_scores`, `tone_preference`, `additional_info`), `form_response` (raw Tally answers), `summary`.
+    *   `user_profiles`: AI-generated Traveler DNA — `profile_data` (JSONB: `tags`, `personality_dimensions_scores`, `tone_preference`, `additional_info`, and `answered_questions` — the chat-collected "living DNA" answers from Task 54, `id → {value, set_at, source}`), `form_response` (raw Tally answers), `summary`.
 
     *   `credits`: per-user credit balance and spend history (`1 credit ≈ 1 eurocent`).
 

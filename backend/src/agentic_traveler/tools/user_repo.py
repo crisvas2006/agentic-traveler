@@ -168,6 +168,48 @@ class UserRepository:
         except Exception:
             logger.exception("Failed to upsert structured profile for user_id=%s", user_id)
 
+    def merge_answered_question(
+        self, user_id: str, qid: str, value: Any, source: str = "chat_tap"
+    ) -> None:
+        """Deterministically record a Traveler-DNA answer (Task 54): merge
+        ``profile_data.answered_questions[qid] = {value, set_at, source}`` into the
+        existing profile_data. Zero LLM, idempotent. A ``tally_backfill`` never
+        clobbers a richer chat/dna answer (Task 54 AC-9). The partial upsert
+        preserves the ``summary`` column (PostgREST updates only given columns)."""
+        from datetime import datetime, timezone
+
+        try:
+            res = (
+                get_db()
+                .table("user_profiles")
+                .select("profile_data")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            profile_data = dict((res.data or {}).get("profile_data") or {}) if res else {}
+            answered = dict(profile_data.get("answered_questions") or {})
+            existing = answered.get(qid)
+            if (
+                source == "tally_backfill"
+                and isinstance(existing, dict)
+                and existing.get("source") in ("chat_tap", "chat_text", "dna_page")
+            ):
+                return
+            answered[qid] = {
+                "value": value,
+                "set_at": datetime.now(timezone.utc).isoformat(),
+                "source": source,
+            }
+            profile_data["answered_questions"] = answered
+            get_db().table("user_profiles").upsert(
+                {"user_id": user_id, "profile_data": profile_data}
+            ).execute()
+        except Exception:
+            logger.exception(
+                "Failed to merge answered question qid=%s user_id=%s", qid, user_id
+            )
+
     # ------------------------------------------------------------------
     # Link (replaces link_telegram_user)
     # ------------------------------------------------------------------

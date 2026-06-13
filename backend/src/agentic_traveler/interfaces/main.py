@@ -18,6 +18,7 @@ from agentic_traveler.interfaces.routers.chat import router as chat_router  # no
 from agentic_traveler.interfaces.routers.metrics import router as metrics_router  # noqa: E402
 from agentic_traveler.interfaces.routers.tally import router as tally_router  # noqa: E402
 from agentic_traveler.interfaces.routers.telegram import router as telegram_router  # noqa: E402
+from agentic_traveler.interfaces.routers.profile import router as profile_router  # noqa: E402
 from agentic_traveler.interfaces.routers.trips import router as trips_router  # noqa: E402
 setup_logging(verbose=os.getenv("VERBOSE", "").lower() in ("1", "true"))
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ app.include_router(admin_router, prefix="/admin", tags=["Admin"])
 app.include_router(chat_router)
 app.include_router(metrics_router)
 app.include_router(trips_router)
+app.include_router(profile_router)
 
 @app.get("/health", tags=["System"])
 async def health():

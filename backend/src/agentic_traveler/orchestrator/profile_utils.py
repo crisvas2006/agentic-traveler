@@ -29,6 +29,38 @@ def build_live_context(trip: Optional[Dict[str, Any]]) -> str:
     )
 
 
+def _answered_summary_line(profile_data: Dict[str, Any]) -> str | None:
+    """Compact 'Answered: company=duo, pace=slow' line from the Traveler-DNA
+    answered_questions (Task 54), so chat-collected answers are immediately visible
+    to agents without a synthesis pass. Skips skipped/empty values."""
+    answered = profile_data.get("answered_questions") or {}
+    parts: list[str] = []
+    for qid, entry in answered.items():
+        if not isinstance(entry, dict):
+            continue
+        val = entry.get("value")
+        if val in (None, "", "__skip__"):
+            continue
+        if isinstance(val, list):
+            val = "/".join(str(v) for v in val)
+        parts.append(f"{qid}={val}")
+    return "Answered: " + ", ".join(parts) if parts else None
+
+
+def relevant_dimensions(saga: Any) -> set[str]:
+    """Union of `informs` over a saga's `requires_profile` ids — the DNA slice a
+    flow cares about (Task 54). Post-alpha: feed this to slim prompt context
+    (proposal §5). Exposed now at zero cost; not yet consumed by any prompt."""
+    from agentic_traveler.orchestrator.profile_questions import BY_ID
+
+    dims: set[str] = set()
+    for qid in getattr(saga, "requires_profile", []) or []:
+        q = BY_ID.get(qid)
+        if q is not None:
+            dims.update(q.informs)
+    return dims
+
+
 def build_profile_summary(
     user_doc: Dict[str, Any],
     include_scores: bool = True,
@@ -78,6 +110,11 @@ def build_profile_summary(
     if tags:
         parts.append(f"Tags: {', '.join(tags) if isinstance(tags, list) else tags}")
 
+    # 2b. Answered Traveler-DNA questions (Task 54) — compact, agent-visible.
+    answered_line = _answered_summary_line(profile_data)
+    if answered_line:
+        parts.append(answered_line)
+
     # 3. Tone/Communication Preference
     if tone_pref:
         parts.append(f"Tone/Communication Preference: {tone_pref}")
@@ -110,7 +147,7 @@ def build_profile_summary(
     known_keys = {
         "summary", "tags", "tone_preference", "additional_info",
         "personality_dimensions_scores", "short_summary",
-        "hard_overrides", "reply_length_preference",
+        "hard_overrides", "reply_length_preference", "answered_questions",
     }
     extra_prefs = {
         k: v for k, v in profile_data.items()

@@ -60,21 +60,29 @@ class SlotRequest:
     """A single clarifying question (<= 200 chars per CLAUDE.md §7.1).
 
     If ``choices`` is set the client renders multiple-choice and the selected
-    option's ``value`` maps deterministically to the trip write (zero
-    extraction cost). If ``choices`` is None the slot is free-text.
+    option's ``value`` maps deterministically to the write (zero extraction
+    cost). If ``choices`` is None the slot is free-text.
+
+    ``target`` selects where a tapped option is written (Task 54): ``"trip"``
+    (default, unchanged behaviour) writes to the active trip via
+    ``slot_selection_to_side_effect``; ``"profile"`` writes a Traveler-DNA answer
+    via ``profile_selection_to_side_effect`` (a profile question chip).
     """
 
     slot: str
     prompt: str
     choices: Optional[list[ChoiceOption]] = None
     allow_multi: bool = False
+    target: str = "trip"  # "trip" (default) | "profile"
 
     def to_wire(self) -> dict[str, Any]:
         """Serialize for the channel layer (web `metadata.ui` / Telegram keyboard).
-        Task 43. `choices` is None for free-text slots."""
+        Task 43. `choices` is None for free-text slots. `target` (Task 54) tells the
+        selection round-trip whether the answer writes to the trip or the profile."""
         return {
             "slot": self.slot,
             "prompt": self.prompt,
+            "target": self.target,
             "choices": (
                 [{"id": c.id, "label": c.label, "value": c.value} for c in self.choices]
                 if self.choices else None
@@ -110,7 +118,16 @@ class SagaResult:
 class BaseSaga(Protocol):
     """Structural contract every saga satisfies. Not an ABC — sagas are plain
     classes; this Protocol documents the surface and powers isinstance checks
-    in tests."""
+    in tests.
+
+    Coverage convention (Task 54/55): a saga MAY declare two class-level lists —
+    ``requires_profile`` (profile question ids it needs answered to personalise
+    well) and ``asks_flow_state`` (flow_state question ids re-asked each flow run).
+    They are intentionally NOT part of this Protocol's required surface (adding
+    data members to a ``runtime_checkable`` Protocol would make ``isinstance``
+    demand them on every saga); the elicitor reads them via
+    ``getattr(saga, "requires_profile", [])`` so sagas without them simply elicit
+    nothing. They are populated per saga in Tasks 55/56/59."""
 
     name: str
 

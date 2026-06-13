@@ -77,3 +77,19 @@ class ChatHistoryResponse(BaseModel):
 
 class ChatSearchResponse(BaseModel):
     results: list[ChatMessageOut]
+
+
+# ── Traveler-DNA profile writes (Task 54) ──────────────────────────────────────
+
+class ProfileAnswerIn(BaseModel):
+    """A tapped Traveler-DNA answer (a profile chip). ``qid`` is the question id;
+    ``values`` are the chosen option value(s). The backend re-validates both
+    against the question bank — the client registry is never trusted."""
+
+    qid: str = Field(..., min_length=1, max_length=64)
+    values: list[str] = Field(..., min_length=1, max_length=10)
+
+
+class ProfileAnswerOut(BaseModel):
+    qid: str
+    value: Any

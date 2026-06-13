@@ -202,6 +202,74 @@ class ProfileAgent:
 
         return self._call_llm(prompt)
 
+    @traceable(name="profile_agent.synthesize_from_answers")
+    def synthesize_from_answers(
+        self,
+        user_id: str,
+        answered_questions: Dict[str, Any],
+        persist: bool = True,
+    ) -> Tuple[Dict[str, Any], Any, float]:
+        """Task 54: (re)synthesise the Traveler DNA — tags, dimension scores,
+        summary — from the chat-collected ``answered_questions`` (NO dependence on a
+        Tally ``form_response``). Occasional / threshold-triggered, never on the hot
+        path. When ``persist``, the synthesised fields are MERGED into the existing
+        ``profile_data`` (preserving ``answered_questions``, hard_overrides, custom
+        keys) and upserted. Returns ``(profile, response, latency_ms)``."""
+        if not self._client:
+            logger.warning("No Gemini client for ProfileAgent.synthesize_from_answers.")
+            return self._build_fallback(), None, 0.0
+
+        from agentic_traveler.orchestrator.profile_questions import BY_ID
+
+        lines: List[str] = []
+        for qid, entry in (answered_questions or {}).items():
+            q = BY_ID.get(qid)
+            if q is None or not isinstance(entry, dict):
+                continue
+            value = entry.get("value")
+            if value in (None, "", "__skip__"):
+                continue
+            by_value = {c.value: c.label for c in q.choices}
+            if isinstance(value, list):
+                label = ", ".join(by_value.get(v, str(v)) for v in value)
+            else:
+                label = by_value.get(value, str(value))
+            lines.append(f"- {q.prompt} -> {label}")
+
+        if not lines:
+            return self._build_fallback(), None, 0.0
+
+        prompt = (
+            "Please analyze the following traveler's answers to onboarding questions "
+            "and generate a full travel personality profile JSON.\n\n"
+            f"{_PROFILE_GUIDELINES}\n\n"
+            "TRAVELER ANSWERS:\n" + "\n".join(lines)
+        )
+        structured, response, latency_ms = self._call_llm(prompt)
+
+        if persist and response is not None:
+            from agentic_traveler.tools.db_client import get_db
+            from agentic_traveler.tools.user_repo import UserRepository
+
+            try:
+                res = (
+                    get_db()
+                    .table("user_profiles")
+                    .select("profile_data")
+                    .eq("user_id", user_id)
+                    .maybe_single()
+                    .execute()
+                )
+                merged = dict((res.data or {}).get("profile_data") or {}) if res else {}
+                merged.update(structured)  # tags/dims/summary overwrite; answered_questions preserved
+                UserRepository().upsert_structured_profile(user_id, merged)
+            except Exception:
+                logger.exception(
+                    "synthesize_from_answers: merge/upsert failed for user_id=%s", user_id
+                )
+
+        return structured, response, latency_ms
+
     def save_preference(
         self,
         preference_raw: str,

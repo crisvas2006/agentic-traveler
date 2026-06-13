@@ -765,7 +765,16 @@ class OrchestratorAgent:
             return
         for se in side_effects:
             try:
-                self._trip_repo.apply_side_effect(user_id, se)
+                if getattr(se, "kind", None) == "profile_patch":
+                    # Task 54: Traveler-DNA writes go to the user profile, not the
+                    # TripRepository. Lazy import avoids any import cycle.
+                    from agentic_traveler.orchestrator.profile_write import (
+                        apply_profile_patch,
+                    )
+
+                    apply_profile_patch(user_id, se.payload)
+                else:
+                    self._trip_repo.apply_side_effect(user_id, se)
             except Exception:
                 logger.exception(
                     "apply_side_effect failed for kind=%s",
