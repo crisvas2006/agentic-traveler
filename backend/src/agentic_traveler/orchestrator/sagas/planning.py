@@ -448,6 +448,12 @@ class PlanningSaga:
     """Owns the trip-planning conversation."""
 
     name = "PlanningSaga"
+    # Task 55: Traveler-DNA questions the planning flow weaves in (one per turn,
+    # appended to a useful reply, never blocking). These COMPLEMENT the trip slots
+    # (pace/budget/structure/travelers) rather than duplicate them: the flow_state
+    # pair captures THIS trip's intent/energy, the profile pair deepens the DNA.
+    requires_profile = ["meaning_depth", "immersion"]
+    asks_flow_state = ["trip_intent_this_time", "energy_for_this_trip"]
 
     def __init__(self, client: Any = None):
         self._client = client or get_client()

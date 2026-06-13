@@ -745,6 +745,11 @@ class OrchestratorAgent:
         result = owner.run(message_text, user_doc, trip, state, conv_context, events)
         self._apply_side_effects(user_id, result.side_effects)
 
+        # Task 55: weave a Traveler-DNA question (or handle a typed skip/mute).
+        self._maybe_elicit_profile(
+            owner, message_text, user_doc, trip, result, user_id, events
+        )
+
         return {
             "text": result.text or "",
             "action": "RESPONSE" if result.text else "ERROR",
@@ -780,6 +785,99 @@ class OrchestratorAgent:
                     "apply_side_effect failed for kind=%s",
                     getattr(se, "kind", "?"),
                 )
+
+    def _maybe_elicit_profile(
+        self,
+        owner: Any,
+        message_text: str,
+        user_doc: Dict[str, Any],
+        trip: Optional[Dict[str, Any]],
+        result: Any,
+        user_id: Optional[str],
+        events: Any,
+    ) -> None:
+        """Task 55: weave a Traveler-DNA question into the reply, or process a typed
+        skip/mute — non-blocking, best-effort (never aborts a turn). Only sagas that
+        declare requirements elicit; the question rides only turns with real content
+        and no pending trip slot (one aside per turn). Soft, per-run skips live on the
+        trip; a permanent "never ask me X" stays the hard_overrides path."""
+        try:
+            from agentic_traveler.orchestrator.profile_elicitor import (
+                ProfileElicitor,
+                classify_elicitation_reply,
+                elicitation_state_side_effect,
+                elicitor_enabled,
+                read_elicitation_state,
+            )
+            from agentic_traveler.orchestrator.profile_questions import BY_ID
+
+            if not elicitor_enabled():
+                return
+            if not getattr(owner, "requires_profile", None) and not getattr(
+                owner, "asks_flow_state", None
+            ):
+                return
+
+            run_state = read_elicitation_state(trip)
+            dirty = False
+
+            # 1. A question was pending and the user TYPED a reply — interpret it.
+            if run_state.get("pending"):
+                if classify_elicitation_reply(message_text) == "mute":
+                    run_state["muted"] = True
+                    events.emit(
+                        "metric",
+                        {"name": "elicitation_muted", "saga": getattr(owner, "name", "")},
+                    )
+                run_state["pending"] = None
+                dirty = True
+
+            # 2. Never stack on a saga that already asked, or on an empty/failed reply.
+            if result.slot_request is not None or not result.text:
+                if dirty and trip is not None:
+                    self._apply_side_effects(
+                        user_id, [elicitation_state_side_effect(trip, run_state)]
+                    )
+                return
+
+            # 3. Offer the next un-asked question (one aside per turn — yield if the
+            #    reply already ends in a question, e.g. a curiosity prompt).
+            aside_ok = not (result.text or "").rstrip().endswith("?")
+            phase = "DREAMING" if self._is_exploratory(trip) else "ANCHORING"
+            pq = ProfileElicitor().next_question(
+                owner, user_doc, run_state, phase=phase,
+                turn_has_primary_content=True, aside_budget_available=aside_ok,
+            )
+            if pq is not None:
+                result.slot_request = pq
+                asked = (run_state.get("asked") or []) + [pq.slot]
+                run_state["asked"] = list(dict.fromkeys(asked))
+                run_state["pending"] = pq.slot
+                dirty = True
+                events.emit(
+                    "metric",
+                    {
+                        "name": "profile_question_asked", "id": pq.slot,
+                        "binding": BY_ID[pq.slot].binding if pq.slot in BY_ID else None,
+                        "saga": getattr(owner, "name", ""),
+                    },
+                )
+
+            if dirty and trip is not None:
+                self._apply_side_effects(
+                    user_id, [elicitation_state_side_effect(trip, run_state)]
+                )
+        except Exception:
+            logger.exception("profile elicitation failed (non-fatal)")
+
+    @staticmethod
+    def _is_exploratory(trip: Optional[Dict[str, Any]]) -> bool:
+        if not trip:
+            return True
+        dests = trip.get("destinations") or []
+        return not any(
+            isinstance(d, dict) and d.get("status") == "confirmed" for d in dests
+        )
 
 
 # ── private helpers ──────────────────────────────────────────────────────────

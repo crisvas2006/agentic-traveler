@@ -50,6 +50,9 @@ LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
 LANGSMITH_API_KEY=<from smith.langchain.com>
 LANGSMITH_PROJECT=aletheia-prod
 LANGSMITH_HASH_KEY=<32+ char random secret>
+
+# Profile Elicitor
+PROFILE_ELICITOR_ENABLED=true
 ```
 
 > **JWT secret note:** Supabase is migrating to JWT Signing Keys (asymmetric RS256). For now, copy the value from the **Legacy JWT Secret** tab in Project Settings → API → JWT Keys — that's what tokens are still signed with. When the backend later moves to JWKS-based verification, this env var goes away.
@@ -114,7 +117,7 @@ gcloud run deploy agentic-traveler \
   --no-cpu-throttling \
   --memory 512Mi \
   --timeout 120 \
-  --set-env-vars "GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=global,FRONTEND_ORIGIN=https://www...,LANGSMITH_TRACING=true,LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com,LANGSMITH_PROJECT=aletheia-prod" \
+  --set-env-vars "PROFILE_ELICITOR_ENABLED=true,GOOGLE_PROJECT_ID=your-project-id,GEMINI_REGION=global,FRONTEND_ORIGIN=https://www...,LANGSMITH_TRACING=true,LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com,LANGSMITH_PROJECT=aletheia-prod" \
   --set-secrets="TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,TELEGRAM_SECRET_TOKEN=TELEGRAM_SECRET_TOKEN:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,TALLY_WEBHOOK_TOKEN=TALLY_WEBHOOK_TOKEN:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest,APP_ADMIN_API_KEY=APP_ADMIN_API_KEY:latest,LANGSMITH_API_KEY=LANGSMITH_API_KEY:latest,LANGSMITH_HASH_KEY=LANGSMITH_HASH_KEY:latest"
 ```
 

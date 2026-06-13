@@ -176,6 +176,14 @@ Core agents (tool-calling architecture):
         into `profile_data.answered_questions` via `POST /profile/answer` with **zero
         LLM** (a free-text reaction costs one `flash-lite`). `synthesize_from_answers`
         occasionally re-derives tags / dimension scores / summary from those answers.
+    *   **Just-in-time elicitation (Task 55):** a deterministic, no-LLM
+        `ProfileElicitor` (twin of the curiosity injector) weaves at most ONE Traveler-DNA
+        question into an already-useful reply, for sagas that declare the questions they
+        need. It's non-blocking and tolerant of erratic users: skips are **soft and
+        per-run** (re-askable later, tracked on `trip.live_state.elicitation`), a typed
+        "skip this" / deviation just moves on, and "go on without questions" **mutes** the
+        rest of the run (permanent "never ask me X" stays the hard-overrides path). Wired
+        centrally in the orchestrator; kill switch `PROFILE_ELICITOR_ENABLED=false`.
 
 8.  **Booking Input Saga** — unstructured booking parser
 
